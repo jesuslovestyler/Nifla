@@ -1,0 +1,8 @@
+// A checker example: this calls a function that is never made
+// anywhere in the program, so the checker stops it before
+// anything runs — in the interpreter's own words.
+make sing(song) {
+    say song
+}
+
+sign("Shalom")

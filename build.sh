@@ -1,8 +1,14 @@
 #!/bin/sh
-# Build the Nifla interpreter into ./nifla
+# Build the Nifla programs into ./nifla and ./niflac
 #
-# Uses swiftc directly — no package manager needed. Set SWIFTC to point
-# at a specific swiftc if the automatic search doesn't find yours.
+# One build makes both: they are the same program, and which one it
+# is is decided by the name it is called by (see src/main.swift).
+# ./nifla checks and runs programs; ./niflac checks and compiles
+# them into standalone native programs.
+#
+# Uses swiftc directly — no package manager needed. Set SWIFTC to
+# point at a specific swiftc if the automatic search doesn't find
+# yours.
 
 set -e
 cd "$(dirname "$0")"
@@ -25,4 +31,5 @@ if [ -z "$SWIFTC" ]; then
 fi
 
 "$SWIFTC" src/*.swift -o nifla
-echo "Built ./nifla"
+cp nifla niflac
+echo "Built ./nifla and ./niflac"

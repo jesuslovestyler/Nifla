@@ -1,0 +1,1 @@
+Line 5: I can't compare some text and a number with '<'. '<' compares two numbers. (Text and true/false values can be checked with == and !=.) I caught this before the program ran, so nothing ran.

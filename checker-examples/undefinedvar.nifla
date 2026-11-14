@@ -1,0 +1,5 @@
+// A checker example: 'nane' was never made — the 'let' line made
+// 'name'. The checker sees every 'let', so it stops the program
+// before anything runs — in the interpreter's own words.
+let name = "Tyler"
+say nane

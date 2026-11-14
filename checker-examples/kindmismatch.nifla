@@ -1,0 +1,6 @@
+// A checker example: adding a number and a true/false value can
+// never work, and both kinds are plain to see from the 'let'
+// lines — so the checker stops the program before anything runs.
+let years = 29
+let ready = true
+say years + ready

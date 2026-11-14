@@ -1,0 +1,7 @@
+// A checker example: '<' compares two numbers, and this compares
+// text with a number. Both kinds are plain to see, so the checker
+// stops the program before anything runs.
+let name = "Tyler"
+if name < 3 {
+    say "smaller"
+}

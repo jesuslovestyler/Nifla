@@ -195,8 +195,88 @@ object that contains itself prints the self-reference as `...`
 rather than listing forever; and fields are always written with
 plain names — a field name can't be built out of text at run time.
 
-Still not built yet, on purpose: the compiler and the Floor.
-Those are the next rings.
+Still not built yet, on purpose: the Floor. The compiler is the
+next ring — Stone 5, below.
+
+## Stone 5 — the compiler (first form)
+
+Laid on **November 14, 2026**, later the same evening. Nifla gains
+the Swift face's two gifts: a checker that reads a program before
+it runs, and a compiler that turns it into a program that stands
+alone.
+
+**The checker** runs before anything else, in both `nifla` and
+`niflac`. It walks the program in the order it would run, keeping
+track of what it can prove about each variable's kind — number,
+text, true/false, object — from literals and from `let` lines
+whose value's kind is clear. It stops the program, in plain words
+with the line named, when it can prove:
+
+- a `+`, `-`, `*`, `/`, `<`, `<=`, `>` or `>=` whose two sides'
+  kinds are both known and can never work together — adding a
+  number and a true/false value, comparing text with a number
+- a call to a function that is never made anywhere in the program
+- a call whose number of values doesn't match the function's
+- a variable used, or set, that no `let` has made
+
+For the name-and-count mistakes it uses the interpreter's exact
+words, so a program it stops reads just as it would have read
+when the interpreter stopped it. Five small programs in
+`checker-examples/` show each refusal.
+
+**The compiler** is `niflac`:
+
+```sh
+./build.sh                       # makes ./nifla and ./niflac
+./niflac examples/tyler.nifla    # makes ./examples/tyler, a native program
+./examples/tyler                 # runs it — no interpreter involved
+```
+
+`niflac` runs the checker first; a refused program is not
+compiled and leaves nothing behind. When the checker is content,
+niflac translates the program into Swift and compiles that,
+together with a small runtime (`runtime/NiflaRuntime.swift`)
+that mirrors the interpreter's values and rules, into a native
+program beside the source (or at the path `-o` names). The whole
+Stone 1–4 language compiles — loops with their runaway guard,
+functions with their call-depth guard, objects shared by
+reference — and a compiled program behaves exactly as the
+interpreter would have run it: same output, same plain-words
+errors, same guards. The Swift it was made from is kept beside
+the program (as `tyler.swift`) for anyone who wants to read it.
+
+The proofs, in `run-compiled.sh`, compile every one of the 25
+examples and check the compiled behavior against the same
+expected files the interpreter is checked against; check that
+both tools refuse every checker example; and copy one compiled
+program alone into an empty folder and run it there, to prove it
+stands alone:
+
+```sh
+./run_tests.sh      # the interpreter: 25 passed, 0 failed
+./run-compiled.sh   # the compiler and checker: 36 passed, 0 failed
+```
+
+Honest limits, stated plainly:
+
+- The checker proves only what it can see clearly. A kind that
+  flows out of an object, out of a function, or into a function
+  as a handed value can't be proven from the writing, so the
+  checker stays silent about it and the run-time checks — the
+  interpreter's, or the compiled program's own — remain the
+  guard, in the same plain words. A mistake inside a branch that
+  would never run is still caught when the checker can prove it;
+  the checker reads the whole program, as Swift's compiler does.
+- Because a function can set variables outside itself, the
+  checker forgets every kind it thought it knew whenever a
+  function is called. Better silent than wrong.
+- Compiling takes about a second a program — the Swift compiler
+  does the heavy work, and this first form doesn't hurry it.
+- The translation goes through Swift. There is no Floor yet —
+  Nifla doesn't talk to the processor directly — and no
+  self-hosting yet: the checker and compiler are written in
+  Swift, not in Nifla. Those are later stones, in the settled
+  order: the compiler first, then the Floor.
 
 ## License
 

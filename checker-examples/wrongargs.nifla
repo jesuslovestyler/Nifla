@@ -1,0 +1,10 @@
+// A checker example: 'add' is made to take two values and is
+// called with one. The checker knows how many values every
+// function in the program takes, so it stops this before
+// anything runs — in the interpreter's own words.
+make add(a, b) {
+    give a + b
+}
+
+let total = add(2)
+say total

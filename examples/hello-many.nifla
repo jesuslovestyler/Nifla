@@ -1,0 +1,11 @@
+// Tyler's first function: every time it is called, it says hello
+// three times — a Stone 2 repeat loop living inside a function.
+// It is called twice here, so hello is said six times in all.
+make helloMany() {
+    repeat 3 {
+        say "hello"
+    }
+}
+
+helloMany()
+helloMany()

@@ -1,0 +1,13 @@
+// A function can hand a value back with 'give'. The value it gives
+// can be used in more math, like any other value.
+make double(n) {
+    give n * 2
+}
+
+make add(a, b) {
+    give a + b
+}
+
+let total = add(double(3), 4)
+say total
+say double(total) + 1

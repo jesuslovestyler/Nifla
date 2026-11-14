@@ -1,0 +1,7 @@
+// Calling a function with the wrong number of values. Nifla says
+// how many it expected and how many it was given.
+make add(a, b) {
+    give a + b
+}
+
+say add(2)

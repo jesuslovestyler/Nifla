@@ -97,6 +97,45 @@ hanging.
 Still not built yet, on purpose: functions, objects, the compiler, and
 the Floor. Those are the next rings.
 
+## Stone 3 — functions
+
+Laid on **November 14, 2026**, later the same evening. Nifla can now be
+taught words of its own:
+
+- `make name(...) { ... }` — makes a function. The names in the
+  parentheses are the values it is handed each time it is called, and
+  the block is what runs. Making a function is a line like any other:
+  it takes effect when the program reaches it, so a function can be
+  called from that line on
+- Calling: `name(value, value)` — on its own line, when the call is
+  for what the function does, or inside any expression, when it is for
+  the value the function gives back
+- `give ...` — hands a value back to whoever called the function, and
+  ends the call there. A function that finishes without a `give` gives
+  nothing back, so it can only be called on its own line; using its
+  result in an expression is a plain-words error
+
+How functions treat variables, kept the same as blocks: names made
+with `let` inside a function stay inside it, and the values a function
+is handed shadow same-named variables outside it. Setting an existing
+outer variable from inside a function still reaches it, just as it
+does from a block — that is how a function can keep a count.
+
+A function may call itself — recursion — and like loops, it is
+guarded: a call chain more than five hundred deep is stopped with a
+plain-words error instead of crashing. Mistakes are plain words too:
+calling a function that was never made (with a "Did you mean...?"
+when a close name exists), giving it the wrong number of values
+(saying how many were expected and how many were given), or using
+`give` outside a function.
+
+Tyler's own first function is among the examples —
+`examples/hello-many.nifla`: every time it is called, it says hello
+three times, a Stone 2 `repeat` loop living inside a function.
+
+Still not built yet, on purpose: objects, the compiler, and the
+Floor. Those are the next rings.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

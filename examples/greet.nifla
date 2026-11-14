@@ -1,0 +1,9 @@
+// Your first function: 'make' teaches Nifla a new word. The name in
+// the parentheses is a value the function is handed each time it is
+// called, and the block runs with that value in hand.
+make greet(name) {
+    say "Shalom, " + name + "!"
+}
+
+greet("Tyler")
+greet("Miriam")

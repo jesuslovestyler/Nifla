@@ -91,6 +91,24 @@ func editDistance(_ a: String, _ b: String) -> Int {
     return previous[bChars.count]
 }
 
+// A function made with 'make' (Stone 3): the names it takes, the
+// statements it runs, and the scope it was made in — its home. The
+// body runs in a fresh scope inside that home, so a function sees the
+// variables around its making, the way a block does, while its own
+// names stay inside it.
+struct FunctionDef {
+    let params: [String]
+    let body: [Stmt]
+    let home: Scope
+}
+
+// How a 'give' line hands its value back: it is thrown like an error
+// and caught by the call that is running the function. It never
+// reaches the person writing Nifla.
+private struct ReturnSignal: Error {
+    let value: Value
+}
+
 final class Interpreter {
     // The runaway guard (Stone 2): a kindness limit on the total number
     // of loop passes in one run, across every loop in the program. A
@@ -98,6 +116,16 @@ final class Interpreter {
     // instead of hanging.
     private var loopPasses = 0
     private let loopPassLimit = 1_000_000
+
+    // The functions this run has made, by name (Stone 3).
+    private var functions: [String: FunctionDef] = [:]
+
+    // The call-depth guard (Stone 3): how many calls are running at
+    // once, one inside another. A function that calls itself without a
+    // way to stop is caught by this limit and stopped with a
+    // plain-words error instead of crashing.
+    private var callDepth = 0
+    private let callDepthLimit = 500
 
     private func tickLoop(line: Int) throws {
         loopPasses += 1
@@ -183,7 +211,84 @@ final class Interpreter {
                 }
                 done += 1
             }
+
+        case .define(let name, let params, let body, let line):
+            // Making a function is a line like any other: it runs when
+            // the program reaches it, so a function is ready to call
+            // from that line on.
+            if functions[name] != nil {
+                throw NiflaError(line: line, message: "There is already a function called '\(name)'. Each function needs its own name — rename this one, or take out the earlier 'make \(name)'.")
+            }
+            functions[name] = FunctionDef(params: params, body: body, home: scope)
+
+        case .give(let valueExpr, let line):
+            guard callDepth > 0 else {
+                throw NiflaError(line: line, message: "'give' hands a value back from a function to whoever called it, but this line is not inside a function. To show a value here, use 'say' instead.")
+            }
+            throw ReturnSignal(value: try evaluate(valueExpr, in: scope))
+
+        case .doCall(let name, let args, let line):
+            // A call on its own line: run it for what it does. Any
+            // value it gives back is simply not used.
+            _ = try callFunction(name: name, argExprs: args, line: line, in: scope)
         }
+    }
+
+    // Runs one call: checks the function exists and was given the
+    // right number of values, then runs its body in a fresh scope
+    // inside its home, with the parameters declared there. Returns
+    // the value the function gave back, or nil when it finished
+    // without a 'give'.
+    private func callFunction(name: String, argExprs: [Expr], line: Int, in scope: Scope) throws -> Value? {
+        guard let def = functions[name] else {
+            var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
+            if let suggestion = closestFunctionName(to: name) {
+                message += " Did you mean '\(suggestion)'?"
+            }
+            throw NiflaError(line: line, message: message)
+        }
+        let args = try argExprs.map { try evaluate($0, in: scope) }
+        guard args.count == def.params.count else {
+            throw NiflaError(line: line, message: "The function '\(name)' takes \(takesText(def.params)), but it was given \(args.count). Make the call match how the function was made: \(name)(\(def.params.joined(separator: ", "))).")
+        }
+        guard callDepth < callDepthLimit else {
+            throw NiflaError(line: line, message: "This call is more than five hundred functions deep and was stopped — it may never finish. A function that calls itself needs a way to stop, like an 'if' that gives an answer for the smallest case instead of calling again.")
+        }
+        callDepth += 1
+        defer { callDepth -= 1 }
+        let callScope = Scope(parent: def.home)
+        for (param, arg) in zip(def.params, args) {
+            callScope.declare(param, arg)
+        }
+        do {
+            for inner in def.body {
+                try execute(inner, in: callScope)
+            }
+        } catch let signal as ReturnSignal {
+            return signal.value
+        }
+        return nil
+    }
+
+    // "no values", "1 value (name)", "2 values (a, b)" — for the
+    // wrong-number-of-values error.
+    private func takesText(_ params: [String]) -> String {
+        switch params.count {
+        case 0: return "no values"
+        case 1: return "1 value (\(params[0]))"
+        default: return "\(params.count) values (\(params.joined(separator: ", ")))"
+        }
+    }
+
+    private func closestFunctionName(to name: String) -> String? {
+        var best: (name: String, distance: Int)? = nil
+        for candidate in functions.keys where candidate != name {
+            let distance = editDistance(name, candidate)
+            if distance <= 2 && (best == nil || distance < best!.distance) {
+                best = (candidate, distance)
+            }
+        }
+        return best?.name
     }
 
     private func evaluate(_ expr: Expr, in scope: Scope) throws -> Value {
@@ -204,6 +309,12 @@ final class Interpreter {
                 message += " Did you mean '\(suggestion)'?"
             }
             throw NiflaError(line: line, message: message)
+
+        case .call(let name, let args, let line):
+            guard let value = try callFunction(name: name, argExprs: args, line: line, in: scope) else {
+                throw NiflaError(line: line, message: "The function '\(name)' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '\(name)', or call it on its own line instead.")
+            }
+            return value
 
         case .negate(let inner, let line):
             let value = try evaluate(inner, in: scope)

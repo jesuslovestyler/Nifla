@@ -1,0 +1,12 @@
+// A function can call itself. Each call works on a smaller number,
+// until it reaches 1 — the case that gives an answer without calling
+// again. That is what lets it stop.
+make factorial(n) {
+    if n <= 1 {
+        give 1
+    }
+    give n * factorial(n - 1)
+}
+
+say factorial(5)
+say factorial(1)

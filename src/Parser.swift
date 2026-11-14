@@ -9,19 +9,25 @@
 //              | "if" expression block [ "else" block ]
 //              | "while" expression block
 //              | "repeat" expression block
+//              | "make" name "(" [ name ( "," name )* ] ")" block
+//              | "give" expression
+//              | name "(" [ expression ( "," expression )* ] ")"
 //   block      = "{" statement* "}"
 //   expression = comparison ( ("==" | "!=") comparison )*
 //   comparison = sum ( ("<" | "<=" | ">" | ">=") sum )*
 //   sum        = term ( ("+" | "-") term )*
 //   term       = factor ( ("*" | "/") factor )*
 //   factor     = "-" factor | atom
-//   atom       = number | text | "true" | "false" | name | "(" expression ")"
+//   atom       = number | text | "true" | "false" | name
+//              | name "(" [ expression ( "," expression )* ] ")"
+//              | "(" expression ")"
 
 indirect enum Expr {
     case number(Double, line: Int)
     case text(String, line: Int)
     case boolean(Bool, line: Int)
     case variable(String, line: Int)
+    case call(name: String, args: [Expr], line: Int)
     case negate(Expr, line: Int)
     case binary(Expr, String, Expr, line: Int)  // line of the operator
 }
@@ -33,6 +39,9 @@ enum Stmt {
     case ifElse(condition: Expr, then: [Stmt], otherwise: [Stmt]?, line: Int)
     case whileLoop(condition: Expr, body: [Stmt], line: Int)
     case repeatLoop(count: Expr, body: [Stmt], line: Int)
+    case define(name: String, params: [String], body: [Stmt], line: Int)
+    case give(Expr, line: Int)
+    case doCall(name: String, args: [Expr], line: Int)
 }
 
 final class Parser {
@@ -155,7 +164,55 @@ final class Parser {
             return .repeatLoop(count: count, body: body, line: token.line)
         }
 
+        if checkKeyword("make") {
+            advance()
+            guard case .name(let name) = current.kind else {
+                throw NiflaError(line: current.line, message: "After 'make' I need a name for the new function, like: make greet(name) { ... }. Instead I found \(current.spoken).")
+            }
+            advance()
+            guard checkSymbol("(") else {
+                throw NiflaError(line: current.line, message: "After the function's name I need '(' and the names of the values it takes, like: make \(name)(name) { ... }. Instead I found \(current.spoken).")
+            }
+            advance()  // the '('
+            var params: [String] = []
+            if !checkSymbol(")") {
+                while true {
+                    guard case .name(let param) = current.kind else {
+                        throw NiflaError(line: current.line, message: "Inside the parentheses of 'make \(name)' I need names for the values, separated by commas, like: make \(name)(a, b) { ... }. Instead I found \(current.spoken).")
+                    }
+                    if params.contains(param) {
+                        throw NiflaError(line: current.line, message: "The function '\(name)' uses the name '\(param)' twice in its list of values. Each value needs its own name.")
+                    }
+                    params.append(param)
+                    advance()
+                    if checkSymbol(",") {
+                        advance()
+                        continue
+                    }
+                    break
+                }
+            }
+            guard checkSymbol(")") else {
+                throw NiflaError(line: current.line, message: "I expected a ')' to close the list of values for '\(name)', but I found \(current.spoken).")
+            }
+            advance()  // the ')'
+            guard checkSymbol("{") else {
+                throw NiflaError(line: current.line, message: "After 'make \(name)(...)' I need a '{' to start the block that runs when the function is called. Instead I found \(current.spoken).")
+            }
+            let openLine = current.line
+            advance()
+            let body = try parseBlock(openLine: openLine)
+            return .define(name: name, params: params, body: body, line: token.line)
+        }
+
+        if checkKeyword("give") {
+            advance()
+            let value = try parseExpression()
+            return .give(value, line: token.line)
+        }
+
         // Setting an existing variable: a name followed by '='.
+        // Calling a function for what it does: a name followed by '('.
         if case .name(let name) = token.kind {
             let next = tokens[min(pos + 1, tokens.count - 1)]
             if case .symbol(let symbol) = next.kind, symbol == "=" {
@@ -164,10 +221,34 @@ final class Parser {
                 let value = try parseExpression()
                 return .assign(name: name, value: value, line: token.line)
             }
-            throw NiflaError(line: token.line, message: "I found the name '\(name)' at the start of a line, but a line needs to do something: make a variable with 'let \(name) = ...', set it with '\(name) = ...', or show it with 'say \(name)'.")
+            if case .symbol(let symbol) = next.kind, symbol == "(" {
+                advance()  // the name
+                let args = try parseCallArgs(name: name)
+                return .doCall(name: name, args: args, line: token.line)
+            }
+            throw NiflaError(line: token.line, message: "I found the name '\(name)' at the start of a line, but a line needs to do something: make a variable with 'let \(name) = ...', set it with '\(name) = ...', show it with 'say \(name)', or call a function with '\(name)(...)'.")
         }
 
-        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', or the name of a variable to set — but I found \(token.spoken).")
+        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'make', 'give', or the name of a variable to set — but I found \(token.spoken).")
+    }
+
+    // The "( value, value )" part of a call, shared by call statements
+    // and calls inside expressions. The current token is the '('.
+    private func parseCallArgs(name: String) throws -> [Expr] {
+        advance()  // the '('
+        var args: [Expr] = []
+        if !checkSymbol(")") {
+            args.append(try parseExpression())
+            while checkSymbol(",") {
+                advance()
+                args.append(try parseExpression())
+            }
+        }
+        guard checkSymbol(")") else {
+            throw NiflaError(line: current.line, message: "I expected a ')' to close the '(' in this call to '\(name)', but I found \(current.spoken).")
+        }
+        advance()  // the ')'
+        return args
     }
 
     private func parseExpression() throws -> Expr {
@@ -248,6 +329,10 @@ final class Parser {
             return .boolean(false, line: token.line)
         case .name(let name):
             advance()
+            if checkSymbol("(") {
+                let args = try parseCallArgs(name: name)
+                return .call(name: name, args: args, line: token.line)
+            }
             return .variable(name, line: token.line)
         case .symbol("("):
             advance()

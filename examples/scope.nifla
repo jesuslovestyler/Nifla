@@ -1,0 +1,22 @@
+// Names made inside a function stay inside it. The 'let' inside
+// 'peek' makes its own 'word', and the one outside is untouched —
+// and a value a function is handed shadows the same name outside,
+// the way 'show' uses its own 'n'.
+let word = "outside"
+
+make peek() {
+    let word = "inside"
+    say word
+}
+
+peek()
+say word
+
+let n = 100
+
+make show(n) {
+    say n
+}
+
+show(7)
+say n

@@ -1,0 +1,7 @@
+// A function that calls itself and never stops. Nifla's call-depth
+// guard stops it with a plain-words error instead of crashing.
+make dive(n) {
+    give dive(n + 1)
+}
+
+say dive(1)

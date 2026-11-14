@@ -1,0 +1,7 @@
+// Calling a function that was never made. Nifla says so in plain
+// words, and suggests the function it probably meant.
+make greet(name) {
+    say "Shalom, " + name + "!"
+}
+
+gret("Tyler")

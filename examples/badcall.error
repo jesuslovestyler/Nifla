@@ -1,0 +1,1 @@
+Line 7: The function 'add' takes 2 values (a, b), but it was given 1. Make the call match how the function was made: add(a, b).

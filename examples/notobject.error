@@ -1,0 +1,1 @@
+Line 4: I can't read the field 'months' of the number 29, because only an object has fields. Make an object first, like: let person = { name: "Tyler" } — then person.name works.

@@ -21,7 +21,7 @@ struct Token {
         case text(String)
         case name(String)
         case keyword(String)  // let, say, if, else, while, repeat, make, give, true, false
-        case symbol(String)   // +  -  *  /  (  )  {  }  ,  =  ==  !=  <  <=  >  >=
+        case symbol(String)   // +  -  *  /  (  )  {  }  ,  .  :  =  ==  !=  <  <=  >  >=
         case end
     }
     let kind: Kind
@@ -120,14 +120,14 @@ final class Lexer {
                 return Token(kind: .symbol(pair), line: startLine)
             }
         }
-        if "+-*/(){}=<>,".contains(c) {
+        if "+-*/(){}=<>.,:".contains(c) {
             pos += 1
             return Token(kind: .symbol(String(c)), line: startLine)
         }
         if c == "!" {
             throw NiflaError(line: startLine, message: "I found a '!' on its own. To say 'not equal', write '!=' — an exclamation mark followed by an equals sign.")
         }
-        throw NiflaError(line: startLine, message: "I don't understand the character '\(c)'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } , = == != < <= > >=.")
+        throw NiflaError(line: startLine, message: "I don't understand the character '\(c)'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } , . : = == != < <= > >=.")
     }
 
     private func lexNumber(_ startLine: Int) throws -> Token {

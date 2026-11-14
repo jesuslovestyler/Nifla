@@ -1,0 +1,5 @@
+// Reading a field the object doesn't have. Nifla says so in
+// plain words, lists the fields it does have, and suggests
+// the one it probably meant.
+let person = { name: "Tyler", years: 29 }
+say person.naem

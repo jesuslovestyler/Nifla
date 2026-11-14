@@ -1,0 +1,4 @@
+// Reading a field of something that isn't an object. Only
+// objects have fields, and Nifla says so in plain words.
+let years = 29
+say years.months

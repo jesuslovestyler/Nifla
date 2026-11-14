@@ -1,0 +1,7 @@
+// An object can hold another object as a field. Dots chain to
+// reach the fields inside, for reading and for setting alike.
+let person = { name: "Tyler", home: { town: "Washington", state: "North Carolina" } }
+say person.home.town
+person.home.town = "Greenville"
+say person.home.town
+say person

@@ -1,0 +1,7 @@
+// Setting a field changes it — and setting a field that isn't
+// there yet adds it to the object.
+let person = { name: "Tyler", years: 29 }
+person.years = 30
+person.town = "Washington"
+say person.years
+say person

@@ -1,0 +1,6 @@
+// An object: named fields in braces, read back with a dot.
+// Saying the object itself prints a readable listing of its fields.
+let person = { name: "Tyler", years: 29 }
+say person.name
+say person.years
+say person

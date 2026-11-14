@@ -136,6 +136,68 @@ three times, a Stone 2 `repeat` loop living inside a function.
 Still not built yet, on purpose: objects, the compiler, and the
 Floor. Those are the next rings.
 
+## Stone 4 — objects
+
+Laid on **November 14, 2026**, later the same evening. The
+JavaScript face of Nifla arrives: things with named fields, carried
+around as one value.
+
+- `{ name: "Tyler", years: 29 }` — an object literal: field names
+  and values in braces, separated by commas. A field's value can be
+  anything, including another object
+- `person.name` — reading a field with a dot. Dots chain, so
+  `person.home.town` reaches through an object held in a field
+- `person.years = 30` — setting a field with a dot and an `=`.
+  Setting a field the object doesn't have yet adds it; dots chain
+  here too, so `person.home.town = "Greenville"` works
+- Objects go everywhere other values go: into variables alongside
+  numbers and text, and into functions, which read and set their
+  fields. Two objects are `==` only when they are the very same
+  object, not merely alike
+
+Saying an object prints a readable listing of its fields, in the
+order they were first written, with text values in quotes so they
+can't be mistaken for numbers:
+
+```nifla
+let person = { name: "Tyler", years: 29 }
+say person
+```
+
+prints
+
+```
+{ name: "Tyler", years: 29 }
+```
+
+One decision, stated plainly: **objects are shared by reference,
+not copied** — the JavaScript way. `let b = a` makes `b` hold the
+very same object as `a`, so `b.years = 30` changes what `a.years`
+reads, and a function handed an object can change its fields for
+whoever called it. The example `examples/describe.nifla` shows
+this on purpose: its birthday function adds a year, and the year
+stays added after the call.
+
+Tyler's own example is `examples/tyler.nifla` — an object of Tyler
+himself, in the shape he asked for ("Make an object of me"): his
+name, his years, and his role, with a hometown added by setting a
+field.
+
+Mistakes are plain words, as always: reading a field an object
+doesn't have (the error lists the fields it does have, and
+suggests a close one — "Did you mean 'name'?"), reading or setting
+a field on something that isn't an object, and naming the same
+field twice in one object literal.
+
+Honest limits: there is no way yet to remove a field, to ask an
+object how many fields it has, or to loop over its fields; an
+object that contains itself prints the self-reference as `...`
+rather than listing forever; and fields are always written with
+plain names — a field name can't be built out of text at run time.
+
+Still not built yet, on purpose: the compiler and the Floor.
+Those are the next rings.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

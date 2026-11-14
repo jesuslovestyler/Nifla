@@ -1,0 +1,17 @@
+// Objects go into functions like any other value, and the
+// function reads their fields. Objects are shared, not copied:
+// when haveBirthday changes the field, the change is still
+// there after the call — the function was handed the very
+// same object.
+make describe(person) {
+    say person.name + " is " + person.years + " years old"
+}
+
+make haveBirthday(person) {
+    person.years = person.years + 1
+}
+
+let tyler = { name: "Tyler", years: 29 }
+describe(tyler)
+haveBirthday(tyler)
+say tyler.years

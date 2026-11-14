@@ -1,0 +1,8 @@
+// An object of Tyler himself, in the shape he asked for: his
+// name, his years, and what he does. Its fields are read with
+// dots, and setting a field he doesn't have yet adds it.
+let tyler = { name: "Tyler", years: 29, role: "missionary and builder" }
+say tyler.name
+say tyler.role
+tyler.town = "Washington"
+say tyler

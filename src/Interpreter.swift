@@ -4,17 +4,59 @@
 // scopes (one per block), and the running of statements. All problems
 // are reported as plain-words NiflaErrors with a line number.
 
+// An object (Stone 4): named fields, kept in the order they were
+// first written. It is a class on purpose — objects are shared by
+// reference, the way JavaScript's are. Two variables that hold the
+// same object see each other's changes to its fields.
+final class NiflaObject {
+    private(set) var fieldNames: [String] = []
+    private var values: [String: Value] = [:]
+
+    func value(for name: String) -> Value? {
+        values[name]
+    }
+
+    // Sets a field: an existing field keeps its place in the order;
+    // a new one is added at the end.
+    func set(_ name: String, _ value: Value) {
+        if values[name] == nil { fieldNames.append(name) }
+        values[name] = value
+    }
+}
+
 enum Value {
     case number(Double)
     case text(String)
     case boolean(Bool)
+    case object(NiflaObject)
 
     // How the value is shown by `say`.
     var spoken: String {
+        render(seen: [], quoted: false)
+    }
+
+    // The one renderer behind `spoken`. An object is shown as a
+    // readable listing of its fields — { name: "Tyler", years: 29 } —
+    // with text values in quotes inside a listing, so they can't be
+    // mistaken for numbers, and nested objects listed the same way.
+    // `seen` holds the objects already being listed on the way here,
+    // so an object that (through its fields) contains itself stops
+    // at "..." instead of listing forever.
+    private func render(seen: Set<ObjectIdentifier>, quoted: Bool) -> String {
         switch self {
         case .number(let value): return formatNumber(value)
-        case .text(let value): return value
+        case .text(let value): return quoted ? "\"\(value)\"" : value
         case .boolean(let value): return value ? "true" : "false"
+        case .object(let object):
+            let id = ObjectIdentifier(object)
+            if seen.contains(id) { return "..." }
+            if object.fieldNames.isEmpty { return "{ }" }
+            var inner = seen
+            inner.insert(id)
+            let parts = object.fieldNames.map { name in
+                "\(name): \(object.value(for: name)!.render(seen: inner, quoted: true))"
+            }
+            return "{ " + parts.joined(separator: ", ") + " }"
         }
     }
 
@@ -24,6 +66,9 @@ enum Value {
         case .number(let value): return "the number \(formatNumber(value))"
         case .text(let value): return "the text \"\(value)\""
         case .boolean(let value): return value ? "true" : "false"
+        case .object(let object):
+            if object.fieldNames.isEmpty { return "an object with no fields yet" }
+            return "an object with the fields \(object.fieldNames.joined(separator: ", "))"
         }
     }
 }
@@ -154,6 +199,20 @@ final class Interpreter {
             if !scope.assign(name, value) {
                 throw NiflaError(line: line, message: "I can't set '\(name)', because no variable called '\(name)' has been made yet. Make one first with: let \(name) = ...")
             }
+
+        case .assignField(let target, let valueExpr, let line):
+            // The target is a chain of field steps; every step but
+            // the last is read, to reach the object whose field is
+            // being set, and the last step names that field. Setting
+            // a field that isn't there yet adds it.
+            guard case .field(let baseExpr, let fieldName, _) = target else {
+                throw NiflaError(line: line, message: "I can only set a field on an object, like: person.years = 30.")
+            }
+            let base = try evaluate(baseExpr, in: scope)
+            guard case .object(let object) = base else {
+                throw NiflaError(line: line, message: "I can't set the field '\(fieldName)' on \(base.described), because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.\(fieldName) = ... works.")
+            }
+            object.set(fieldName, try evaluate(valueExpr, in: scope))
 
         case .say(let valueExpr, _):
             let value = try evaluate(valueExpr, in: scope)
@@ -316,6 +375,23 @@ final class Interpreter {
             }
             return value
 
+        case .object(let fields, _):
+            let object = NiflaObject()
+            for field in fields {
+                object.set(field.name, try evaluate(field.value, in: scope))
+            }
+            return .object(object)
+
+        case .field(let baseExpr, let name, let line):
+            let base = try evaluate(baseExpr, in: scope)
+            guard case .object(let object) = base else {
+                throw NiflaError(line: line, message: "I can't read the field '\(name)' of \(base.described), because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.name works.")
+            }
+            guard let value = object.value(for: name) else {
+                throw missingFieldError(object: object, field: name, line: line)
+            }
+            return value
+
         case .negate(let inner, let line):
             let value = try evaluate(inner, in: scope)
             guard case .number(let number) = value else {
@@ -328,6 +404,30 @@ final class Interpreter {
             let right = try evaluate(rightExpr, in: scope)
             return try apply(op, left, right, line: line)
         }
+    }
+
+    // Reading a field an object doesn't have: say which fields it
+    // does have, and suggest a close one when there is one.
+    private func missingFieldError(object: NiflaObject, field name: String, line: Int) -> NiflaError {
+        if object.fieldNames.isEmpty {
+            return NiflaError(line: line, message: "This object has no fields yet, so it has no field called '\(name)'. You can add one by setting it, like: person.\(name) = ...")
+        }
+        var message = "This object has no field called '\(name)'. Its fields are: \(object.fieldNames.joined(separator: ", "))."
+        if let suggestion = closestFieldName(to: name, in: object) {
+            message += " Did you mean '\(suggestion)'?"
+        }
+        return NiflaError(line: line, message: message)
+    }
+
+    private func closestFieldName(to name: String, in object: NiflaObject) -> String? {
+        var best: (name: String, distance: Int)? = nil
+        for candidate in object.fieldNames where candidate != name {
+            let distance = editDistance(name, candidate)
+            if distance <= 2 && (best == nil || distance < best!.distance) {
+                best = (candidate, distance)
+            }
+        }
+        return best?.name
     }
 
     private func closestName(to name: String, in scope: Scope) -> String? {
@@ -377,6 +477,7 @@ final class Interpreter {
             case (.number(let a), .number(let b)): equal = a == b
             case (.text(let a), .text(let b)): equal = a == b
             case (.boolean(let a), .boolean(let b)): equal = a == b
+            case (.object(let a), .object(let b)): equal = a === b  // the very same object, not just alike
             default: equal = false  // different kinds are never equal
             }
             return .boolean(op == "==" ? equal : !equal)

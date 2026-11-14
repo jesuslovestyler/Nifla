@@ -92,6 +92,20 @@ func editDistance(_ a: String, _ b: String) -> Int {
 }
 
 final class Interpreter {
+    // The runaway guard (Stone 2): a kindness limit on the total number
+    // of loop passes in one run, across every loop in the program. A
+    // loop that would spin forever is stopped with a plain-words error
+    // instead of hanging.
+    private var loopPasses = 0
+    private let loopPassLimit = 1_000_000
+
+    private func tickLoop(line: Int) throws {
+        loopPasses += 1
+        if loopPasses > loopPassLimit {
+            throw NiflaError(line: line, message: "This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.")
+        }
+    }
+
     func run(_ program: [Stmt]) throws {
         let top = Scope()
         for statement in program {
@@ -126,6 +140,48 @@ final class Interpreter {
             let child = Scope(parent: scope)
             for inner in block {
                 try execute(inner, in: child)
+            }
+
+        case .whileLoop(let condition, let body, let line):
+            // The condition is checked before every pass. Each pass
+            // runs the body in a fresh block scope, the same way 'if'
+            // does: 'let' inside is new each pass, while setting a
+            // variable reaches the one outside — that is how counting
+            // works.
+            while true {
+                let value = try evaluate(condition, in: scope)
+                guard case .boolean(let flag) = value else {
+                    throw NiflaError(line: line, message: "'while' needs a true or false value to decide with, but here it was given \(value.described). Try a comparison, like: while years < 40 { ... }")
+                }
+                if !flag { break }
+                try tickLoop(line: line)
+                let child = Scope(parent: scope)
+                for inner in body {
+                    try execute(inner, in: child)
+                }
+            }
+
+        case .repeatLoop(let countExpr, let body, let line):
+            // The count is worked out once, before the loop starts,
+            // and must be a whole number, zero or more.
+            let value = try evaluate(countExpr, in: scope)
+            guard case .number(let count) = value else {
+                throw NiflaError(line: line, message: "'repeat' needs a number saying how many times to run, but here it was given \(value.described). Write it like: repeat 3 { ... }")
+            }
+            if count < 0 {
+                throw NiflaError(line: line, message: "'repeat' was told to run \(formatNumber(count)) times, but a count can't be negative — a loop can't run less than zero times. Use zero or more, like: repeat 3 { ... }")
+            }
+            if count != count.rounded() {
+                throw NiflaError(line: line, message: "'repeat' was told to run \(formatNumber(count)) times, but a loop can only run a whole number of times. Use a whole number instead, like \(formatNumber(count.rounded(.down))) or \(formatNumber(count.rounded(.up))).")
+            }
+            var done = 0.0
+            while done < count {
+                try tickLoop(line: line)
+                let child = Scope(parent: scope)
+                for inner in body {
+                    try execute(inner, in: child)
+                }
+                done += 1
             }
         }
     }

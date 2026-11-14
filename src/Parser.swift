@@ -7,6 +7,8 @@
 //              | name "=" expression
 //              | "say" expression
 //              | "if" expression block [ "else" block ]
+//              | "while" expression block
+//              | "repeat" expression block
 //   block      = "{" statement* "}"
 //   expression = comparison ( ("==" | "!=") comparison )*
 //   comparison = sum ( ("<" | "<=" | ">" | ">=") sum )*
@@ -29,6 +31,8 @@ enum Stmt {
     case assign(name: String, value: Expr, line: Int)
     case say(Expr, line: Int)
     case ifElse(condition: Expr, then: [Stmt], otherwise: [Stmt]?, line: Int)
+    case whileLoop(condition: Expr, body: [Stmt], line: Int)
+    case repeatLoop(count: Expr, body: [Stmt], line: Int)
 }
 
 final class Parser {
@@ -124,6 +128,33 @@ final class Parser {
             return .ifElse(condition: condition, then: thenBlock, otherwise: elseBlock, line: token.line)
         }
 
+        if checkKeyword("while") {
+            advance()
+            let condition = try parseExpression()
+            guard checkSymbol("{") else {
+                if checkSymbol("=") {
+                    throw NiflaError(line: current.line, message: "After the 'while' condition I expected '{' but found '='. To compare two things, use '==' — two equals signs. A single '=' sets a variable.")
+                }
+                throw NiflaError(line: current.line, message: "After the 'while' condition I need a '{' to start the block that runs again and again while it's true. Instead I found \(current.spoken).")
+            }
+            let openLine = current.line
+            advance()
+            let body = try parseBlock(openLine: openLine)
+            return .whileLoop(condition: condition, body: body, line: token.line)
+        }
+
+        if checkKeyword("repeat") {
+            advance()
+            let count = try parseExpression()
+            guard checkSymbol("{") else {
+                throw NiflaError(line: current.line, message: "After the 'repeat' count I need a '{' to start the block that runs that many times, like: repeat 3 { ... }. Instead I found \(current.spoken).")
+            }
+            let openLine = current.line
+            advance()
+            let body = try parseBlock(openLine: openLine)
+            return .repeatLoop(count: count, body: body, line: token.line)
+        }
+
         // Setting an existing variable: a name followed by '='.
         if case .name(let name) = token.kind {
             let next = tokens[min(pos + 1, tokens.count - 1)]
@@ -136,7 +167,7 @@ final class Parser {
             throw NiflaError(line: token.line, message: "I found the name '\(name)' at the start of a line, but a line needs to do something: make a variable with 'let \(name) = ...', set it with '\(name) = ...', or show it with 'say \(name)'.")
         }
 
-        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', or the name of a variable to set — but I found \(token.spoken).")
+        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', or the name of a variable to set — but I found \(token.spoken).")
     }
 
     private func parseExpression() throws -> Expr {

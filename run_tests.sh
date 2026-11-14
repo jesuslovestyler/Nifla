@@ -12,6 +12,14 @@
 set -u
 cd "$(dirname "$0")"
 
+# A safety net: no example may run longer than ten seconds. Nifla's own
+# runaway guard should stop a bad loop long before this — this is here
+# so the test run itself can never hang.
+TIMEOUT=""
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT="timeout 10"
+fi
+
 ./build.sh >/dev/null || { echo "BUILD FAILED"; exit 1; }
 
 pass=0
@@ -20,7 +28,7 @@ for program in examples/*.nifla; do
     name=$(basename "$program" .nifla)
     out=$(mktemp)
     err=$(mktemp)
-    if ./nifla "$program" >"$out" 2>"$err"; then
+    if $TIMEOUT ./nifla "$program" >"$out" 2>"$err"; then
         status=0
     else
         status=$?

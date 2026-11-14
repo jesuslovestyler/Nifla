@@ -20,7 +20,7 @@ struct Token {
         case number(Double)
         case text(String)
         case name(String)
-        case keyword(String)  // let, say, if, else, true, false
+        case keyword(String)  // let, say, if, else, while, repeat, true, false
         case symbol(String)   // +  -  *  /  (  )  {  }  =  ==  !=  <  <=  >  >=
         case end
     }
@@ -54,7 +54,7 @@ final class Lexer {
     private var pos = 0
     private var line = 1
 
-    private static let keywords: Set<String> = ["let", "say", "if", "else", "true", "false"]
+    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "true", "false"]
 
     init(_ source: String) {
         chars = Array(source)

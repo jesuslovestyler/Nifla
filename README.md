@@ -71,8 +71,31 @@ Shalom
 Tyler
 ```
 
-Not built yet, on purpose: the compiler, objects, loops, functions, and
+Not built yet, on purpose: the compiler, objects, functions, and
 the Floor. Those are later stones.
+
+## Stone 2 — loops
+
+Laid on **November 14, 2026**, the same evening as the first stone.
+Nifla can now repeat itself, in two ways:
+
+- `while ... { ... }` — runs the block again and again, checking the
+  condition before each pass, and stops when the condition turns false
+- `repeat N { ... }` — runs the block exactly N times; N is worked out
+  once, before the loop starts, and must be a whole number, zero or more
+
+How loops treat variables, kept simple: setting a variable inside a
+loop changes the one outside it — that is how counting works — while a
+variable made with `let` inside a loop's block is made fresh on every
+pass and stays inside the block.
+
+A kindness built in from the start: a loop that would run effectively
+forever is stopped. After a million passes in one program, Nifla stops
+the run and says so in plain words, naming the loop's line, instead of
+hanging.
+
+Still not built yet, on purpose: functions, objects, the compiler, and
+the Floor. Those are the next rings.
 
 ## License
 

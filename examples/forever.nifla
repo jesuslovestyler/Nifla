@@ -1,0 +1,4 @@
+// A loop whose condition never turns false. Nifla's runaway guard
+// stops it with a plain-words error instead of spinning forever.
+while true {
+}

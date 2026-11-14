@@ -1,0 +1,8 @@
+// A repeat loop builds a small pattern. The 'let' inside the loop
+// is made fresh on every pass; the line outside keeps growing.
+let line = ""
+repeat 4 {
+    let star = "*"
+    line = line + star
+    say line
+}

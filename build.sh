@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the Nifla interpreter (Stone 1) into ./nifla
+# Build the Nifla interpreter into ./nifla
 #
 # Uses swiftc directly — no package manager needed. Set SWIFTC to point
 # at a specific swiftc if the automatic search doesn't find yours.

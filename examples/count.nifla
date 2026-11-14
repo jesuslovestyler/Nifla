@@ -1,0 +1,7 @@
+// Counting with a while loop. The counter is made outside the loop,
+// and each pass changes it, until the condition turns false.
+let n = 1
+while n <= 5 {
+    say n
+    n = n + 1
+}

@@ -1,0 +1,14 @@
+// Choosing with if and else.
+let years = 29
+if years > 12 {
+    say "More than twelve years"
+} else {
+    say "Twelve years or fewer"
+}
+
+let age = 12
+if age > 12 {
+    say "Older than twelve"
+} else {
+    say "Not older than twelve yet"
+}

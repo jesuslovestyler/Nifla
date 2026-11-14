@@ -1,0 +1,4 @@
+// A deliberate mistake: the variable is spelled 'yeers' but was
+// made as 'years'. Nifla should say so in plain words.
+let years = 29
+say yeers

@@ -1,0 +1,9 @@
+// Arithmetic with variables and parentheses.
+let a = 6
+let b = 3
+say a + b * 2
+say (a + b) * 2
+say a / b
+say 10 - 4 - 3
+let price = 2.5
+say price * 4

@@ -1,0 +1,7 @@
+// Joining text together with +.
+let first = "Tyler"
+let last = "Kovalevich"
+let greeting = "Shalom, " + first + " " + last + "!"
+say greeting
+let years = 29
+say first + " is " + years + " years old"

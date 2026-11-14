@@ -1,0 +1,4 @@
+// Your first Nifla program.
+say "Shalom"
+let name = "Tyler"
+say name

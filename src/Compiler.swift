@@ -340,10 +340,13 @@ func compileMain(arguments: [String]) -> Int32 {
 
     var input: String? = nil
     var output: String? = nil
+    var bare = false
     var index = 1
     while index < arguments.count {
         let argument = arguments[index]
-        if argument == "-o" {
+        if argument == "--bare" {
+            bare = true
+        } else if argument == "-o" {
             index += 1
             guard index < arguments.count else {
                 return fail("The '-o' needs a name for the program to make, like: niflac hello.nifla -o hello", code: 2)
@@ -372,11 +375,18 @@ func compileMain(arguments: [String]) -> Int32 {
     do {
         let tokens = try Lexer(source).tokenize()
         program = try Parser(tokens).parseProgram()
-        try Checker(program: program).check(program)
+        try Checker(program: program, forBareMetal: bare).check(program)
     } catch let error as NiflaError {
         return fail(error.spoken, code: 1)
     } catch {
         return fail("Something went wrong while reading the program.", code: 1)
+    }
+
+    // Stone 11: the bare-metal target has its own translator
+    // and build (BareCompiler.swift) — no Swift runtime, no
+    // hosted runtime file, nothing underneath the program.
+    if bare {
+        return compileBare(inputPath: inputPath, output: output, program: program, fail: fail)
     }
 
     guard let runtimePath = findRuntime() else {

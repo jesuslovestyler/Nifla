@@ -179,7 +179,15 @@ final class Checker {
     // interpreter stops a second making when it runs, as before.
     private var functions: [String: [String]] = [:]
 
-    init(program: [Stmt]) {
+    // Stone 11: when the program is being compiled for bare
+    // metal, the floor desk differs — it carries numbers and
+    // one piece of text (on its memory side), and a bare floor
+    // block gives back only a number. checkFloor follows the
+    // target it is checking for; every other rule is the same.
+    private let forBareMetal: Bool
+
+    init(program: [Stmt], forBareMetal: Bool = false) {
+        self.forBareMetal = forBareMetal
         collectFunctions(program)
     }
 
@@ -699,11 +707,20 @@ final class Checker {
                 if bytesSeen > 1 {
                     throw NiflaError(line: line, message: "'floor' can be handed only one block of bytes, but it was given two. I caught this before the program ran, so nothing ran.")
                 }
+            } else if forBareMetal && kind == .text {
+                // The bare desk's memory side carries one piece
+                // of text; the bare validator counts them.
+                continue
             } else if kind != .unknown && kind != .number {
+                if forBareMetal {
+                    throw NiflaError(line: line, message: "'floor' can be handed numbers and one piece of text on bare metal, but it was given \(kind.phrase). I caught this before the program ran, so nothing ran.")
+                }
                 throw NiflaError(line: line, message: "'floor' can be handed numbers and one block of bytes, but it was given \(kind.phrase). I caught this before the program ran, so nothing ran.")
             }
         }
-        return .unknown
+        // On bare metal a floor block gives back only its
+        // number; hosted, it may give a list of extra answers.
+        return forBareMetal ? .number : .unknown
     }
 
     // The kind rules of the operators, mirroring the interpreter's

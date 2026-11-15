@@ -1,0 +1,67 @@
+// Nifla on bare metal (Stone 11): this program is compiled
+// with `niflac --bare` into a binary that boots on its own —
+// no operating system, no runtime underneath. The friendly
+// side decides what the screen says; the Floor writes it into
+// the screen's memory itself.
+//
+// The high level at work: a function, a loop that builds the
+// number 15 (which is also 0x0F — white text on a black
+// screen, the screen's own way of holding a color next to
+// each letter), and a decision between two pieces of text.
+// Then the word and the number are handed to a floor block,
+// which walks the text's bytes (rbx, with r12 saying how
+// many) and writes each one to the text screen at 0xB8000,
+// with the handed number as every letter's color byte.
+make twice(x) {
+    give x * 2
+}
+
+let style = 0
+let passes = 0
+while passes < 5 {
+    style = style + 3
+    passes = passes + 1
+}
+
+let word = "Nifla"
+if style == 15 {
+    word = "Nifla runs on bare metal"
+}
+
+floor(word, style) {
+    mov rcx, 0
+    mov rdx, 0xB8000
+    mov r8, [r10]
+write_loop:
+    cmp rcx, r12
+    jae write_done
+    mov al, [rbx + rcx]
+    mov [rdx + rcx * 2], al
+    mov [rdx + rcx * 2 + 1], r8b
+    inc rcx
+    jmp write_loop
+write_done:
+}
+
+// A second call, proving the desk is set up fresh each time:
+// "It works" at the start of the screen's second row — cell
+// 80, twice 40, worked out by the function above (each row
+// holds 80 cells, and the block doubles the cell number into
+// a byte offset, two bytes per cell).
+let cheer = "It works"
+floor(cheer, twice(40)) {
+    mov rcx, 0
+    mov rdx, 0xB8000
+    mov rax, [r10]
+    shl rax, 1
+    add rdx, rax
+cheer_loop:
+    cmp rcx, r12
+    jae cheer_done
+    mov al, [rbx + rcx]
+    mov [rdx + rcx * 2], al
+    mov byte ptr [rdx + rcx * 2 + 1], 0x0F
+    inc rcx
+    jmp cheer_loop
+cheer_done:
+}

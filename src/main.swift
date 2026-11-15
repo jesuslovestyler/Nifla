@@ -6,6 +6,10 @@
 //   nifla                  read a Nifla program from standard input
 //   niflac program.nifla   check a Nifla program, then compile it
 //                          into a standalone native program
+//   niflac --bare program.nifla
+//                          compile a bare-metal subset of Nifla
+//                          into a binary that boots on its own
+//                          (Stone 11; see BareCompiler.swift)
 //
 // Which program this is is decided by the name it was called by.
 // Either way, the checker (Stone 5) reads the program first, and a

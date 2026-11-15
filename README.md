@@ -743,6 +743,113 @@ Honest limits of Stone 10:
   `forever` remain uncovered, and nothing in this stone was
   bent to change that.
 
+## Stone 11 — first bare metal
+
+Laid on **November 14, 2026**, the same evening, last of the
+three. Every program Nifla has ever made stood on something:
+the interpreter, or a compiled binary carrying the Swift
+runtime and the hosted runtime file, on Linux. This stone
+takes the ground away.
+
+```
+niflac --bare program.nifla [-o out.elf]
+```
+
+compiles a **restricted subset** of Nifla into a freestanding
+binary with no operating system and no runtime underneath —
+the compiler emits x86-64 assembly itself (the Swift-codegen
+path cannot do this; its output carries Swift with it), and
+the assembly is kept beside the binary as `.s`, for reading.
+
+**The bare subset**, enforced by a validator that runs after
+the ordinary checker and refuses anything outside it, in
+plain words, before anything is built:
+
+- **whole numbers** — a number with a part after the point,
+  or too big for the machine, is refused; division gives the
+  **whole quotient** (`7 / 2` is 3 there — a real difference
+  from hosted Nifla, named here on purpose)
+- **text** as literals and variables: held, measured with
+  `length`, compared with `==` and `!=`, and handed to a
+  floor block. It cannot be joined, split, or searched —
+  there is no one there to own new text
+- **true and false**, as 1 and 0
+- `let` and setting variables, `if`/`else`, `while`, `repeat`
+- `make` and `give`, with recursion; values travel in the
+  processor's registers, up to six words' worth per call
+  (a piece of text takes two)
+- **floor blocks** with the Stone 9 desk — r10/r11 the handed
+  numbers, the one piece of text on the memory side (rbx/r12)
+  — except **r13 is 0: there is no results desk**, so a bare
+  floor block gives back only its `rax` number
+
+Everything else is refused in plain words: `say`, objects,
+lists, blocks of bytes as values, files, `for`, `attempt`,
+and every built-in tool except `length`. A value's shape —
+number, text, or true/false — must be one thing everywhere
+it is used and handed; the validator pins shapes down from
+uses and calls and refuses a clash. (The ordinary checker
+runs first, with its one floor rule following the target:
+on bare metal the desk takes text, so text handed to a
+floor block is allowed there and only there.)
+
+**What the binary contains**: a multiboot-1 header; a 32-bit
+stub that sets up a stack, builds identity page tables (2 MiB
+pages covering the first 1 GiB), enables PAE and long mode,
+loads a small GDT, and steps into 64-bit code; the program —
+its functions and statements as machine code, its text as
+bytes in read-only data, its floor blocks as raw functions
+behind the desk; and a halt loop for an ending. It is linked
+at 0x100000 and repackaged in a 32-bit ELF shell, the form
+QEMU's built-in multiboot loader accepts (every address is
+below 4 GiB, so nothing is lost; GRUB reads either form).
+The two runaway guards keep their numbers — a million loop
+passes, five hundred nested calls — but on bare metal they
+**halt the machine**: there is no one to speak to.
+
+**The proof** is `bare-examples/nifla-bare.nifla`, run by
+`./run-bare.sh`: the high level builds the number 15 with a
+loop (15 is also 0x0F, white on black), chooses the text
+"Nifla runs on bare metal" with an `if`, and hands word and
+number to a floor block that writes the word to the screen's
+memory at 0xB8000 with the number as each letter's color
+byte; a second call writes "It works" on the next row, at a
+cell worked out by a function. The script boots the binary
+headless in QEMU and reads the VGA text buffer back through
+the monitor; both rows must begin with the words in
+`bare-examples/nifla-bare.screen`. It prints PASS — and it
+does.
+
+```sh
+./run-bare.sh   # bare metal: PASS — the words are on the emulated screen
+```
+
+Honest limits of Stone 11:
+
+- This is a **first proof that a kernel can be written in
+  Nifla — it is not a kernel**. There are no interrupts, no
+  keyboard or any input, no memory management beyond the
+  one identity map, no drivers, and nothing to do after the
+  program's last line but halt. The screen is written by
+  hand, from a floor block, the way this bench's Cardnull
+  work writes it.
+- A problem on bare metal is **silent**: a faulting
+  instruction, a division by zero, or a tripped guard stops
+  the machine (or restarts it) with no words at all. Plain
+  words need a speaker, and there isn't one down there —
+  the validator's refusals before the build are the only
+  plain words bare metal gets.
+- Division gives the whole quotient, a negative `repeat`
+  count halts instead of being refused in words, and a
+  function that never `give`s hands back 0 — three named
+  differences from hosted Nifla, all consequences of there
+  being no runtime to speak or to hand back "nothing".
+- One machine only: x86-64, booted the multiboot way, in
+  QEMU on this bench (the script uses the bench's extracted
+  QEMU 10 through its loader, or `$QEMU` when set). The ARM
+  edition Cardnull dreams of would need its own floor, its
+  own boot, and its own stone.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

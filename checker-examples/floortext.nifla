@@ -1,0 +1,8 @@
+// A checker example: a floor block handed some text. A floor
+// block can be handed numbers and one block of bytes; the
+// checker can prove text can never work, so it refuses the
+// program before anything runs.
+let answer = floor("hello") {
+    mov rax, 1
+}
+say answer

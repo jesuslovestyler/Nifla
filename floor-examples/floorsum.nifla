@@ -1,0 +1,24 @@
+// The Floor gets hands (Stone 9): values handed in, and more
+// than one value handed back. The values a block is handed
+// wait in an array the block reads through r10 — the first
+// at [r10], the second at [r10 + 8], and so on. The
+// processor's divide gives a quotient and a remainder at
+// once: the block leaves the quotient in rax, as always,
+// writes the remainder into the results area at [r13], and
+// sets r14 to 1 to say one extra answer is waiting there —
+// so the block gives back a list of the two answers.
+let answers = floor(100, 7) {
+    mov rax, [r10]
+    mov rcx, [r10 + 8]
+    xor rdx, rdx
+    div rcx
+    mov [r13], rdx
+    mov r14, 1
+}
+say answers
+say answers[0] + answers[1]
+let plus = floor(41) {
+    mov rax, [r10]
+    add rax, 1
+}
+say plus

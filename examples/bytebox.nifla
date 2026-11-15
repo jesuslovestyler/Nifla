@@ -1,0 +1,21 @@
+// Stone 9: a block of bytes — raw memory the friendly way.
+// makebytes makes one, full of zeros; [ ] reads and writes its
+// bytes by number, the way a list's items are read and written;
+// length says how many bytes there are; and a 'for' loop can
+// walk the bytes as numbers. Here the numbers 72, 101, 108,
+// 108, 111 are put in — the character codes of "Hello".
+let data = makebytes(5)
+data[0] = 72
+data[1] = 101
+data[2] = 108
+data[3] = 108
+data[4] = 111
+say length(data)
+say data
+let total = 0
+for byte in data {
+    total = total + byte
+}
+say total
+data[0] = 74
+say data[0]

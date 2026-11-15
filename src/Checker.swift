@@ -33,6 +33,7 @@ enum StaticKind {
     case boolean
     case object
     case list
+    case bytes
     case unknown
 
     // How the kind is named in a plain-words message.
@@ -43,6 +44,7 @@ enum StaticKind {
         case .boolean: return "a true/false value"
         case .object: return "an object"
         case .list: return "a list"
+        case .bytes: return "a block of bytes"
         case .unknown: return "a value"
         }
     }
@@ -61,7 +63,7 @@ private struct BuiltinRule {
 }
 
 private let builtinRules: [String: BuiltinRule] = [
-    "length": BuiltinRule(result: .number, needs: [([.text, .list, .object], "some text, a list, or an object to measure")]),
+    "length": BuiltinRule(result: .number, needs: [([.text, .list, .object, .bytes], "some text, a list, an object, or a block of bytes to measure")]),
     "join": BuiltinRule(result: .text, needs: [([.list], "a list to join"), ([.text], "some text to join the items with")]),
     "split": BuiltinRule(result: .list, needs: [([.text], "some text to split"), ([.text], "some text to split by")]),
     "part": BuiltinRule(result: .text, needs: [([.text], "some text to take a part of"), ([.number], "a number saying which character to start at"), ([.number], "a number saying how many characters to take")]),
@@ -70,6 +72,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "readfile": BuiltinRule(result: .text, needs: [([.text], "the name of a file, as text")]),
     "writefile": BuiltinRule(result: .number, needs: [([.text], "the name of a file, as text"), ([.text], "some text to write")]),
     "arguments": BuiltinRule(result: .list, needs: []),
+    "makebytes": BuiltinRule(result: .bytes, needs: [([.number], "a number saying how many bytes to make")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each
@@ -529,15 +532,16 @@ final class Checker {
             _ = try checkExpr(base, env: &env, outerNames: outerNames)
             return .unknown  // what comes out of an object can't be proven
 
-        case .index(let base, let index, _):
+        case .index(let base, let index, let line):
             let baseKind = try checkExpr(base, env: &env, outerNames: outerNames)
-            _ = try checkExpr(index, env: &env, outerNames: outerNames)
+            let indexKind = try checkExpr(index, env: &env, outerNames: outerNames)
+            try checkIndexKind(base: baseKind, index: indexKind, line: line)
             // A character taken from text is provably text; an item
             // taken from a list could be anything.
             return baseKind == .text ? .text : .unknown
 
-        case .floor(let asm, let line):
-            return try checkFloor(asm: asm, line: line)
+        case .floor(let asm, let args, let line):
+            return try checkFloor(asm: asm, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false)
 
         case .negate(let inner, _):
             let kind = try checkExpr(inner, env: &env, outerNames: outerNames)
@@ -591,13 +595,14 @@ final class Checker {
             _ = try checkExprForgiving(base, env: &env, outerNames: outerNames)
             return .unknown
 
-        case .index(let base, let index, _):
+        case .index(let base, let index, let line):
             let baseKind = try checkExprForgiving(base, env: &env, outerNames: outerNames)
-            _ = try checkExprForgiving(index, env: &env, outerNames: outerNames)
+            let indexKind = try checkExprForgiving(index, env: &env, outerNames: outerNames)
+            try checkIndexKind(base: baseKind, index: indexKind, line: line)
             return baseKind == .text ? .text : .unknown
 
-        case .floor(let asm, let line):
-            return try checkFloor(asm: asm, line: line)
+        case .floor(let asm, let args, let line):
+            return try checkFloor(asm: asm, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true)
 
         case .negate(let inner, _):
             let kind = try checkExprForgiving(inner, env: &env, outerNames: outerNames)
@@ -613,17 +618,47 @@ final class Checker {
         }
     }
 
-    // A floor block (Stone 7): the checker treats it as opaque —
-    // the instructions inside are the processor's business, not
-    // Nifla's — but it does verify the block is well-formed, which
-    // here means it isn't empty. A floor block gives back a number
-    // (what the processor leaves in its return register), so its
-    // kind is known.
-    private func checkFloor(asm: String, line: Int) throws -> StaticKind {
+    // An index whose kind is proven: picking an item of a list,
+    // a character of some text, or a byte of a block of bytes
+    // takes a number, so a proven kind that isn't a number can
+    // never work and is refused before the run. (Which items
+    // exist — the range — is the run's business, as always.)
+    private func checkIndexKind(base: StaticKind, index: StaticKind, line: Int) throws {
+        guard base == .list || base == .text || base == .bytes else { return }
+        guard index != .unknown && index != .number else { return }
+        throw NiflaError(line: line, message: "I can't use \(index.phrase) to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+    }
+
+    // A floor block (Stones 7 and 9): the checker treats the
+    // instructions as opaque — they are the processor's business,
+    // not Nifla's — but it does verify the block is well-formed,
+    // which here means it isn't empty, and it checks the values
+    // the block is handed: each must be a number or a block of
+    // bytes, there may be only one block of bytes, and a handed
+    // value whose kind is proven to be anything else is refused
+    // before the run. What a block gives back can no longer be
+    // proven: since Stone 9 it may hand back extra answers, and
+    // then it gives a list, not a number — so the kind is unknown
+    // and the run's own checks remain the guard.
+    private func checkFloor(asm: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>, forgiving: Bool) throws -> StaticKind {
         if asm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw NiflaError(line: line, message: "This floor block is empty — it needs the processor instructions it is meant to run, between the 'floor {' line and the line holding only '}'.")
         }
-        return .number
+        var bytesSeen = 0
+        for arg in args {
+            let kind = forgiving
+                ? try checkExprForgiving(arg, env: &env, outerNames: outerNames)
+                : try checkExpr(arg, env: &env, outerNames: outerNames)
+            if kind == .bytes {
+                bytesSeen += 1
+                if bytesSeen > 1 {
+                    throw NiflaError(line: line, message: "'floor' can be handed only one block of bytes, but it was given two. I caught this before the program ran, so nothing ran.")
+                }
+            } else if kind != .unknown && kind != .number {
+                throw NiflaError(line: line, message: "'floor' can be handed numbers and one block of bytes, but it was given \(kind.phrase). I caught this before the program ran, so nothing ran.")
+            }
+        }
+        return .unknown
     }
 
     // The kind rules of the operators, mirroring the interpreter's

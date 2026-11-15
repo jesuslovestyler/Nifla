@@ -57,12 +57,25 @@ final class NiflaList {
     }
 }
 
+// A block of bytes (Stone 9): raw memory, a fixed number of
+// bytes, each a whole number from 0 to 255. A class on purpose —
+// shared by reference, so a floor block handed the block works
+// on the very memory the high-level side reads back afterwards.
+final class NiflaBytes {
+    var data: [UInt8]
+
+    init(count: Int) {
+        data = [UInt8](repeating: 0, count: count)
+    }
+}
+
 enum Value {
     case number(Double)
     case text(String)
     case boolean(Bool)
     case object(NiflaObject)
     case list(NiflaList)
+    case bytes(NiflaBytes)
 
     // How the value is shown by `say`.
     var spoken: String {
@@ -92,6 +105,9 @@ enum Value {
             inner.insert(id)
             let parts = list.items.map { $0.render(seen: inner, quoted: true) }
             return "[" + parts.joined(separator: ", ") + "]"
+        case .bytes(let bytes):
+            let parts = bytes.data.map { String($0) }
+            return "bytes(" + parts.joined(separator: ", ") + ")"
         }
     }
 
@@ -109,6 +125,12 @@ enum Value {
             case 0: return "an empty list"
             case 1: return "a list of 1 item"
             default: return "a list of \(list.items.count) items"
+            }
+        case .bytes(let bytes):
+            switch bytes.data.count {
+            case 0: return "an empty block of bytes"
+            case 1: return "a block of 1 byte"
+            default: return "a block of \(bytes.data.count) bytes"
             }
         }
     }
@@ -196,6 +218,7 @@ let builtinTools: [String: BuiltinDef] = [
     "readfile": BuiltinDef(params: ["path"], example: "readfile(\"notes.txt\")"),
     "writefile": BuiltinDef(params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")"),
     "arguments": BuiltinDef(params: [], example: "arguments()"),
+    "makebytes": BuiltinDef(params: ["count"], example: "makebytes(8)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -210,14 +233,34 @@ func builtinCountMessage(name: String, def: BuiltinDef, given: Int) -> String {
     return "The tool '\(name)' takes \(takes), but it was given \(given). Call it like: \(def.example)."
 }
 
+// The place an item-setting line will write to: what a list
+// slot and a bytes slot (Stone 9) have in common.
+protocol ItemSlot {
+    func set(_ value: Value) throws
+}
+
 // The place an item-setting line will write to: a list and the
 // item's number in it, checked and ready.
-struct ListSlot {
+struct ListSlot: ItemSlot {
     let list: NiflaList
     let index: Int
 
-    func set(_ value: Value) {
+    func set(_ value: Value) throws {
         list.items[index] = value
+    }
+}
+
+// The place a byte-setting line will write to (Stone 9): a block
+// of bytes and the byte's number in it, checked and ready. The
+// value itself is checked when it is stored — a byte must be a
+// whole number from 0 to 255.
+struct BytesSlot: ItemSlot {
+    let bytes: NiflaBytes
+    let index: Int
+    let line: Int
+
+    func set(_ value: Value) throws {
+        bytes.data[index] = try Machine.byteValue(value, line: line)
     }
 }
 
@@ -360,6 +403,16 @@ final class Machine {
             }
             return .text(String(chars[index]))
 
+        case .bytes(let bytes):
+            let index = try itemNumber(indexValue, line: line)
+            if bytes.data.isEmpty {
+                throw NiflaError(line: line, message: "This block of bytes has no bytes yet, so there is no byte \(index) to take from it. Make a bigger block with makebytes — like: makebytes(8).")
+            }
+            guard index >= 0 && index < bytes.data.count else {
+                throw NiflaError(line: line, message: "This block of bytes has \(bytes.data.count) bytes, numbered 0 to \(bytes.data.count - 1), but I was asked for byte \(index).")
+            }
+            return .number(Double(bytes.data[index]))
+
         default:
             throw NiflaError(line: line, message: "I can't take an item from \(base.described). Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character.")
         }
@@ -368,7 +421,7 @@ final class Machine {
     // For an item-setting line: the list and number the line will
     // write to, checked before the new value is worked out, as the
     // interpreter checks them.
-    func indexTarget(_ base: Value, _ indexValue: Value, line: Int) throws -> ListSlot {
+    func indexTarget(_ base: Value, _ indexValue: Value, line: Int) throws -> ItemSlot {
         switch base {
         case .list(let list):
             let index = try itemNumber(indexValue, line: line)
@@ -379,6 +432,15 @@ final class Machine {
                 throw NiflaError(line: line, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), so there is no item \(index) to set. To add an item at the end, use append — like: append(items, ...).")
             }
             return ListSlot(list: list, index: index)
+        case .bytes(let bytes):
+            let index = try itemNumber(indexValue, line: line)
+            if bytes.data.isEmpty {
+                throw NiflaError(line: line, message: "This block of bytes has no bytes yet, so there is no byte \(index) to set. Make a bigger block with makebytes — like: makebytes(8).")
+            }
+            guard index >= 0 && index < bytes.data.count else {
+                throw NiflaError(line: line, message: "This block of bytes has \(bytes.data.count) bytes, numbered 0 to \(bytes.data.count - 1), so there is no byte \(index) to set.")
+            }
+            return BytesSlot(bytes: bytes, index: index, line: line)
         case .text:
             throw NiflaError(line: line, message: "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
         default:
@@ -387,15 +449,18 @@ final class Machine {
     }
 
     // The items a 'for' loop walks: a list's items as they stand
-    // when the loop begins, or a text's characters, one by one.
+    // when the loop begins, a text's characters one by one, or a
+    // block of bytes' bytes as numbers (Stone 9).
     func forItems(_ value: Value, line: Int) throws -> [Value] {
         switch value {
         case .list(let list):
             return list.items
         case .text(let text):
             return Array(text).map { Value.text(String($0)) }
+        case .bytes(let bytes):
+            return bytes.data.map { Value.number(Double($0)) }
         default:
-            throw NiflaError(line: line, message: "'for' needs a list or some text to walk through, but here it was given \(value.described). Write it like: for item in items { ... }")
+            throw NiflaError(line: line, message: "'for' needs a list, some text, or a block of bytes to walk through, but here it was given \(value.described). Write it like: for item in items { ... }")
         }
     }
 
@@ -408,6 +473,81 @@ final class Machine {
             message += " Did you mean '\(suggestion)'?"
         }
         return NiflaError(line: line, message: message)
+    }
+
+    // --- the Floor (Stones 7 and 9) --------------------------------
+
+    // Checks that a value can be stored in a block of bytes: a
+    // whole number from 0 to 255.
+    static func byteValue(_ value: Value, line: Int) throws -> UInt8 {
+        guard case .number(let number) = value, number == number.rounded(), number >= 0, number <= 255 else {
+            throw NiflaError(line: line, message: "A byte is a whole number from 0 to 255, but I was given \(value.described).")
+        }
+        return UInt8(number)
+    }
+
+    // Runs one floor block (Stone 9's desk): the values the block
+    // was handed are checked and laid out — the whole numbers in
+    // an array the block reads through r10/r11, the one block of
+    // bytes as the very memory the block works on through
+    // rbx/r12, and a results area (room for eight numbers) the
+    // block writes extra answers into through r13, saying how
+    // many with r14. The generated code hands over a closure that
+    // calls the block's own assembly with those pointers.
+    //
+    // What the block gives back: the number its instructions
+    // leave in rax, as since Stone 7 — or, when it wrote extra
+    // answers, a list: the rax number first, then the extras in
+    // the order it wrote them.
+    func runFloor(args: [Value], line: Int, call: (UnsafePointer<Int64>?, Int64, UnsafeMutablePointer<UInt8>?, Int64, UnsafeMutablePointer<Int64>, UnsafeMutablePointer<Int64>) -> Int64) throws -> Value {
+        var inputs: [Int64] = []
+        var memory: NiflaBytes? = nil
+        for arg in args {
+            switch arg {
+            case .number(let number):
+                guard number == number.rounded() && abs(number) < 1e15 else {
+                    throw NiflaError(line: line, message: "A floor block can be handed only whole numbers, but it was handed \(arg.described).")
+                }
+                inputs.append(Int64(number))
+            case .bytes(let bytes):
+                if memory != nil {
+                    throw NiflaError(line: line, message: "A floor block can be handed only one block of bytes, but it was handed two.")
+                }
+                memory = bytes
+            default:
+                throw NiflaError(line: line, message: "A floor block can be handed numbers and one block of bytes, but it was given \(arg.described).")
+            }
+        }
+        var results = [Int64](repeating: 0, count: 8)
+        var resultCount: Int64 = 0
+        let inputCount = Int64(inputs.count)
+        let memoryCount = Int64(memory?.data.count ?? 0)
+        let headline: Int64 = results.withUnsafeMutableBufferPointer { resultsBuffer in
+            withUnsafeMutablePointer(to: &resultCount) { countPointer in
+                inputs.withUnsafeBufferPointer { inputsBuffer in
+                    if let memory {
+                        return memory.data.withUnsafeMutableBufferPointer { memoryBuffer in
+                            call(inputsBuffer.baseAddress, inputCount,
+                                 memoryBuffer.baseAddress, memoryCount,
+                                 resultsBuffer.baseAddress!, countPointer)
+                        }
+                    }
+                    return call(inputsBuffer.baseAddress, inputCount,
+                                nil, 0,
+                                resultsBuffer.baseAddress!, countPointer)
+                }
+            }
+        }
+        let extra = Int(max(0, min(8, resultCount)))
+        if extra == 0 {
+            return .number(Double(headline))
+        }
+        let list = NiflaList()
+        list.items.append(.number(Double(headline)))
+        for index in 0..<extra {
+            list.items.append(.number(Double(results[index])))
+        }
+        return .list(list)
     }
 
     // --- operators -------------------------------------------------
@@ -456,6 +596,7 @@ final class Machine {
             case (.boolean(let a), .boolean(let b)): equal = a == b
             case (.object(let a), .object(let b)): equal = a === b
             case (.list(let a), .list(let b)): equal = a === b
+            case (.bytes(let a), .bytes(let b)): equal = a === b
             default: equal = false
             }
             return .boolean(op == "==" ? equal : !equal)
@@ -606,9 +747,20 @@ final class Machine {
             case .text(let text): return .number(Double(text.count))
             case .list(let list): return .number(Double(list.items.count))
             case .object(let object): return .number(Double(object.fieldNames.count))
+            case .bytes(let bytes): return .number(Double(bytes.data.count))
             default:
-                throw NiflaError(line: line, message: "'length' measures some text, a list, or an object, but it was given \(args[0].described).")
+                throw NiflaError(line: line, message: "'length' measures some text, a list, an object, or a block of bytes, but it was given \(args[0].described).")
             }
+
+        case "makebytes":
+            let count = try wholeCount(args[0], what: "The number of bytes to make", line: line)
+            if count < 0 {
+                throw NiflaError(line: line, message: "'makebytes' was told to make \(count) bytes, but a count can't be less than 0.")
+            }
+            if count > 16_777_216 {
+                throw NiflaError(line: line, message: "'makebytes' was told to make \(count) bytes, but one block can hold at most 16777216 bytes.")
+            }
+            return .bytes(NiflaBytes(count: count))
 
         case "join":
             guard case .list(let list) = args[0] else {

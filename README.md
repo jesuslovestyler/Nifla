@@ -529,9 +529,95 @@ tools, files, program arguments, and floor refusal.
   The suite runs in about a second compiled; a million-pass
   interpreted loop takes the better part of a minute.
 
-That is the road's end, as far as it was drawn: the interpreter,
-the checker, the compiler, words and lists, the Floor — and the
-language running itself.
+That was the road's end, as far as it was drawn up to that
+point: the interpreter, the checker, the compiler, words and
+lists, the Floor — and the language running itself. The road
+did not stay ended; the next three stones follow.
+
+## Stone 9 — the Floor gets hands
+
+Laid on **November 14, 2026**, later still the same evening, at
+Tyler's word to walk the next three stones. Until now a floor
+block started from the processor's registers alone and gave
+back exactly one number. Now the friendly side and the Floor
+can hand work back and forth.
+
+**A block of bytes** is a new kind of value: a fixed stretch of
+raw memory, made with `makebytes(count)` — that many bytes, all
+zero to start. Its bytes are read and written by number, the
+way a list's items are (`data[0] = 72`, `say data[0]`), a byte
+being a whole number from 0 to 255; `length` measures it, and a
+`for` loop can walk its bytes as numbers. Saying one prints its
+numbers in a shape no list can be mistaken for:
+`bytes(72, 101, 108, 108, 111)`. A block is shared by
+reference, the way objects and lists are — which is what lets
+the next part work.
+
+**Handing values to a floor block** is written the way a call
+is: `floor(100, 7) { ... }`. When `niflac` wraps a block, it
+lays out a desk for the block's instructions before they run:
+
+- **r10** points to the handed whole numbers, in order — the
+  first at `[r10]`, the second at `[r10 + 8]`, and so on — and
+  **r11** says how many there are
+- **rbx** points to the first byte of the one block of bytes
+  the block was handed (0 when it was handed none), and
+  **r12** says how many bytes it holds
+- **r13** points to a results area with room for eight numbers,
+  and **r14** starts at 0
+
+The block gives back what it always did — the number in `rax`
+— and, when it has more to say, it writes up to eight extra
+numbers at `[r13]`, `[r13 + 8]`, … and sets `r14` to how many
+it wrote; then the block gives back **a list**: the `rax`
+number first, then the extras in order. The wrapper preserves
+the registers a called function must preserve and tidies up
+afterwards, as before; inside the block, `rbx`, `r12`, `r13`
+and `r14` are the desk — overwrite them and the desk is lost,
+and `r14` must hold the extra-answer count when the block
+ends.
+
+The proofs, in `floor-examples/`: `floorbytes` makes a block
+of bytes, writes "Hello" into it as numbers, hands the very
+same memory to a floor block that adds one to every byte, and
+reads "Ifmmp" back; `floorsum` hands 100 and 7 in and gets the
+divide's quotient *and* remainder back as the list `[14, 2]`.
+The **checker** checks what a block is handed: a handed value
+whose kind is proven to be anything but a number or a block of
+bytes is refused before the run, a second block of bytes is
+refused, and `makebytes` itself is checked like every tool
+(three cases in `checker-examples/`). The interpreter still
+refuses any program holding floor code, exactly as before.
+
+```sh
+./run_tests.sh      # the interpreter: 34 passed, 0 failed
+./run-compiled.sh   # the compiler, checker, and Floor: 69 passed, 0 failed
+```
+
+Honest limits of Stone 9:
+
+- A floor block can be handed **whole numbers only** — a
+  number with a part after the point is refused in plain words
+  when the block is reached (the desk is whole-number
+  registers), and at most **one** block of bytes. Text, lists,
+  and objects can't cross the desk; a block of bytes is the one
+  stretch of shared memory.
+- The results area holds **eight** extra answers; a block that
+  sets `r14` higher is read as eight. What a block gives back
+  can no longer be proven by the checker — it may be a number
+  or a list — so the checker stays silent about it and the
+  run's own checks guard its use, as with values out of
+  objects.
+- A block of bytes is at most 16,777,216 bytes (16 MiB), and
+  its size never changes once made — there is no growing or
+  shrinking it, and no reading a file into one yet: files are
+  still whole text, as Stone 6 left them.
+- The desk is this machine's desk: Linux on x86-64, the same
+  honest limit Stone 7 stated. Floor code is still raw access
+  with raw consequences — an instruction that faults takes the
+  whole compiled program down, and a block that writes outside
+  the memory it was handed is writing outside the language's
+  protection entirely. That is what the marking is for.
 
 ## License
 

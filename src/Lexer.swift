@@ -56,6 +56,14 @@ final class Lexer {
     private var pos = 0
     private var line = 1
 
+    // Tokens already read and waiting their turn (Stone 9): when a
+    // floor block is handed values — floor(value, ...) { ... } —
+    // the values' tokens are read while the word 'floor' is being
+    // read, so the block itself can be captured right after them;
+    // they wait here, behind the 'floor' keyword token, and are
+    // handed out before any new reading.
+    private var pendingTokens: [Token] = []
+
     private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor"]
 
     init(_ source: String) {
@@ -74,7 +82,15 @@ final class Lexer {
 
     func tokenize() throws -> [Token] {
         var tokens: [Token] = []
-        while let token = try nextToken() {
+        while true {
+            let token: Token
+            if !pendingTokens.isEmpty {
+                token = pendingTokens.removeFirst()
+            } else if let next = try nextToken() {
+                token = next
+            } else {
+                break
+            }
             tokens.append(token)
             if case .end = token.kind { break }
         }
@@ -130,6 +146,37 @@ final class Lexer {
             throw NiflaError(line: startLine, message: "I found a '!' on its own. To say 'not equal', write '!=' — an exclamation mark followed by an equals sign.")
         }
         throw NiflaError(line: startLine, message: "I don't understand the character '\(c)'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } [ ] , . : = == != < <= > >=.")
+    }
+
+    // Captures a floor block's raw lines (Stone 7): called just
+    // after the '{' that opens the block has been read. Nothing
+    // else belongs on the opening line; the lines below it are
+    // taken whole, exactly as written, until a line holding
+    // only '}'.
+    private func captureFloorLines(startLine: Int) throws -> String {
+        while let c = peek(), c == " " || c == "\t" { pos += 1 }
+        if peek() == "/", peekNext() == "/" {
+            while let c = peek(), c != "\n" { pos += 1 }
+        }
+        guard peek() == "\n" || atEnd else {
+            throw NiflaError(line: startLine, message: "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
+        }
+        if peek() == "\n" { pos += 1; line += 1 }
+        var asmLines: [String] = []
+        while true {
+            guard !atEnd else {
+                throw NiflaError(line: startLine, message: "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
+            }
+            var text = ""
+            while let c = peek(), c != "\n" {
+                text.append(c)
+                pos += 1
+            }
+            if peek() == "\n" { pos += 1; line += 1 }
+            if text.trimmingCharacters(in: .whitespaces) == "}" { break }
+            asmLines.append(text)
+        }
+        return asmLines.joined(separator: "\n")
     }
 
     private func lexNumber(_ startLine: Int) throws -> Token {
@@ -196,34 +243,47 @@ final class Lexer {
             // instructions, taken exactly as written — that runs
             // until a line holding only '}'. Those lines are never
             // lexed as Nifla; they are captured whole.
+            //
+            // Since Stone 9 a floor block can be handed values:
+            // 'floor(value, ...)' followed by '{' on the same line.
+            // The values are ordinary Nifla, so their tokens are
+            // read here (parentheses counted, text read as text)
+            // and queued behind the 'floor' keyword token; the
+            // block is captured right after them, as before.
             let savedPos = pos
             while let c = peek(), c == " " || c == "\t" { pos += 1 }
             if peek() == "{" {
                 pos += 1  // the '{'
-                // Nothing else belongs on the opening line.
-                while let c = peek(), c == " " || c == "\t" { pos += 1 }
-                if peek() == "/", peekNext() == "/" {
-                    while let c = peek(), c != "\n" { pos += 1 }
-                }
-                guard peek() == "\n" || atEnd else {
-                    throw NiflaError(line: startLine, message: "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
-                }
-                if peek() == "\n" { pos += 1; line += 1 }
-                var asmLines: [String] = []
+                let asm = try captureFloorLines(startLine: startLine)
+                return Token(kind: .floor(asm), line: startLine)
+            }
+            if peek() == "(" {
+                var collected: [Token] = []
+                var depth = 0
                 while true {
-                    guard !atEnd else {
-                        throw NiflaError(line: startLine, message: "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
+                    guard let token = try nextToken() else {
+                        throw NiflaError(line: startLine, message: "The '(' after 'floor' is never closed. Close the values being handed to the block with ')', then give the block itself: floor(values) { ... }.")
                     }
-                    var text = ""
-                    while let c = peek(), c != "\n" {
-                        text.append(c)
-                        pos += 1
+                    if case .end = token.kind {
+                        throw NiflaError(line: startLine, message: "The '(' after 'floor' is never closed. Close the values being handed to the block with ')', then give the block itself: floor(values) { ... }.")
                     }
-                    if peek() == "\n" { pos += 1; line += 1 }
-                    if text.trimmingCharacters(in: .whitespaces) == "}" { break }
-                    asmLines.append(text)
+                    collected.append(token)
+                    if case .symbol(let symbol) = token.kind {
+                        if symbol == "(" { depth += 1 }
+                        if symbol == ")" {
+                            depth -= 1
+                            if depth == 0 { break }
+                        }
+                    }
                 }
-                return Token(kind: .floor(asmLines.joined(separator: "\n")), line: startLine)
+                while let c = peek(), c == " " || c == "\t" { pos += 1 }
+                guard peek() == "{" else {
+                    throw NiflaError(line: startLine, message: "After the values handed to 'floor' I need the block itself: '{' on the same line, then the processor instructions on the lines below, until a line holding only '}'.")
+                }
+                pos += 1  // the '{'
+                let asm = try captureFloorLines(startLine: startLine)
+                pendingTokens = collected + [Token(kind: .floor(asm), line: startLine)]
+                return Token(kind: .keyword("floor"), line: startLine)
             }
             pos = savedPos
         }

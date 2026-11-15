@@ -1,0 +1,5 @@
+// A checker example: makebytes handed text instead of a
+// number. The checker knows the tool needs a number, so it
+// refuses the program before anything runs.
+let data = makebytes("big")
+say data

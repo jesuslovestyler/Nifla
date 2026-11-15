@@ -1,0 +1,27 @@
+// The Floor gets hands (Stone 9): the friendly side of the
+// program makes a block of bytes and writes "Hello" into it
+// as numbers. A floor block is then handed the very same
+// block — through rbx, which points at its first byte, and
+// r12, which says how many bytes there are — and adds one to
+// every byte. The friendly side reads the changed bytes back:
+// "Hello" has become "Ifmmp".
+let data = makebytes(5)
+data[0] = 72
+data[1] = 101
+data[2] = 108
+data[3] = 108
+data[4] = 111
+floor(data) {
+    xor rcx, rcx
+1:
+    cmp rcx, r12
+    jae 2f
+    add byte ptr [rbx + rcx], 1
+    inc rcx
+    jmp 1b
+2:
+    mov rax, r12
+}
+say data
+say data[0]
+say data[1] + data[2]

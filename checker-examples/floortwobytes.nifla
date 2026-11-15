@@ -1,0 +1,9 @@
+// A checker example: a floor block handed two blocks of
+// bytes. A block works on one stretch of memory at a time,
+// so the checker refuses a second one before anything runs.
+let first = makebytes(2)
+let second = makebytes(2)
+let answer = floor(first, second) {
+    mov rax, 1
+}
+say answer

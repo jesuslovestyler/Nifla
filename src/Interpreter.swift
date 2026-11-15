@@ -37,12 +37,28 @@ final class NiflaList {
     }
 }
 
+// A block of bytes (Stone 9): raw memory, a fixed number of bytes,
+// each a whole number from 0 to 255. It is a class on purpose — a
+// bytes block is shared by reference, the way objects and lists
+// are, so a floor block handed the block works on the very memory
+// the high-level side reads back afterwards. Its size is set when
+// it is made and never changes; its bytes can be read and written
+// by number, the way a list's items can.
+final class NiflaBytes {
+    var data: [UInt8]
+
+    init(count: Int) {
+        data = [UInt8](repeating: 0, count: count)
+    }
+}
+
 enum Value {
     case number(Double)
     case text(String)
     case boolean(Bool)
     case object(NiflaObject)
     case list(NiflaList)
+    case bytes(NiflaBytes)
 
     // How the value is shown by `say`.
     var spoken: String {
@@ -79,6 +95,11 @@ enum Value {
             inner.insert(id)
             let parts = list.items.map { $0.render(seen: inner, quoted: true) }
             return "[" + parts.joined(separator: ", ") + "]"
+        case .bytes(let bytes):
+            // A block of bytes is shown as its numbers, in a shape
+            // no list can be mistaken for: bytes(72, 101, 108).
+            let parts = bytes.data.map { String($0) }
+            return "bytes(" + parts.joined(separator: ", ") + ")"
         }
     }
 
@@ -96,6 +117,12 @@ enum Value {
             case 0: return "an empty list"
             case 1: return "a list of 1 item"
             default: return "a list of \(list.items.count) items"
+            }
+        case .bytes(let bytes):
+            switch bytes.data.count {
+            case 0: return "an empty block of bytes"
+            case 1: return "a block of 1 byte"
+            default: return "a block of \(bytes.data.count) bytes"
             }
         }
     }
@@ -203,6 +230,7 @@ let builtinTools: [String: BuiltinDef] = [
     "readfile": BuiltinDef(params: ["path"], example: "readfile(\"notes.txt\")"),
     "writefile": BuiltinDef(params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")"),
     "arguments": BuiltinDef(params: [], example: "arguments()"),
+    "makebytes": BuiltinDef(params: ["count"], example: "makebytes(8)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -265,7 +293,10 @@ func firstFloorLine(in statements: [Stmt]) -> Int? {
 
 func firstFloorLine(in expr: Expr) -> Int? {
     switch expr {
-    case .floor(_, let line):
+    case .floor(_, _, let line):
+        // The block's own line is where the floor construct starts;
+        // a program holding any floor block is refused at the
+        // first one, so there is no need to look inside its values.
         return line
     case .call(_, let args, _):
         for arg in args {
@@ -423,8 +454,10 @@ final class Interpreter {
                 items = list.items
             case .text(let text):
                 items = Array(text).map { Value.text(String($0)) }
+            case .bytes(let bytes):
+                items = bytes.data.map { Value.number(Double($0)) }
             default:
-                throw NiflaError(line: line, message: "'for' needs a list or some text to walk through, but here it was given \(over.described). Write it like: for item in items { ... }")
+                throw NiflaError(line: line, message: "'for' needs a list, some text, or a block of bytes to walk through, but here it was given \(over.described). Write it like: for item in items { ... }")
             }
             for item in items {
                 try tickLoop(line: line)
@@ -491,6 +524,15 @@ final class Interpreter {
                     throw NiflaError(line: indexLine, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), so there is no item \(index) to set. To add an item at the end, use append — like: append(items, ...).")
                 }
                 list.items[index] = try evaluate(valueExpr, in: scope)
+            case .bytes(let bytes):
+                let index = try itemNumber(try evaluate(indexExpr, in: scope), line: indexLine)
+                if bytes.data.isEmpty {
+                    throw NiflaError(line: indexLine, message: "This block of bytes has no bytes yet, so there is no byte \(index) to set. Make a bigger block with makebytes — like: makebytes(8).")
+                }
+                guard index >= 0 && index < bytes.data.count else {
+                    throw NiflaError(line: indexLine, message: "This block of bytes has \(bytes.data.count) bytes, numbered 0 to \(bytes.data.count - 1), so there is no byte \(index) to set.")
+                }
+                bytes.data[index] = try byteValue(try evaluate(valueExpr, in: scope), line: indexLine)
             case .text:
                 throw NiflaError(line: indexLine, message: "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
             default:
@@ -500,6 +542,15 @@ final class Interpreter {
         default:
             throw NiflaError(line: line, message: "I can only set a field on an object or an item in a list, like: person.years = 30 or items[0] = 30.")
         }
+    }
+
+    // Checks that a value can be stored in a block of bytes
+    // (Stone 9): a whole number from 0 to 255.
+    private func byteValue(_ value: Value, line: Int) throws -> UInt8 {
+        guard case .number(let number) = value, number == number.rounded(), number >= 0, number <= 255 else {
+            throw NiflaError(line: line, message: "A byte is a whole number from 0 to 255, but I was given \(value.described).")
+        }
+        return UInt8(number)
     }
 
     // Checks that a value can pick an item: a whole number. The
@@ -538,6 +589,16 @@ final class Interpreter {
                 throw NiflaError(line: line, message: "This text has \(chars.count) characters, numbered 0 to \(chars.count - 1), but I was asked for character \(index).")
             }
             return .text(String(chars[index]))
+
+        case .bytes(let bytes):
+            let index = try itemNumber(indexValue, line: line)
+            if bytes.data.isEmpty {
+                throw NiflaError(line: line, message: "This block of bytes has no bytes yet, so there is no byte \(index) to take from it. Make a bigger block with makebytes — like: makebytes(8).")
+            }
+            guard index >= 0 && index < bytes.data.count else {
+                throw NiflaError(line: line, message: "This block of bytes has \(bytes.data.count) bytes, numbered 0 to \(bytes.data.count - 1), but I was asked for byte \(index).")
+            }
+            return .number(Double(bytes.data[index]))
 
         default:
             throw NiflaError(line: line, message: "I can't take an item from \(base.described). Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character.")
@@ -619,9 +680,20 @@ final class Interpreter {
             case .text(let text): return .number(Double(text.count))
             case .list(let list): return .number(Double(list.items.count))
             case .object(let object): return .number(Double(object.fieldNames.count))
+            case .bytes(let bytes): return .number(Double(bytes.data.count))
             default:
-                throw NiflaError(line: line, message: "'length' measures some text, a list, or an object, but it was given \(args[0].described).")
+                throw NiflaError(line: line, message: "'length' measures some text, a list, an object, or a block of bytes, but it was given \(args[0].described).")
             }
+
+        case "makebytes":
+            let count = try wholeCount(args[0], what: "The number of bytes to make", line: line)
+            if count < 0 {
+                throw NiflaError(line: line, message: "'makebytes' was told to make \(count) bytes, but a count can't be less than 0.")
+            }
+            if count > 16_777_216 {
+                throw NiflaError(line: line, message: "'makebytes' was told to make \(count) bytes, but one block can hold at most 16777216 bytes.")
+            }
+            return .bytes(NiflaBytes(count: count))
 
         case "join":
             guard case .list(let list) = args[0] else {
@@ -789,7 +861,7 @@ final class Interpreter {
             let indexValue = try evaluate(indexExpr, in: scope)
             return try readIndex(base, indexValue, line: line)
 
-        case .floor(_, let line):
+        case .floor(_, _, let line):
             // Floor code is raw processor instructions; only a
             // compiled program can run it. (The entry point refuses
             // a program holding floor code before anything runs;
@@ -893,6 +965,7 @@ final class Interpreter {
             case (.boolean(let a), .boolean(let b)): equal = a == b
             case (.object(let a), .object(let b)): equal = a === b  // the very same object, not just alike
             case (.list(let a), .list(let b)): equal = a === b  // the very same list, not just alike
+            case (.bytes(let a), .bytes(let b)): equal = a === b  // the very same block, not just alike
             default: equal = false  // different kinds are never equal
             }
             return .boolean(op == "==" ? equal : !equal)

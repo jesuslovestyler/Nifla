@@ -28,9 +28,10 @@
 //              | "{" [ name ":" expression ( "," name ":" expression )* ] "}"
 //              | "[" [ expression ( "," expression )* ] "]"
 //              | floor-block
-//   floor-block = "floor" "{" — then raw lines of processor
-//              instructions, taken whole by the lexer, until a line
-//              holding only "}" (Stone 7)
+//   floor-block = "floor" [ "(" [ expression ( "," expression )* ] ")" ]
+//              "{" — then raw lines of processor instructions, taken
+//              whole by the lexer, until a line holding only "}"
+//              (Stone 7; the values it can be handed, Stone 9)
 
 indirect enum Expr {
     case number(Double, line: Int)
@@ -42,7 +43,7 @@ indirect enum Expr {
     case list(items: [Expr], line: Int)
     case field(base: Expr, name: String, line: Int)
     case index(base: Expr, index: Expr, line: Int)
-    case floor(asm: String, line: Int)
+    case floor(asm: String, args: [Expr], line: Int)
     case negate(Expr, line: Int)
     case binary(Expr, String, Expr, line: Int)  // line of the operator
 }
@@ -114,7 +115,14 @@ final class Parser {
         // does, and let the value it gives back go.
         if case .floor(let asm) = token.kind {
             advance()
-            return .doExpr(.floor(asm: asm, line: token.line), line: token.line)
+            return .doExpr(.floor(asm: asm, args: [], line: token.line), line: token.line)
+        }
+
+        // A floor block handed values (Stone 9), standing on its
+        // own line: the same — run it for what it does.
+        if checkKeyword("floor") {
+            let value = try parseExpression()
+            return .doExpr(value, line: token.line)
         }
 
         if checkKeyword("let") {
@@ -512,7 +520,18 @@ final class Parser {
             return try parseListLiteral(openToken: token)
         case .floor(let asm):
             advance()
-            return .floor(asm: asm, line: token.line)
+            return .floor(asm: asm, args: [], line: token.line)
+        case .keyword("floor"):
+            // A floor block handed values (Stone 9): the lexer read
+            // the values' tokens and captured the block right after
+            // them, so what follows the ')' is the block token.
+            advance()
+            let args = try parseCallArgs(name: "floor")
+            guard case .floor(let asm) = current.kind else {
+                throw NiflaError(line: current.line, message: "After the values handed to 'floor' I need the block itself: '{' on the same line, then the processor instructions. Instead I found \(current.spoken).")
+            }
+            advance()
+            return .floor(asm: asm, args: args, line: token.line)
         default:
             throw NiflaError(line: token.line, message: "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, a list like [1, 2, 3], or a floor block here, but I found \(token.spoken).")
         }

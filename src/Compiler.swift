@@ -52,13 +52,16 @@ struct SwiftTranslator {
         lines.append("}")
         if !floorBlocks.isEmpty {
             lines.append("")
-            lines.append("// The floor blocks (Stone 7): raw processor instructions,")
-            lines.append("// assembled separately and linked into this program.")
-            lines.append("// Each one gives back the number its instructions leave")
-            lines.append("// in the processor's return register (rax).")
+            lines.append("// The floor blocks (Stones 7 and 9): raw processor")
+            lines.append("// instructions, assembled separately and linked into")
+            lines.append("// this program. Each is called through the runtime's")
+            lines.append("// desk (Machine.runFloor): the handed numbers, the one")
+            lines.append("// block of bytes, and the results area are laid out")
+            lines.append("// for its instructions, which give back the number")
+            lines.append("// left in the processor's return register (rax).")
             for index in floorBlocks.indices {
                 lines.append("@_silgen_name(\"nifla_floor_\(index)\")")
-                lines.append("func __floor\(index)() -> Int64")
+                lines.append("func __floor\(index)(_ inputs: UnsafePointer<Int64>?, _ inputCount: Int64, _ memory: UnsafeMutablePointer<UInt8>?, _ memoryCount: Int64, _ results: UnsafeMutablePointer<Int64>, _ resultCount: UnsafeMutablePointer<Int64>) -> Int64")
             }
         }
         return lines.joined(separator: "\n") + "\n"
@@ -104,7 +107,7 @@ struct SwiftTranslator {
                 let slot = fresh("t")
                 emit(indent, "let \(base) = \(genExpr(baseExpr, scope: scope))")
                 emit(indent, "let \(slot) = try __m.indexTarget(\(base), \(genExpr(indexExpr, scope: scope)), line: \(indexLine))")
-                emit(indent, "\(slot).set(\(genExpr(valueExpr, scope: scope)))")
+                emit(indent, "try \(slot).set(\(genExpr(valueExpr, scope: scope)))")
             default:
                 break
             }
@@ -207,13 +210,16 @@ struct SwiftTranslator {
             return "try __m.readField(\(genExpr(base, scope: scope)), \(swiftText(name)), line: \(line))"
         case .index(let base, let index, let line):
             return "try __m.readIndex(\(genExpr(base, scope: scope)), \(genExpr(index, scope: scope)), line: \(line))"
-        case .floor(let asm, _):
-            // A floor block becomes a call to its assembly function;
-            // the number it gives back is what the instructions
-            // leave in rax.
+        case .floor(let asm, let args, let line):
+            // A floor block becomes a call to its assembly function,
+            // through the runtime's desk: the handed values are
+            // worked out here, checked and laid out there, and the
+            // block gives back its number — or a list, when it
+            // wrote extra answers into the results area.
             let index = floorBlocks.count
             floorBlocks.append(asm)
-            return "Value.number(Double(__floor\(index)()))"
+            let values = args.map { genExpr($0, scope: scope) }.joined(separator: ", ")
+            return "try __m.runFloor(args: [\(values)], line: \(line)) { __floor\(index)($0, $1, $2, $3, $4, $5) }"
         case .negate(let inner, let line):
             return "try __m.negate(\(genExpr(inner, scope: scope)), line: \(line))"
         case .binary(let left, let op, let right, let line):
@@ -402,24 +408,37 @@ func compileMain(arguments: [String]) -> Int32 {
     }
     defer { try? FileManager.default.removeItem(at: scratch) }
 
-    // Floor blocks (Stone 7): wrap each block's raw instructions as
-    // an assembly function — its name above it, a 'ret' after it, so
-    // the value in rax when the instructions finish is what the
-    // block gives back — then assemble the file and link the object
-    // into the program. The assembly is kept beside the program,
-    // like the generated Swift, for anyone who wants to read it.
+    // Floor blocks (Stones 7 and 9): wrap each block's raw
+    // instructions as an assembly function. The wrapper lays out
+    // the desk before the block's own instructions — the handed
+    // numbers in r10 (how many in r11), the one block of bytes in
+    // rbx (how many in r12), the results area in r13, and r14 set
+    // to zero for the block to say how many extra answers it
+    // wrote there — and afterwards writes r14 where the runtime
+    // reads it, restores the registers a called function must
+    // preserve, and returns, so the value in rax when the
+    // instructions finish is the block's headline number. The
+    // assembly is kept beside the program, like the generated
+    // Swift, for anyone who wants to read it.
     var floorObjectPath: String? = nil
     var generatedAsmPath: String? = nil
     if !translator.floorBlocks.isEmpty {
-        var asm = "// The floor blocks of \(URL(fileURLWithPath: inputPath).lastPathComponent), wrapped by niflac (Nifla Stone 7).\n"
-        asm += "// Each block's instructions stand between its name and a 'ret';\n"
-        asm += "// what is in rax at the 'ret' is the number the block gives back.\n"
+        var asm = "// The floor blocks of \(URL(fileURLWithPath: inputPath).lastPathComponent), wrapped by niflac (Nifla Stones 7 and 9).\n"
+        asm += "// Each block's instructions stand between a desk-laying-out\n"
+        asm += "// prologue and a tidying-up epilogue; what is in rax when the\n"
+        asm += "// instructions finish is the number the block gives back.\n"
         asm += "// Floor code is written in Intel syntax — 'mov rax, 1' — the\n"
         asm += "// way processor instructions are most often written and read.\n"
         asm += "    .intel_syntax noprefix\n"
         for (index, block) in translator.floorBlocks.enumerated() {
             asm += "\n    .text\n    .globl nifla_floor_\(index)\n    .type nifla_floor_\(index), @function\nnifla_floor_\(index):\n"
+            asm += "    push rbx\n    push r12\n    push r13\n    push r14\n    push r15\n"
+            asm += "    mov r10, rdi\n    mov r11, rsi\n    mov rbx, rdx\n    mov r12, rcx\n    mov r13, r8\n    mov r15, r9\n    xor r14d, r14d\n"
             asm += block + "\n"
+            asm += "__nifla_floor_\(index)_done:\n"
+            asm += "    cmp r14, 8\n    jle __nifla_floor_\(index)_counted\n    mov r14, 8\n__nifla_floor_\(index)_counted:\n"
+            asm += "    mov [r15], r14\n"
+            asm += "    pop r15\n    pop r14\n    pop r13\n    pop r12\n    pop rbx\n"
             asm += "    ret\n"
         }
         let asmPath = outputPath + ".s"

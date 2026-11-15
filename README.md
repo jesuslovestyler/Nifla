@@ -365,6 +365,97 @@ Honest limits of Stone 6:
 Still not built yet, on purpose: the Floor, and Nifla written in
 Nifla. Those are the next rings, in the settled order.
 
+## Stone 7 — the Floor (first form)
+
+Laid on **November 14, 2026**, later the same evening. The third
+face of Nifla arrives: a marked block that talks to the processor
+directly, in the processor's own instructions.
+
+```nifla
+let quotient = floor {
+    mov rax, 100
+    mov rcx, 7
+    xor rdx, rdx
+    div rcx
+}
+say quotient        // 14
+```
+
+A floor block is written `floor {` on its own line, then the raw
+instructions — x86-64, in Intel syntax — one per line, exactly as
+written, until a line holding only `}`. The lexer takes those
+lines whole; they are never read as Nifla. A floor block is an
+expression: it **gives back a number** — whatever its instructions
+leave in the processor's return register, `rax`, when they finish.
+It can stand anywhere a value can, or on its own line, run for
+what it does.
+
+The contract, plainly: the instructions must leave the stack as
+they found it and preserve the registers a called function is
+expected to preserve (`rbx`, `rbp`, `r12`–`r15`); `niflac` adds
+the `ret` itself, so a block doesn't write one; and labels inside
+a block should be local numeric ones (`1:`, jumped to with `1b` /
+`1f`), because every block in a program is assembled into one
+file.
+
+**Only compiled programs run floor code.** The interpreter
+refuses a program that holds any floor block — before anything
+runs, even a block on a path the run wouldn't take — in plain
+words: floor code runs only when compiled. The **checker** treats
+a block as opaque (the instructions are the processor's
+business), but it verifies the block is well-formed: an empty
+block is refused before the run, a block that is never closed is
+refused while the program is being read, and the checker knows a
+block gives back a number, so `floor { ... } + true` is refused
+like any other bad adding.
+
+When `niflac` compiles a program with floor blocks, it wraps
+each block as a small assembly function, assembles them with the
+machine's C toolchain, and links them into the program. The
+assembly is kept beside the program (as `name.s`), next to the
+generated Swift, for anyone who wants to read it.
+
+The proofs, in `floor-examples/` and Part 4 of `run-compiled.sh`:
+`floorwrite` writes "Floor!" to the screen through a raw system
+call — something the high-level language cannot do — and reports
+the 7 bytes written, between ordinary `say` lines; `floordiv`
+uses the processor's `div` instruction and hands back both its
+quotient (14) and, from a second block, its remainder (2) — an
+answer Nifla's own arithmetic never touches. Each is checked both
+ways: the interpreter refuses it with exactly the recorded words,
+and the compiled program runs it and prints exactly the recorded
+output.
+
+```sh
+./run_tests.sh      # the interpreter: 33 passed, 0 failed
+./run-compiled.sh   # the compiler, checker, and Floor: 58 passed, 0 failed
+```
+
+Honest limits of Stone 7, stated plainly:
+
+- This is the Floor's **first form, on this machine**: Linux on
+  x86-64. The instructions are this processor's; another
+  processor (like the ARM boards Cardnull plans) will need its
+  own floor dialect when its time comes.
+- It is the **seed of kernel work, not a kernel**. A floor block
+  runs inside an ordinary program, with the operating system
+  still underneath it. Talking to hardware with nothing beneath
+  is the Cardnull OS road, not this stone.
+- A floor block **can't be handed Nifla values yet**: it starts
+  from the processor's registers alone, and it gives back exactly
+  one number. Whole numbers are exact up to 2⁵³, the way all
+  Nifla numbers work.
+- Floor code is raw access, with raw consequences: an instruction
+  that faults — dividing by zero, touching memory it shouldn't —
+  takes the whole compiled program down with it, and no
+  plain-words error can catch it. The checker can't see inside a
+  block, and the assembler is the only judge of the instructions.
+  That danger is what the marking is for: the Floor is fenced and
+  labeled, never mixed silently into ordinary code.
+
+Still not built yet, on purpose: Nifla written in Nifla. That is
+the next — and last — ring of this road.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

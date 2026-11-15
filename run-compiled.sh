@@ -20,6 +20,12 @@
 # alone into an empty folder and run there, with no interpreter
 # and no other files, to prove it stands alone.
 #
+# Part 4 — the Floor (Stone 7): every program in floor-examples/
+# holds floor code, which the two tools treat differently on
+# purpose. The interpreter must refuse it with exactly the
+# .error text; niflac must compile it, and the compiled program
+# must print exactly the .expected text.
+#
 # Prints PASS or FAIL for each check, and a summary at the end.
 
 set -u
@@ -162,6 +168,46 @@ if $CTIMEOUT ./niflac examples/tyler.nifla -o "$WORK/tyler-compiled" >/dev/null 
 else
     note_fail "standalone (could not set up the lone program)"
 fi
+
+echo "# Part 4 — the Floor (Stone 7): refused by the interpreter, run by the compiled program"
+# A floor example behaves differently in the two tools ON PURPOSE,
+# so it can't live in examples/: the interpreter must refuse it
+# with exactly the .error text, and the compiled program must run
+# it and print exactly the .expected text.
+for program in floor-examples/*.nifla; do
+    name=$(basename "$program" .nifla)
+    out=$(mktemp)
+    err=$(mktemp)
+    # The interpreter refuses it, before anything runs.
+    if $TIMEOUT ./nifla "$program" >"$out" 2>"$err"; then status=0; else status=$?; fi
+    if [ "$status" -ne 0 ] && [ ! -s "$out" ] && diff -q "floor-examples/$name.error" "$err" >/dev/null; then
+        note_pass "$name (floor, nifla refuses)"
+    else
+        note_fail "$name (floor, nifla should have refused with this error:)"
+        cat "floor-examples/$name.error"
+        echo "--- actual (exit $status) ---"
+        cat "$out" "$err"
+    fi
+    # The compiler builds it, and the program runs the floor code.
+    bin="$WORK/floor-$name"
+    if $CTIMEOUT ./niflac "$program" -o "$bin" >"$out" 2>"$err"; then status=0; else status=$?; fi
+    if [ "$status" -eq 0 ] && [ -x "$bin" ]; then
+        if $TIMEOUT "$bin" >"$out" 2>"$err"; then status=0; else status=$?; fi
+        if [ "$status" -eq 0 ] && [ ! -s "$err" ] && diff -q "floor-examples/$name.expected" "$out" >/dev/null; then
+            note_pass "$name (floor, compiled program runs it)"
+        else
+            note_fail "$name (floor, compiled program's output differed; exit $status)"
+            echo "--- expected ---"
+            cat "floor-examples/$name.expected"
+            echo "--- actual ---"
+            cat "$out" "$err"
+        fi
+    else
+        note_fail "$name (floor, niflac should have compiled it; exit $status)"
+        cat "$out" "$err"
+    fi
+    rm -f "$out" "$err"
+done
 
 echo "---"
 echo "$pass passed, $fail failed"

@@ -1,0 +1,23 @@
+// The Floor (Stone 7): the processor's own divide instruction.
+// 'div' divides the number in rdx:rax by the number it is given,
+// leaving the quotient in rax and the remainder in rdx — two
+// answers at once, which a floor block can hand back one at a
+// time: the first block gives back rax (the quotient of 100 / 7),
+// and the second moves rdx into rax first, so it gives back the
+// remainder. Ordinary Nifla arithmetic never touches the
+// remainder; the Floor can reach it.
+let quotient = floor {
+    mov rax, 100
+    mov rcx, 7
+    xor rdx, rdx
+    div rcx
+}
+say quotient
+let remainder = floor {
+    mov rax, 100
+    mov rcx, 7
+    xor rdx, rdx
+    div rcx
+    mov rax, rdx
+}
+say remainder

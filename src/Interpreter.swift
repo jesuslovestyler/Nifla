@@ -218,6 +218,85 @@ func builtinCountMessage(name: String, def: BuiltinDef, given: Int) -> String {
     return "The tool '\(name)' takes \(takes), but it was given \(given). Call it like: \(def.example)."
 }
 
+// The interpreter's refusal of floor code (Stone 7), in one place
+// so the entry point's scan and the block itself say the same words.
+let floorRefusalMessage = "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes."
+
+// Finds the first floor block in a program, wherever it is nested —
+// inside a branch, a loop, or a function — and gives back its line.
+// The interpreter refuses a program that holds floor code before
+// anything runs, even floor code on a path the run wouldn't take:
+// the interpreter can't run it at all.
+func firstFloorLine(in statements: [Stmt]) -> Int? {
+    for statement in statements {
+        switch statement {
+        case .declare(_, let value, _), .assign(_, let value, _):
+            if let line = firstFloorLine(in: value) { return line }
+        case .say(let value, _), .give(let value, _):
+            if let line = firstFloorLine(in: value) { return line }
+        case .assignTarget(let target, let value, _):
+            if let line = firstFloorLine(in: target) { return line }
+            if let line = firstFloorLine(in: value) { return line }
+        case .ifElse(let condition, let then, let otherwise, _):
+            if let line = firstFloorLine(in: condition) { return line }
+            if let line = firstFloorLine(in: then) { return line }
+            if let otherwise, let line = firstFloorLine(in: otherwise) { return line }
+        case .whileLoop(let condition, let body, _):
+            if let line = firstFloorLine(in: condition) { return line }
+            if let line = firstFloorLine(in: body) { return line }
+        case .repeatLoop(let count, let body, _):
+            if let line = firstFloorLine(in: count) { return line }
+            if let line = firstFloorLine(in: body) { return line }
+        case .forEach(_, let over, let body, _):
+            if let line = firstFloorLine(in: over) { return line }
+            if let line = firstFloorLine(in: body) { return line }
+        case .define(_, _, let body, _):
+            if let line = firstFloorLine(in: body) { return line }
+        case .doCall(_, let args, _):
+            for arg in args {
+                if let line = firstFloorLine(in: arg) { return line }
+            }
+        case .doExpr(let expr, _):
+            if let line = firstFloorLine(in: expr) { return line }
+        }
+    }
+    return nil
+}
+
+func firstFloorLine(in expr: Expr) -> Int? {
+    switch expr {
+    case .floor(_, let line):
+        return line
+    case .call(_, let args, _):
+        for arg in args {
+            if let line = firstFloorLine(in: arg) { return line }
+        }
+        return nil
+    case .object(let fields, _):
+        for field in fields {
+            if let line = firstFloorLine(in: field.value) { return line }
+        }
+        return nil
+    case .list(let items, _):
+        for item in items {
+            if let line = firstFloorLine(in: item) { return line }
+        }
+        return nil
+    case .field(let base, _, _):
+        return firstFloorLine(in: base)
+    case .negate(let inner, _):
+        return firstFloorLine(in: inner)
+    case .index(let base, let index, _):
+        if let line = firstFloorLine(in: base) { return line }
+        return firstFloorLine(in: index)
+    case .binary(let left, _, let right, _):
+        if let line = firstFloorLine(in: left) { return line }
+        return firstFloorLine(in: right)
+    case .number, .text, .boolean, .variable:
+        return nil
+    }
+}
+
 final class Interpreter {
     // The runaway guard (Stone 2): a kindness limit on the total number
     // of loop passes in one run, across every loop in the program. A
@@ -378,6 +457,11 @@ final class Interpreter {
             // A call on its own line: run it for what it does. Any
             // value it gives back is simply not used.
             _ = try callFunction(name: name, argExprs: args, line: line, in: scope)
+
+        case .doExpr(let expr, _):
+            // An expression run for what it does — a floor block
+            // standing on its own (Stone 7). Its value goes unused.
+            _ = try evaluate(expr, in: scope)
         }
     }
 
@@ -704,6 +788,13 @@ final class Interpreter {
             let base = try evaluate(baseExpr, in: scope)
             let indexValue = try evaluate(indexExpr, in: scope)
             return try readIndex(base, indexValue, line: line)
+
+        case .floor(_, let line):
+            // Floor code is raw processor instructions; only a
+            // compiled program can run it. (The entry point refuses
+            // a program holding floor code before anything runs;
+            // this is the same refusal, at the block itself.)
+            throw NiflaError(line: line, message: floorRefusalMessage)
 
         case .field(let baseExpr, let name, let line):
             let base = try evaluate(baseExpr, in: scope)

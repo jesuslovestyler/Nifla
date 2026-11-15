@@ -245,6 +245,15 @@ final class Machine {
     // the program's own name — what arguments() gives (Stone 6).
     let programArguments: [String] = Array(CommandLine.arguments.dropFirst())
 
+    // What 'say' does in a compiled program: the value's spoken
+    // form and a new line, written straight to standard output —
+    // not buffered — so that in a program with floor blocks
+    // (Stone 7), whose raw writes are never buffered, everything
+    // the program says comes out in the order it was said.
+    func say(_ value: Value) {
+        FileHandle.standardOutput.write(Data((value.spoken + "\n").utf8))
+    }
+
     func tickLoop(line: Int) throws {
         loopPasses += 1
         if loopPasses > loopPassLimit {

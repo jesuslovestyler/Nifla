@@ -25,6 +25,13 @@ struct SwiftTranslator {
     private var lines: [String] = []
     private var counter = 0
 
+    // The floor blocks (Stone 7) this program holds, in the order
+    // the translation meets them. Each becomes a small assembly
+    // function, nifla_floor_0, nifla_floor_1, ..., assembled and
+    // linked into the compiled program; the generated Swift calls
+    // them by those names.
+    private(set) var floorBlocks: [String] = []
+
     private mutating func fresh(_ prefix: String) -> String {
         counter += 1
         return "__\(prefix)\(counter)"
@@ -43,6 +50,17 @@ struct SwiftTranslator {
         lines.append("    FileHandle.standardError.write(Data((error.spoken + \"\\n\").utf8))")
         lines.append("    exit(1)")
         lines.append("}")
+        if !floorBlocks.isEmpty {
+            lines.append("")
+            lines.append("// The floor blocks (Stone 7): raw processor instructions,")
+            lines.append("// assembled separately and linked into this program.")
+            lines.append("// Each one gives back the number its instructions leave")
+            lines.append("// in the processor's return register (rax).")
+            for index in floorBlocks.indices {
+                lines.append("@_silgen_name(\"nifla_floor_\(index)\")")
+                lines.append("func __floor\(index)() -> Int64")
+            }
+        }
         return lines.joined(separator: "\n") + "\n"
     }
 
@@ -92,7 +110,7 @@ struct SwiftTranslator {
             }
 
         case .say(let valueExpr, _):
-            emit(indent, "print(\(genExpr(valueExpr, scope: scope)).spoken)")
+            emit(indent, "__m.say(\(genExpr(valueExpr, scope: scope)))")
 
         case .ifElse(let condition, let thenBlock, let elseBlock, let line):
             emit(indent, "if try __m.decide(\(genExpr(condition, scope: scope)), kind: \"if\", line: \(line)) {")
@@ -153,6 +171,9 @@ struct SwiftTranslator {
 
         case .doCall(let name, let args, let line):
             emit(indent, "try __m.callStatement(\(swiftText(name)), args: [\(argClosures(args, scope: scope))], line: \(line))")
+
+        case .doExpr(let expr, _):
+            emit(indent, "_ = \(genExpr(expr, scope: scope))")
         }
     }
 
@@ -160,11 +181,11 @@ struct SwiftTranslator {
     // so the machine can look the function up before working any of
     // them out — the interpreter's order, and so the same error
     // comes first.
-    private func argClosures(_ args: [Expr], scope: String) -> String {
+    private mutating func argClosures(_ args: [Expr], scope: String) -> String {
         args.map { "{ \(genExpr($0, scope: scope)) }" }.joined(separator: ", ")
     }
 
-    private func genExpr(_ expr: Expr, scope: String) -> String {
+    private mutating func genExpr(_ expr: Expr, scope: String) -> String {
         switch expr {
         case .number(let value, _):
             return "Value.number(\(swiftNumber(value)))"
@@ -186,6 +207,13 @@ struct SwiftTranslator {
             return "try __m.readField(\(genExpr(base, scope: scope)), \(swiftText(name)), line: \(line))"
         case .index(let base, let index, let line):
             return "try __m.readIndex(\(genExpr(base, scope: scope)), \(genExpr(index, scope: scope)), line: \(line))"
+        case .floor(let asm, _):
+            // A floor block becomes a call to its assembly function;
+            // the number it gives back is what the instructions
+            // leave in rax.
+            let index = floorBlocks.count
+            floorBlocks.append(asm)
+            return "Value.number(Double(__floor\(index)()))"
         case .negate(let inner, let line):
             return "try __m.negate(\(genExpr(inner, scope: scope)), line: \(line))"
         case .binary(let left, let op, let right, let line):
@@ -374,9 +402,66 @@ func compileMain(arguments: [String]) -> Int32 {
     }
     defer { try? FileManager.default.removeItem(at: scratch) }
 
+    // Floor blocks (Stone 7): wrap each block's raw instructions as
+    // an assembly function — its name above it, a 'ret' after it, so
+    // the value in rax when the instructions finish is what the
+    // block gives back — then assemble the file and link the object
+    // into the program. The assembly is kept beside the program,
+    // like the generated Swift, for anyone who wants to read it.
+    var floorObjectPath: String? = nil
+    var generatedAsmPath: String? = nil
+    if !translator.floorBlocks.isEmpty {
+        var asm = "// The floor blocks of \(URL(fileURLWithPath: inputPath).lastPathComponent), wrapped by niflac (Nifla Stone 7).\n"
+        asm += "// Each block's instructions stand between its name and a 'ret';\n"
+        asm += "// what is in rax at the 'ret' is the number the block gives back.\n"
+        asm += "// Floor code is written in Intel syntax — 'mov rax, 1' — the\n"
+        asm += "// way processor instructions are most often written and read.\n"
+        asm += "    .intel_syntax noprefix\n"
+        for (index, block) in translator.floorBlocks.enumerated() {
+            asm += "\n    .text\n    .globl nifla_floor_\(index)\n    .type nifla_floor_\(index), @function\nnifla_floor_\(index):\n"
+            asm += block + "\n"
+            asm += "    ret\n"
+        }
+        let asmPath = outputPath + ".s"
+        do {
+            try asm.write(toFile: asmPath, atomically: true, encoding: .utf8)
+        } catch {
+            return fail("I couldn't write the floor assembly to '\(asmPath)'.", code: 2)
+        }
+        generatedAsmPath = asmPath
+
+        guard let cc = findAssembler() else {
+            return fail("This program has floor blocks, and I couldn't find an assembler (cc) to build them with. Install a C compiler toolchain and try again.", code: 2)
+        }
+        let scratchAsm = scratch.appendingPathComponent("floor.s").path
+        let objectPath = scratch.appendingPathComponent("floor.o").path
+        do {
+            try asm.write(toFile: scratchAsm, atomically: true, encoding: .utf8)
+        } catch {
+            return fail("I couldn't set up a scratch folder to build in.", code: 2)
+        }
+        let assembler = Process()
+        assembler.executableURL = URL(fileURLWithPath: cc)
+        assembler.arguments = ["-c", scratchAsm, "-o", objectPath]
+        let assemblerErrors = Pipe()
+        assembler.standardError = assemblerErrors
+        assembler.standardOutput = Pipe()
+        do {
+            try assembler.run()
+        } catch {
+            return fail("I couldn't start the assembler at '\(cc)'.", code: 2)
+        }
+        assembler.waitUntilExit()
+        if assembler.terminationStatus != 0 {
+            let assemblerWords = String(data: assemblerErrors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return fail("The floor blocks in '\(inputPath)' couldn't be assembled. The instructions inside a floor block are the processor's own, and the assembler is the judge of them. What it said:\n\(assemblerWords)", code: 1)
+        }
+        floorObjectPath = objectPath
+    }
+
     let process = Process()
     process.executableURL = URL(fileURLWithPath: swiftc)
-    process.arguments = [scratchMain, runtimePath, "-o", outputPath]
+    process.arguments = [scratchMain, runtimePath] + (floorObjectPath.map { [$0] } ?? []) + ["-o", outputPath]
     let errorPipe = Pipe()
     process.standardError = errorPipe
     process.standardOutput = Pipe()
@@ -394,5 +479,26 @@ func compileMain(arguments: [String]) -> Int32 {
 
     print("Made \(outputPath) — a standalone program, compiled from \(inputPath).")
     print("The Swift it was made from is kept at \(generatedPath), if you'd like to read it.")
+    if let generatedAsmPath {
+        print("The floor assembly it was made from is kept at \(generatedAsmPath).")
+    }
     return 0
+}
+
+// Finds the assembler for floor blocks: a C compiler driver (cc)
+// on the PATH, which every Swift toolchain machine here has.
+func findAssembler() -> String? {
+    let environment = ProcessInfo.processInfo.environment
+    if let override = environment["CC"], !override.isEmpty {
+        return override
+    }
+    if let path = environment["PATH"] {
+        for directory in path.split(separator: ":") {
+            let candidate = String(directory) + "/cc"
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+    }
+    return nil
 }

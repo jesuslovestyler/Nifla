@@ -1,0 +1,1 @@
+Line 9: This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.

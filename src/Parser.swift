@@ -14,6 +14,7 @@
 //              | "make" name "(" [ name ( "," name )* ] ")" block
 //              | "give" expression
 //              | name "(" [ expression ( "," expression )* ] ")"
+//              | floor-block
 //   block      = "{" statement* "}"
 //   expression = comparison ( ("==" | "!=") comparison )*
 //   comparison = sum ( ("<" | "<=" | ">" | ">=") sum )*
@@ -26,6 +27,10 @@
 //              | "(" expression ")"
 //              | "{" [ name ":" expression ( "," name ":" expression )* ] "}"
 //              | "[" [ expression ( "," expression )* ] "]"
+//              | floor-block
+//   floor-block = "floor" "{" — then raw lines of processor
+//              instructions, taken whole by the lexer, until a line
+//              holding only "}" (Stone 7)
 
 indirect enum Expr {
     case number(Double, line: Int)
@@ -37,6 +42,7 @@ indirect enum Expr {
     case list(items: [Expr], line: Int)
     case field(base: Expr, name: String, line: Int)
     case index(base: Expr, index: Expr, line: Int)
+    case floor(asm: String, line: Int)
     case negate(Expr, line: Int)
     case binary(Expr, String, Expr, line: Int)  // line of the operator
 }
@@ -53,6 +59,7 @@ enum Stmt {
     case define(name: String, params: [String], body: [Stmt], line: Int)
     case give(Expr, line: Int)
     case doCall(name: String, args: [Expr], line: Int)
+    case doExpr(Expr, line: Int)  // an expression run for what it does (a floor block, Stone 7)
 }
 
 final class Parser {
@@ -102,6 +109,13 @@ final class Parser {
 
     private func parseStatement() throws -> Stmt {
         let token = current
+
+        // A floor block standing on its own: run it for what it
+        // does, and let the value it gives back go.
+        if case .floor(let asm) = token.kind {
+            advance()
+            return .doExpr(.floor(asm: asm, line: token.line), line: token.line)
+        }
 
         if checkKeyword("let") {
             advance()
@@ -496,8 +510,11 @@ final class Parser {
             return try parseObjectLiteral(openToken: token)
         case .symbol("["):
             return try parseListLiteral(openToken: token)
+        case .floor(let asm):
+            advance()
+            return .floor(asm: asm, line: token.line)
         default:
-            throw NiflaError(line: token.line, message: "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, or a list like [1, 2, 3] here, but I found \(token.spoken).")
+            throw NiflaError(line: token.line, message: "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, a list like [1, 2, 3], or a floor block here, but I found \(token.spoken).")
         }
     }
 }

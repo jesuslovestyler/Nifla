@@ -290,6 +290,9 @@ final class Checker {
 
         case .doCall(let name, let args, let line):
             try checkCall(name: name, args: args, line: line, env: &env, outerNames: outerNames)
+
+        case .doExpr(let expr, _):
+            _ = try checkExpr(expr, env: &env, outerNames: outerNames)
         }
     }
 
@@ -398,6 +401,9 @@ final class Checker {
 
         case .doCall(let name, let args, let line):
             try checkCallForgiving(name: name, args: args, line: line, env: &env, outerNames: outerNames)
+
+        case .doExpr(let expr, _):
+            _ = try checkExprForgiving(expr, env: &env, outerNames: outerNames)
         }
     }
 
@@ -530,6 +536,9 @@ final class Checker {
             // taken from a list could be anything.
             return baseKind == .text ? .text : .unknown
 
+        case .floor(let asm, let line):
+            return try checkFloor(asm: asm, line: line)
+
         case .negate(let inner, _):
             let kind = try checkExpr(inner, env: &env, outerNames: outerNames)
             return kind == .number ? .number : .unknown
@@ -587,6 +596,9 @@ final class Checker {
             _ = try checkExprForgiving(index, env: &env, outerNames: outerNames)
             return baseKind == .text ? .text : .unknown
 
+        case .floor(let asm, let line):
+            return try checkFloor(asm: asm, line: line)
+
         case .negate(let inner, _):
             let kind = try checkExprForgiving(inner, env: &env, outerNames: outerNames)
             return kind == .number ? .number : .unknown
@@ -599,6 +611,19 @@ final class Checker {
         default:
             return try checkExpr(expr, env: &env, outerNames: outerNames)
         }
+    }
+
+    // A floor block (Stone 7): the checker treats it as opaque —
+    // the instructions inside are the processor's business, not
+    // Nifla's — but it does verify the block is well-formed, which
+    // here means it isn't empty. A floor block gives back a number
+    // (what the processor leaves in its return register), so its
+    // kind is known.
+    private func checkFloor(asm: String, line: Int) throws -> StaticKind {
+        if asm.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw NiflaError(line: line, message: "This floor block is empty — it needs the processor instructions it is meant to run, between the 'floor {' line and the line holding only '}'.")
+        }
+        return .number
     }
 
     // The kind rules of the operators, mirroring the interpreter's

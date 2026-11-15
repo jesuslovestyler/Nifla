@@ -1,0 +1,7 @@
+// A checker example: a floor block with nothing in it. The
+// checker treats floor blocks as opaque — the instructions are
+// the processor's business — but it does verify the block is
+// well-formed, and an empty one isn't.
+let answer = floor {
+}
+say answer

@@ -20,8 +20,9 @@ struct Token {
         case number(Double)
         case text(String)
         case name(String)
-        case keyword(String)  // let, say, if, else, while, repeat, for, in, make, give, true, false
+        case keyword(String)  // let, say, if, else, while, repeat, for, in, make, give, true, false, floor
         case symbol(String)   // +  -  *  /  (  )  {  }  [  ]  ,  .  :  =  ==  !=  <  <=  >  >=
+        case floor(String)    // a floor block's raw processor instructions (Stone 7)
         case end
     }
     let kind: Kind
@@ -35,6 +36,7 @@ struct Token {
         case .name(let value): return "the name '\(value)'"
         case .keyword(let value): return "'\(value)'"
         case .symbol(let value): return "'\(value)'"
+        case .floor: return "a 'floor' block"
         case .end: return "the end of the program"
         }
     }
@@ -54,7 +56,7 @@ final class Lexer {
     private var pos = 0
     private var line = 1
 
-    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false"]
+    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor"]
 
     init(_ source: String) {
         chars = Array(source)
@@ -109,7 +111,7 @@ final class Lexer {
             return try lexText(startLine)
         }
         if c.isLetter || c == "_" {
-            return lexWord(startLine)
+            return try lexWord(startLine)
         }
 
         // Two-character symbols first, so "=" and "==" stay distinct.
@@ -182,11 +184,48 @@ final class Lexer {
         throw NiflaError(line: startLine, message: "This text never ends. Add a closing \" to finish it.")
     }
 
-    private func lexWord(_ startLine: Int) -> Token {
+    private func lexWord(_ startLine: Int) throws -> Token {
         var word = ""
         while let c = peek(), c.isLetter || c.isNumber || c == "_" {
             word.append(c)
             pos += 1
+        }
+        if word == "floor" {
+            // A floor block (Stone 7): 'floor' followed on the same
+            // line by '{' opens a stretch of raw lines — processor
+            // instructions, taken exactly as written — that runs
+            // until a line holding only '}'. Those lines are never
+            // lexed as Nifla; they are captured whole.
+            let savedPos = pos
+            while let c = peek(), c == " " || c == "\t" { pos += 1 }
+            if peek() == "{" {
+                pos += 1  // the '{'
+                // Nothing else belongs on the opening line.
+                while let c = peek(), c == " " || c == "\t" { pos += 1 }
+                if peek() == "/", peekNext() == "/" {
+                    while let c = peek(), c != "\n" { pos += 1 }
+                }
+                guard peek() == "\n" || atEnd else {
+                    throw NiflaError(line: startLine, message: "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
+                }
+                if peek() == "\n" { pos += 1; line += 1 }
+                var asmLines: [String] = []
+                while true {
+                    guard !atEnd else {
+                        throw NiflaError(line: startLine, message: "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
+                    }
+                    var text = ""
+                    while let c = peek(), c != "\n" {
+                        text.append(c)
+                        pos += 1
+                    }
+                    if peek() == "\n" { pos += 1; line += 1 }
+                    if text.trimmingCharacters(in: .whitespaces) == "}" { break }
+                    asmLines.append(text)
+                }
+                return Token(kind: .floor(asmLines.joined(separator: "\n")), line: startLine)
+            }
+            pos = savedPos
         }
         if Lexer.keywords.contains(word) {
             return Token(kind: .keyword(word), line: startLine)

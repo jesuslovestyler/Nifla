@@ -1,0 +1,27 @@
+// The Floor (Stone 7): a block of raw processor instructions
+// inside a Nifla program. This one writes "Floor!" straight to
+// the screen through a system call — the processor asking the
+// system to write bytes — something the high-level language
+// cannot do. It runs only in a compiled program; the
+// interpreter refuses it (see floorwrite.error).
+//
+// The instructions are x86-64, in Intel syntax. The eight bytes
+// of "Floor!\n" are loaded as one number (last character in the
+// highest byte), pushed onto the stack, and the write system
+// call (number 1) is handed the screen (1), the stack top, and
+// the byte count (7). What a floor block gives back is the
+// number left in the processor's return register, rax — here,
+// how many bytes the write wrote.
+say "Before the floor."
+let wrote = floor {
+    mov rax, 0x0a21726f6f6c46
+    push rax
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, rsp
+    mov rdx, 7
+    syscall
+    pop rcx
+}
+say "The floor wrote " + wrote + " bytes."
+say "After the floor."

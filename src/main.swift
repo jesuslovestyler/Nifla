@@ -45,6 +45,12 @@ do {
     let tokens = try Lexer(source).tokenize()
     let program = try Parser(tokens).parseProgram()
     try Checker(program: program).check(program)
+    // Floor code (Stone 7) runs only in a compiled program; the
+    // interpreter refuses a program that holds any, before
+    // anything runs.
+    if let floorLine = firstFloorLine(in: program) {
+        throw NiflaError(line: floorLine, message: floorRefusalMessage)
+    }
     let interpreter = Interpreter()
     // The program's own arguments (Stone 6): the words after the
     // program's file name, which arguments() hands to the program.

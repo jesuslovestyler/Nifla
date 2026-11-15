@@ -226,6 +226,8 @@ struct SwiftTranslator {
             return "Value.text(\(swiftText(value)))"
         case .boolean(let value, _):
             return "Value.boolean(\(value))"
+        case .nothing:
+            return "Value.nothing"
         case .variable(let name, let line):
             return "try __m.lookup(\(swiftText(name)), in: \(scope), line: \(line))"
         case .call(let name, let args, let line):

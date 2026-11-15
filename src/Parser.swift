@@ -23,7 +23,7 @@
 //   term       = factor ( ("*" | "/") factor )*
 //   factor     = "-" factor | postfix
 //   postfix    = atom ( "." name | "[" expression "]" )*
-//   atom       = number | text | "true" | "false" | name
+//   atom       = number | text | "true" | "false" | "nothing" | name
 //              | name "(" [ expression ( "," expression )* ] ")"
 //              | "(" expression ")"
 //              | "{" [ name ":" expression ( "," name ":" expression )* ] "}"
@@ -38,6 +38,9 @@ indirect enum Expr {
     case number(Double, line: Int)
     case text(String, line: Int)
     case boolean(Bool, line: Int)
+    // Stone 19: the empty value, written 'nothing' — the value a
+    // 'maybe' variable holds when it holds nothing.
+    case nothing(line: Int)
     case variable(String, line: Int)
     case call(name: String, args: [Expr], line: Int)
     case object(fields: [(name: String, value: Expr)], line: Int)
@@ -110,8 +113,31 @@ final class Parser {
 
     // Reads one kind word where an annotation stands. The word
     // arrives as a name token; anything else — or a name that
-    // isn't a kind — is refused in plain words.
+    // isn't a kind — is refused in plain words. Stone 19: the
+    // word 'maybe' may stand before a kind — 'maybe number'
+    // marks a value that is a number or nothing.
     private func parseKindWord(after: String) throws -> String {
+        // Stone 19: 'nothing' is a word of the language now, so
+        // it arrives as a keyword token, not a name — it is a
+        // kind word all the same, in the plain position.
+        if case .keyword(let word) = current.kind, word == "nothing" {
+            advance()
+            return "nothing"
+        }
+        if case .name(let word) = current.kind, word == "maybe" {
+            advance()
+            if case .keyword(let innerWord) = current.kind, innerWord == "nothing" {
+                throw NiflaError(line: current.line, message: "'maybe nothing' says no more than 'nothing' itself — a value that may be nothing or nothing is just nothing. Write 'nothing' alone, or 'maybe' before a real kind, like: maybe number.")
+            }
+            guard case .name(let inner) = current.kind else {
+                throw NiflaError(line: current.line, message: "After 'maybe' I need a kind — one of: number, text, boolean, list, object, bytes. Instead I found \(current.spoken).")
+            }
+            guard Parser.kindWords.contains(inner) else {
+                throw NiflaError(line: current.line, message: "I don't know a kind called '\(inner)'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing — and 'maybe' can stand before any of them but 'nothing', like: maybe number.")
+            }
+            advance()
+            return "maybe " + inner
+        }
         guard case .name(let word) = current.kind else {
             throw NiflaError(line: current.line, message: "After the \(after) I need a kind — one of: number, text, boolean, list, object, bytes, nothing. Instead I found \(current.spoken).")
         }
@@ -584,6 +610,9 @@ final class Parser {
         case .keyword("false"):
             advance()
             return .boolean(false, line: token.line)
+        case .keyword("nothing"):
+            advance()
+            return .nothing(line: token.line)
         case .name(let name):
             advance()
             if checkSymbol("(") {

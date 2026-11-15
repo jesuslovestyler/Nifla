@@ -1,0 +1,9 @@
+// Stone 19: the empty value given back where the 'make'
+// line promised a number for sure.
+
+make lookup(name) -> number {
+    if name == "Tyler" {
+        give 29
+    }
+    give nothing
+}

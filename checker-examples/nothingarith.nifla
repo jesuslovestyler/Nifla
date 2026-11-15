@@ -1,0 +1,5 @@
+// Stone 19: the empty value itself, used in arithmetic —
+// proven on its face, refused before the run.
+
+let x = nothing
+say x + 1

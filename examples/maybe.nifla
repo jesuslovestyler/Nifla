@@ -1,0 +1,41 @@
+// Stone 19: checked absence. 'nothing' is the empty value;
+// a 'maybe' mark promises a value of a kind, or nothing.
+// The roads are handled by checking against nothing —
+// inside the road where the check held, the value is known.
+
+say nothing
+
+make lookup(name) -> maybe number {
+    if name == "Tyler" {
+        give 29
+    }
+}
+
+let a: maybe number = lookup("Tyler")
+let b: maybe number = lookup("Noki")
+
+if a == nothing {
+    say "a is missing"
+} else {
+    say a + 1
+}
+
+if b != nothing {
+    say b
+} else {
+    say "b is missing"
+}
+
+say lookup("Noki")
+
+let c: maybe number = nothing
+while c == nothing {
+    c = 7
+}
+say c * 2
+
+say "b holds: " + b
+say nothing == nothing
+say nothing == 5
+say [nothing, 1]
+say { gift: nothing }

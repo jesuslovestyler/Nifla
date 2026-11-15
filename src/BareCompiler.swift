@@ -299,6 +299,15 @@ final class BareValidator {
         case .boolean:
             return .boolean
 
+        case .nothing(let line):
+            // Stone 19: absence stands apart on bare metal,
+            // honestly and on purpose. A bare value is a machine
+            // word with one pinned shape; the empty value has no
+            // word to be, and there is no runtime there to hold
+            // the difference. 'maybe' marks are refused the same
+            // way, by the annotation reading above.
+            throw NiflaError(line: line, message: "Bare metal has no 'nothing' — every value there is a machine word with one shape, and the empty value has no word to be. Absence lives in hosted Nifla, in the 'maybe' kinds; on bare metal, hand the value itself, or leave the line out.")
+
         case .variable(let name, _):
             return lookup(name) ?? .unknown
 
@@ -787,6 +796,7 @@ struct BareTranslator {
         case .number: return .number
         case .text: return .text
         case .boolean: return .boolean
+        case .nothing: return .number  // refused by the validator; never emitted
         case .variable(let name, _):
             for scope in scopes.reversed() {
                 if let entry = scope[name] { return entry.kind }
@@ -1864,6 +1874,9 @@ struct BareTranslator {
 
         case .boolean(let flag, _):
             emit("    mov rax, \(flag ? 1 : 0)")
+
+        case .nothing:
+            emit("    ud2")  // refused by the validator; never emitted
 
         case .variable(let name, _):
             let entry = lookupVar(name)

@@ -20,7 +20,7 @@ struct Token {
         case number(Double)
         case text(String)
         case name(String)
-        case keyword(String)  // let, say, if, else, while, repeat, for, in, make, give, true, false, floor, attempt
+        case keyword(String)  // let, say, if, else, while, repeat, for, in, make, give, true, false, floor, attempt, nothing
         case symbol(String)   // +  -  *  /  (  )  {  }  [  ]  ,  .  :  =  ==  !=  <  <=  >  >=
         case floor(String)    // a floor block's raw processor instructions (Stone 7)
         case end
@@ -64,7 +64,7 @@ final class Lexer {
     // handed out before any new reading.
     private var pendingTokens: [Token] = []
 
-    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor", "attempt"]
+    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor", "attempt", "nothing"]
 
     init(_ source: String) {
         chars = Array(source)

@@ -1,0 +1,1 @@
+Line 12: This uses a number or nothing — a value that may be nothing — where a value that is surely there is needed, and nothing is the empty value: there is nothing there to use. Check the value first, like: if value == nothing { ... } else { ... } — in the 'else', the value is known to be there. I caught this before the program ran, so nothing ran.

@@ -1,0 +1,1 @@
+Line 5: I can't add nothing and a number. '+' adds two numbers, or joins text together. Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there. I caught this before the program ran, so nothing ran.

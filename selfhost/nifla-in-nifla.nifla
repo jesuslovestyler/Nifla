@@ -31,8 +31,10 @@
 //   { kind: "object", names: [field names], values: [field values] }
 //   { kind: "list", items: [the values] }
 //   { kind: "bytes", data: [the bytes, as host numbers] }
-//   { kind: "nothing" } — what a function that never 'give's
-//   hands back; only this interpreter ever sees it.
+//   { kind: "nothing" } — the empty value (Stone 19): what
+//   the word 'nothing' stands for, what a 'maybe' variable
+//   holds when it holds nothing, and what a function that
+//   never 'give's hands back inside this interpreter.
 //
 // Every lexer, parser, and interpreter function hands back a
 // result instead of failing — Nifla has no errors to throw:
@@ -51,6 +53,11 @@
 
 // The one "nothing" value, made once and shared.
 let NOTHING = { kind: "nothing" }
+
+// Stone 19: the words that follow an operation's refusal when
+// one side was the empty value — the same text the Swift
+// interpreter speaks (its nothingNote).
+let NOTHINGNOTE = " Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there."
 
 make errAt(line, message) {
     give { ok: false, message: "Line " + line + ": " + message, bare: message, line: line }
@@ -361,6 +368,9 @@ make renderValue(v, seen, quoted) {
         }
         give "bytes(" + join(parts, ", ") + ")"
     }
+    if v.kind == "nothing" {
+        give "nothing"
+    }
     give ""
 }
 
@@ -402,12 +412,29 @@ make described(v) {
         }
         give "a block of " + length(v.data) + " bytes"
     }
+    if v.kind == "nothing" {
+        give "nothing"
+    }
     give ""
+}
+
+// Stone 19: whether a kind word is a 'maybe' word —
+// 'maybe ' standing before a kind.
+make isMaybeKindWord(word) {
+    if length(word) > 6 {
+        give part(word, 0, 6) == "maybe "
+    }
+    give false
 }
 
 // Stone 18: how a kind word is spoken of in a guard's
 // message — the same phrases the Swift checker uses.
+// Stone 19: a 'maybe' word is spoken as the kind it names,
+// or nothing.
 make kindPhrase(word) {
+    if isMaybeKindWord(word) {
+        give kindPhrase(part(word, 6, length(word) - 6)) + " or nothing"
+    }
     if word == "number" {
         give "a number"
     }
@@ -432,9 +459,17 @@ make kindPhrase(word) {
 // Stone 18: whether a value satisfies an annotation. A
 // value's own kind answers to the same word (see the value
 // makers above); 'nothing' is satisfied only by no value.
+// Stone 19: a 'maybe' mark is satisfied by the kind it
+// names, and by the empty value.
 make kindSatisfies(word, v) {
     if word == "nothing" {
         give v.kind == "nothing"
+    }
+    if isMaybeKindWord(word) {
+        if v.kind == "nothing" {
+            give true
+        }
+        give v.kind == part(word, 6, length(word) - 6)
     }
     give v.kind == word
 }
@@ -606,7 +641,7 @@ make trimSpaceLine(t) {
 }
 
 make isKeywordWord(w) {
-    let words = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor", "attempt"]
+    let words = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor", "attempt", "nothing"]
     for word in words {
         if word == w {
             give true
@@ -1151,10 +1186,38 @@ make isKindWord(word) {
 
 make parseKindWord(after) {
     let t = pCur()
+    // Stone 19: 'nothing' is a word of the language now, so
+    // it arrives as a keyword token, not a name — it is a
+    // kind word all the same, in the plain position.
+    if t.kind == "keyword" {
+        if t.word == "nothing" {
+            pAdvance()
+            give okVal("nothing")
+        }
+    }
     if t.kind != "name" {
         give errAt(t.line, "After the " + after + " I need a kind — one of: number, text, boolean, list, object, bytes, nothing. Instead I found " + pSpoken(t) + ".")
     }
     let word = t.name
+    // Stone 19: 'maybe' may stand before a kind.
+    if word == "maybe" {
+        pAdvance()
+        let t2 = pCur()
+        if t2.kind == "keyword" {
+            if t2.word == "nothing" {
+                give errAt(t2.line, "'maybe nothing' says no more than 'nothing' itself — a value that may be nothing or nothing is just nothing. Write 'nothing' alone, or 'maybe' before a real kind, like: maybe number.")
+            }
+        }
+        if t2.kind != "name" {
+            give errAt(t2.line, "After 'maybe' I need a kind — one of: number, text, boolean, list, object, bytes. Instead I found " + pSpoken(t2) + ".")
+        }
+        let inner = t2.name
+        if isKindWord(inner) == false {
+            give errAt(t2.line, "I don't know a kind called '" + inner + "'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing — and 'maybe' can stand before any of them but 'nothing', like: maybe number.")
+        }
+        pAdvance()
+        give okVal("maybe " + inner)
+    }
     if isKindWord(word) == false {
         give errAt(t.line, "I don't know a kind called '" + word + "'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing.")
     }
@@ -1724,6 +1787,10 @@ make parseAtom() {
             pAdvance()
             give okVal({ type: "boolean", flag: false, line: token.line })
         }
+        if token.word == "nothing" {
+            pAdvance()
+            give okVal({ type: "nothing", line: token.line })
+        }
         if token.word == "floor" {
             give parseFloorExpr()
         }
@@ -1957,6 +2024,9 @@ make evalLeaf(e, scope) {
     }
     if e.type == "boolean" {
         give okVal(vBool(e.flag))
+    }
+    if e.type == "nothing" {
+        give okVal(NOTHING)
     }
     if e.type == "variable" {
         let r = scopeLookup(scope, e.name)
@@ -2205,8 +2275,14 @@ make stepUnwind(top) {
                 }
                 removeat(mStack, length(mStack) - 1)
                 mGave = false
+                // Stone 19: a function marked '-> nothing'
+                // never hands a value back — a 'give nothing'
+                // line inside it is an early way out, and the
+                // empty value it names is absorbed by the
+                // promise. Any other function's given value
+                // crosses as it is — the empty value included.
                 if top.inExpr {
-                    if value.kind == "nothing" {
+                    if top.def.returnKind == "nothing" {
                         holdResult(errAt(top.line, "The function '" + top.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + top.name + "', or call it on its own line instead."), false)
                         give mDone
                     }
@@ -2957,6 +3033,10 @@ make stepExprStart(top) {
         finishFrame(okVal(vBool(e.flag)), false)
         give mDone
     }
+    if e.type == "nothing" {
+        finishFrame(okVal(NOTHING), false)
+        give mDone
+    }
     if e.type == "variable" {
         let r = scopeLookup(top.scope, e.name)
         if r.found == false {
@@ -3168,9 +3248,22 @@ make consumeCall(top) {
     }
     if top.stage == 2 {
         gCallDepth = gCallDepth - 1
-        if top.def.returnKind != "" {
-            if top.def.returnKind != "nothing" {
-                finishFrame(errAt(top.line, "'" + top.name + "' is marked to give back " + kindPhrase(top.def.returnKind) + " by its annotation, but it finished without giving a value back. Add a 'give' line inside '" + top.name + "', or change the annotation."), false)
+        // Stone 19: a function marked 'maybe' that finishes
+        // without a 'give' hands back the empty value — that
+        // is exactly what the mark says may happen — so the
+        // no-give finish is a value for it, and only for it.
+        let rk = top.def.returnKind
+        if rk != "" {
+            if rk != "nothing" {
+                if isMaybeKindWord(rk) == false {
+                    finishFrame(errAt(top.line, "'" + top.name + "' is marked to give back " + kindPhrase(rk) + " by its annotation, but it finished without giving a value back. Add a 'give' line inside '" + top.name + "', or change the annotation."), false)
+                    give mDone
+                }
+            }
+        }
+        if top.inExpr {
+            if isMaybeKindWord(rk) == false {
+                finishFrame(errAt(top.line, "The function '" + top.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + top.name + "', or call it on its own line instead."), false)
                 give mDone
             }
         }
@@ -3229,19 +3322,17 @@ make dispatchCall(top) {
     give mDone
 }
 
-// The call's outcome, with the one check that belongs to the
-// place the call was made: a call used as a value needs a
-// value back.
+// The call's outcome. (The check that belongs to the place
+// the call was made — a call used as a value needs a value
+// back — lives in the two roads that finish a made function:
+// consumeCall for a body that ended without a 'give', and
+// stepUnwind for one that gave. A built-in tool always hands
+// a value back, and since Stone 19 the empty value is a
+// value like any other when a function gives it.)
 make finishCall(top, r) {
     if r.ok == false {
         finishFrame(r, false)
         give mDone
-    }
-    if top.inExpr {
-        if r.value.kind == "nothing" {
-            finishFrame(errAt(top.line, "The function '" + top.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + top.name + "', or call it on its own line instead."), false)
-            give mDone
-        }
     }
     finishFrame(r, false)
     give mDone
@@ -3346,6 +3437,15 @@ make missingField(obj, name, line) {
 
 // The operators, with the Swift interpreter's rules and words.
 make applyOp(op, l, r, line) {
+    // Stone 19: when one side is the empty value, the refusal
+    // carries the nothing words, as the Swift interpreter's do.
+    let note = ""
+    if l.kind == "nothing" {
+        note = NOTHINGNOTE
+    }
+    if r.kind == "nothing" {
+        note = NOTHINGNOTE
+    }
     if op == "+" {
         if l.kind == "text" {
             give okVal(vText(spokenOf(l) + spokenOf(r)))
@@ -3358,7 +3458,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vNumber(l.num + r.num))
             }
         }
-        give errAt(line, "I can't add " + described(l) + " and " + described(r) + ". '+' adds two numbers, or joins text together.")
+        give errAt(line, "I can't add " + described(l) + " and " + described(r) + ". '+' adds two numbers, or joins text together." + note)
     }
     if op == "-" {
         if l.kind == "number" {
@@ -3366,7 +3466,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vNumber(l.num - r.num))
             }
         }
-        give errAt(line, "I can't subtract " + described(l) + " and " + described(r) + ". '-' works on two numbers. (Only '+' joins text.)")
+        give errAt(line, "I can't subtract " + described(l) + " and " + described(r) + ". '-' works on two numbers. (Only '+' joins text.)" + note)
     }
     if op == "*" {
         if l.kind == "number" {
@@ -3374,7 +3474,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vNumber(l.num * r.num))
             }
         }
-        give errAt(line, "I can't multiply " + described(l) + " and " + described(r) + ". '*' works on two numbers. (Only '+' joins text.)")
+        give errAt(line, "I can't multiply " + described(l) + " and " + described(r) + ". '*' works on two numbers. (Only '+' joins text.)" + note)
     }
     if op == "/" {
         if l.kind == "number" {
@@ -3385,7 +3485,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vNumber(l.num / r.num))
             }
         }
-        give errAt(line, "I can't divide " + described(l) + " and " + described(r) + ". '/' works on two numbers. (Only '+' joins text.)")
+        give errAt(line, "I can't divide " + described(l) + " and " + described(r) + ". '/' works on two numbers. (Only '+' joins text.)" + note)
     }
     if op == "==" {
         give okVal(vBool(valuesEqual(l, r)))
@@ -3402,7 +3502,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vBool(l.num < r.num))
             }
         }
-        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '<'. '<' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '<'. '<' compares two numbers. (Text and true/false values can be checked with == and !=.)" + note)
     }
     if op == "<=" {
         if l.kind == "number" {
@@ -3410,7 +3510,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vBool(l.num <= r.num))
             }
         }
-        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '<='. '<=' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '<='. '<=' compares two numbers. (Text and true/false values can be checked with == and !=.)" + note)
     }
     if op == ">" {
         if l.kind == "number" {
@@ -3418,7 +3518,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vBool(l.num > r.num))
             }
         }
-        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '>'. '>' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '>'. '>' compares two numbers. (Text and true/false values can be checked with == and !=.)" + note)
     }
     if op == ">=" {
         if l.kind == "number" {
@@ -3426,7 +3526,7 @@ make applyOp(op, l, r, line) {
                 give okVal(vBool(l.num >= r.num))
             }
         }
-        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '>='. '>=' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '>='. '>=' compares two numbers. (Text and true/false values can be checked with == and !=.)" + note)
     }
     give errAt(line, "I don't know the sign '" + op + "'.")
 }
@@ -3456,6 +3556,11 @@ make valuesEqual(l, r) {
     }
     if l.kind == "bytes" {
         give l == r
+    }
+    if l.kind == "nothing" {
+        // Stone 19: the empty value is equal to itself — that
+        // is how a maybe is checked.
+        give true
     }
     give false
 }

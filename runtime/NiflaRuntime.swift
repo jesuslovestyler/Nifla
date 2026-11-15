@@ -85,6 +85,15 @@ enum Value {
     case object(NiflaObject)
     case list(NiflaList)
     case bytes(NiflaBytes)
+    // Stone 19: the empty value — what 'nothing' stands for,
+    // and what a 'maybe' variable holds when it holds nothing.
+    case nothing
+
+    // Whether this value is the empty value.
+    var isNothing: Bool {
+        if case .nothing = self { return true }
+        return false
+    }
 
     // How the value is shown by `say`.
     var spoken: String {
@@ -117,6 +126,8 @@ enum Value {
         case .bytes(let bytes):
             let parts = bytes.data.map { String($0) }
             return "bytes(" + parts.joined(separator: ", ") + ")"
+        case .nothing:
+            return "nothing"
         }
     }
 
@@ -141,6 +152,8 @@ enum Value {
             case 1: return "a block of 1 byte"
             default: return "a block of \(bytes.data.count) bytes"
             }
+        case .nothing:
+            return "nothing"
         }
     }
 }
@@ -230,11 +243,17 @@ func valueKindWord(_ value: Value) -> String {
     case .object: return "object"
     case .list: return "list"
     case .bytes: return "bytes"
+    case .nothing: return "nothing"
     }
 }
 
 // How a kind word is spoken of in a guard's message.
 func kindPhrase(_ kindWord: String) -> String {
+    // Stone 19: a 'maybe' mark is spoken as the kind it names,
+    // or nothing.
+    if kindWord.hasPrefix("maybe ") {
+        return kindPhrase(String(kindWord.dropFirst("maybe ".count))) + " or nothing"
+    }
     switch kindWord {
     case "number": return "a number"
     case "text": return "some text"
@@ -250,10 +269,29 @@ func kindPhrase(_ kindWord: String) -> String {
 // Whether a value (or the lack of one, from a function that
 // gave nothing back) satisfies an annotation.
 func kindSatisfies(_ kindWord: String, _ value: Value?) -> Bool {
-    if kindWord == "nothing" { return value == nil }
+    // Stone 19: 'nothing' is a value now — the empty value
+    // satisfies a 'nothing' mark, and so does a function that
+    // gave nothing back at all.
+    if kindWord == "nothing" {
+        guard let value else { return true }
+        return value.isNothing
+    }
+    // Stone 19: a 'maybe' mark is satisfied by the kind it
+    // names, by the empty value, and by a function that gave
+    // nothing back.
+    if kindWord.hasPrefix("maybe ") {
+        guard let value else { return true }
+        if value.isNothing { return true }
+        return valueKindWord(value) == String(kindWord.dropFirst("maybe ".count))
+    }
     guard let value else { return false }
     return valueKindWord(value) == kindWord
 }
+
+// Stone 19: the words that follow an operation's refusal when
+// one side was the empty value — the same text the interpreter
+// speaks (see nothingNote there).
+let nothingNote = " Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there."
 
 // A built-in tool (Stone 6): a function every Nifla program has
 // from the start, without making it. `params` names the values it
@@ -654,11 +692,17 @@ final class Machine {
             if case .number(let a) = left, case .number(let b) = right {
                 return .number(a + b)
             }
+            if left.isNothing || right.isNothing {
+                throw NiflaError(line: line, message: "I can't add \(left.described) and \(right.described). '+' adds two numbers, or joins text together.\(nothingNote)")
+            }
             throw NiflaError(line: line, message: "I can't add \(left.described) and \(right.described). '+' adds two numbers, or joins text together.")
 
         case "-", "*", "/":
             guard case .number(let a) = left, case .number(let b) = right else {
                 let verb = op == "-" ? "subtract" : (op == "*" ? "multiply" : "divide")
+                if left.isNothing || right.isNothing {
+                    throw NiflaError(line: line, message: "I can't \(verb) \(left.described) and \(right.described). '\(op)' works on two numbers. (Only '+' joins text.)\(nothingNote)")
+                }
                 throw NiflaError(line: line, message: "I can't \(verb) \(left.described) and \(right.described). '\(op)' works on two numbers. (Only '+' joins text.)")
             }
             switch op {
@@ -680,12 +724,16 @@ final class Machine {
             case (.object(let a), .object(let b)): equal = a === b
             case (.list(let a), .list(let b)): equal = a === b
             case (.bytes(let a), .bytes(let b)): equal = a === b
+            case (.nothing, .nothing): equal = true
             default: equal = false
             }
             return .boolean(op == "==" ? equal : !equal)
 
         case "<", "<=", ">", ">=":
             guard case .number(let a) = left, case .number(let b) = right else {
+                if left.isNothing || right.isNothing {
+                    throw NiflaError(line: line, message: "I can't compare \(left.described) and \(right.described) with '\(op)'. '\(op)' compares two numbers. (Text and true/false values can be checked with == and !=.)\(nothingNote)")
+                }
                 throw NiflaError(line: line, message: "I can't compare \(left.described) and \(right.described) with '\(op)'. '\(op)' compares two numbers. (Text and true/false values can be checked with == and !=.)")
             }
             switch op {
@@ -810,10 +858,24 @@ final class Machine {
             if let returnKind = def.returnKind, !kindSatisfies(returnKind, signal.value) {
                 throw NiflaError(line: signal.line, message: "'\(name)' is marked to give back \(kindPhrase(returnKind)) by its annotation, but this 'give' hands back \(signal.value.described). Change the value, or change the annotation.")
             }
+            // Stone 19: a function marked '-> nothing' never
+            // hands a value back — a 'give nothing' line inside
+            // it is an early way out, and the empty value it
+            // names is absorbed by the promise.
+            if def.returnKind == "nothing" {
+                return nil
+            }
             return signal.value
         }
-        if let returnKind = def.returnKind, returnKind != "nothing" {
-            throw NiflaError(line: line, message: "'\(name)' is marked to give back \(kindPhrase(returnKind)) by its annotation, but it finished without giving a value back. Add a 'give' line inside '\(name)', or change the annotation.")
+        if let returnKind = def.returnKind {
+            // Stone 19: a function marked 'maybe' that finishes
+            // without a 'give' hands back the empty value.
+            if returnKind.hasPrefix("maybe ") {
+                return .nothing
+            }
+            if returnKind != "nothing" {
+                throw NiflaError(line: line, message: "'\(name)' is marked to give back \(kindPhrase(returnKind)) by its annotation, but it finished without giving a value back. Add a 'give' line inside '\(name)', or change the annotation.")
+            }
         }
         return nil
     }

@@ -1,0 +1,16 @@
+// Stone 19: a maybe handed to a parameter marked with a
+// plain kind — the call might hand over the empty value,
+// and the parameter's mark says it must not.
+
+make twice(n: number) -> number {
+    give n * 2
+}
+
+make lookup(name) -> maybe number {
+    if name == "Tyler" {
+        give 29
+    }
+}
+
+let b: maybe number = lookup("Noki")
+say twice(b)

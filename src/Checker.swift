@@ -27,7 +27,7 @@
 
 // What the checker can prove about a value's kind. 'unknown' means
 // "can't be proven from here" — the checker stays silent about it.
-enum StaticKind {
+indirect enum StaticKind: Hashable {
     case number
     case text
     case boolean
@@ -35,6 +35,16 @@ enum StaticKind {
     case list
     case bytes
     case unknown
+    // Stone 19: the empty value, definitely — a variable proven
+    // to hold nothing (made from 'nothing', or narrowed by a
+    // check: in the road of 'if x == nothing' where it held).
+    case nothing
+    // Stone 19: one of these kinds, or nothing — the kind of a
+    // value marked 'maybe', not yet checked. The heart of the
+    // stone: a maybe may only be used where nothing could be
+    // handled, and the checker refuses the uses it can prove
+    // would meet the empty value unprepared.
+    case maybe(StaticKind)
 
     // How the kind is named in a plain-words message.
     var phrase: String {
@@ -46,13 +56,19 @@ enum StaticKind {
         case .list: return "a list"
         case .bytes: return "a block of bytes"
         case .unknown: return "a value"
+        case .nothing: return "nothing"
+        case .maybe(let inner): return "\(inner.phrase) or nothing"
         }
     }
 
     // Stone 18: the kind an annotation word names, or nil for
     // 'nothing' (which no StaticKind stands for — a promise that
     // a function gives nothing back, checked on its own terms).
+    // Stone 19: a 'maybe' word names the maybe of its kind.
     static func fromKindWord(_ word: String) -> StaticKind? {
+        if word.hasPrefix("maybe ") {
+            return fromKindWord(String(word.dropFirst("maybe ".count))).map { .maybe($0) }
+        }
         switch word {
         case "number": return .number
         case "text": return .text
@@ -68,6 +84,30 @@ enum StaticKind {
     static func phrase(forKindWord word: String) -> String {
         if let kind = fromKindWord(word) { return kind.phrase }
         return "nothing"
+    }
+
+    // Stone 19: how two proven kinds join where the program
+    // could have gone either way (the two sides of an 'if', a
+    // loop body against the state before it). Kinds that agree
+    // stay; a definite kind meeting the empty value becomes the
+    // maybe of that kind — the honest sum of the two roads;
+    // anything else that disagrees becomes unknown, as before.
+    static func mergedKind(_ a: StaticKind, _ b: StaticKind) -> StaticKind {
+        if a == b { return a }
+        switch (a, b) {
+        case (.nothing, .maybe(let inner)), (.maybe(let inner), .nothing):
+            return .maybe(inner)
+        case (.nothing, let kind) where kind != .unknown:
+            return .maybe(kind)
+        case (let kind, .nothing) where kind != .unknown:
+            return .maybe(kind)
+        case (.maybe(let inner), let kind) where kind == inner:
+            return .maybe(inner)
+        case (let kind, .maybe(let inner)) where kind == inner:
+            return .maybe(inner)
+        default:
+            return .unknown
+        }
     }
 }
 
@@ -204,6 +244,24 @@ struct StaticEnv {
         return false
     }
 
+    // Stone 19: sets a name's kind in whichever block made it,
+    // and lets its tracked facts go — the narrowing a check
+    // against 'nothing' earns (inside 'if x == nothing', x is
+    // known to be the empty value; in the 'else', known to be
+    // the kind itself). The facts were proven of the unnarrowed
+    // value, so they don't carry into the narrowed road.
+    mutating func narrow(_ name: String, to kind: StaticKind) {
+        for index in scopes.indices.reversed() {
+            if scopes[index][name] != nil {
+                scopes[index][name] = kind
+                constants[index][name] = nil
+                emptyLists[index][name] = nil
+                lengths[index][name] = nil
+                return
+            }
+        }
+    }
+
     // Takes away every tracked fact in every scope, keeping
     // kinds and annotations. Used when a function body is
     // checked: a fact about a variable outside the body (this
@@ -284,7 +342,7 @@ struct StaticEnv {
                 let kindA = a.scopes[index][name]
                 let kindB = b.scopes[index][name]
                 if let kindA, let kindB {
-                    scope[name] = kindA == kindB ? kindA : .unknown
+                    scope[name] = StaticKind.mergedKind(kindA, kindB)
                 } else if let kind = kindA ?? kindB {
                     scope[name] = kind
                 }
@@ -457,10 +515,15 @@ final class Checker {
 
         case .ifElse(let condition, let thenBlock, let elseBlock, _):
             _ = try checkExpr(condition, env: &env, outerNames: outerNames)
+            // Stone 19: a test against 'nothing' narrows the
+            // tested variable on each road (see nothingTest).
+            let test = nothingTest(condition: condition, env: env)
             let before = env
+            if let test { env.narrow(test.name, to: test.thenKind) }
             try checkChildBlock(thenBlock, env: &env, outerNames: outerNames, mergeWithBefore: false)
             let afterThen = env
             env = before
+            if let test { env.narrow(test.name, to: test.elseKind) }
             if let elseBlock {
                 try checkChildBlock(elseBlock, env: &env, outerNames: outerNames, mergeWithBefore: false)
             }
@@ -468,15 +531,24 @@ final class Checker {
 
         case .whileLoop(let condition, let body, _):
             _ = try checkExpr(condition, env: &env, outerNames: outerNames)
+            // Stone 19: inside the loop the test held, so the
+            // tested variable is narrowed to the road where it
+            // held; after the loop it is narrowed to the road
+            // where it failed — the only way out.
+            let test = nothingTest(condition: condition, env: env)
+            if let test { env.narrow(test.name, to: test.thenKind) }
             try checkChildBlock(body, env: &env, outerNames: outerNames, mergeWithBefore: true)
+            if let test { env.narrow(test.name, to: test.elseKind) }
 
         case .repeatLoop(let count, let body, let line):
-            _ = try checkExpr(count, env: &env, outerNames: outerNames)
+            let countKind = try checkExpr(count, env: &env, outerNames: outerNames)
             try checkRepeatCount(count, env: env, line: line)
+            try checkCountKind(kind: countKind, line: line)
             try checkChildBlock(body, env: &env, outerNames: outerNames, mergeWithBefore: true)
 
-        case .forEach(let name, let over, let body, _):
-            _ = try checkExpr(over, env: &env, outerNames: outerNames)
+        case .forEach(let name, let over, let body, let line):
+            let overKind = try checkExpr(over, env: &env, outerNames: outerNames)
+            try checkWalkKind(kind: overKind, line: line)
             let before = env
             env.pushScope()
             env.declare(name, .unknown)
@@ -605,10 +677,14 @@ final class Checker {
 
         case .ifElse(let condition, let thenBlock, let elseBlock, _):
             _ = try checkExprForgiving(condition, env: &env, outerNames: outerNames)
+            // Stone 19: narrowing, as in the plain reading.
+            let test = nothingTest(condition: condition, env: env)
             let before = env
+            if let test { env.narrow(test.name, to: test.thenKind) }
             try checkChildBlockInFunction(thenBlock, env: &env, outerNames: outerNames)
             let afterThen = env
             env = before
+            if let test { env.narrow(test.name, to: test.elseKind) }
             if let elseBlock {
                 try checkChildBlockInFunction(elseBlock, env: &env, outerNames: outerNames)
             }
@@ -616,19 +692,27 @@ final class Checker {
 
         case .whileLoop(let condition, let body, _):
             _ = try checkExprForgiving(condition, env: &env, outerNames: outerNames)
+            // Stone 19: narrowing, as in the plain reading —
+            // the body sees the road where the test held, and
+            // what follows sees the road where it failed.
+            let test = nothingTest(condition: condition, env: env)
             let before = env
+            if let test { env.narrow(test.name, to: test.thenKind) }
             try checkChildBlockInFunction(body, env: &env, outerNames: outerNames)
             env = StaticEnv.merged(before, env)
+            if let test { env.narrow(test.name, to: test.elseKind) }
 
         case .repeatLoop(let count, let body, let line):
-            _ = try checkExprForgiving(count, env: &env, outerNames: outerNames)
+            let countKind = try checkExprForgiving(count, env: &env, outerNames: outerNames)
             try checkRepeatCount(count, env: env, line: line)
+            try checkCountKind(kind: countKind, line: line)
             let before = env
             try checkChildBlockInFunction(body, env: &env, outerNames: outerNames)
             env = StaticEnv.merged(before, env)
 
-        case .forEach(let name, let over, let body, _):
-            _ = try checkExprForgiving(over, env: &env, outerNames: outerNames)
+        case .forEach(let name, let over, let body, let line):
+            let overKind = try checkExprForgiving(over, env: &env, outerNames: outerNames)
+            try checkWalkKind(kind: overKind, line: line)
             let before = env
             env.pushScope()
             env.declare(name, .unknown)
@@ -704,7 +788,11 @@ final class Checker {
         for (index, kind) in kinds.enumerated() where kind != .unknown {
             let need = rule.needs[index]
             if let allowed = need.kinds, !allowed.contains(kind) {
-                throw NiflaError(line: line, message: "'\(name)' needs \(need.need), but it was given \(kind.phrase). I caught this before the program ran, so nothing ran.")
+                var message = "'\(name)' needs \(need.need), but it was given \(kind.phrase)."
+                if isMaybe(kind) {
+                    message += " A value that may be nothing has to be checked first: if value == nothing { ... } else { ... } — in the 'else', the value is known to be there."
+                }
+                throw NiflaError(line: line, message: message + " I caught this before the program ran, so nothing ran.")
             }
         }
         // Stone 18: the ranges the checker can prove, and the
@@ -829,6 +917,8 @@ final class Checker {
             return .text
         case .boolean:
             return .boolean
+        case .nothing:
+            return .nothing
 
         case .variable(let name, let line):
             if let kind = env.lookup(name) {
@@ -868,8 +958,9 @@ final class Checker {
             }
             return .list
 
-        case .field(let base, _, _):
-            _ = try checkExpr(base, env: &env, outerNames: outerNames)
+        case .field(let base, let fieldName, let line):
+            let baseKind = try checkExpr(base, env: &env, outerNames: outerNames)
+            try checkFieldBase(base: baseKind, fieldName: fieldName, line: line)
             return .unknown  // what comes out of an object can't be proven
 
         case .index(let base, let index, let line):
@@ -884,8 +975,9 @@ final class Checker {
         case .floor(let asm, let args, let line):
             return try checkFloor(asm: asm, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false)
 
-        case .negate(let inner, _):
+        case .negate(let inner, let line):
             let kind = try checkExpr(inner, env: &env, outerNames: outerNames)
+            try checkNegate(kind: kind, line: line)
             return kind == .number ? .number : .unknown
 
         case .binary(let leftExpr, let op, let rightExpr, let line):
@@ -939,8 +1031,9 @@ final class Checker {
             }
             return .list
 
-        case .field(let base, _, _):
-            _ = try checkExprForgiving(base, env: &env, outerNames: outerNames)
+        case .field(let base, let fieldName, let line):
+            let baseKind = try checkExprForgiving(base, env: &env, outerNames: outerNames)
+            try checkFieldBase(base: baseKind, fieldName: fieldName, line: line)
             return .unknown
 
         case .index(let base, let index, let line):
@@ -953,8 +1046,9 @@ final class Checker {
         case .floor(let asm, let args, let line):
             return try checkFloor(asm: asm, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true)
 
-        case .negate(let inner, _):
+        case .negate(let inner, let line):
             let kind = try checkExprForgiving(inner, env: &env, outerNames: outerNames)
+            try checkNegate(kind: kind, line: line)
             return kind == .number ? .number : .unknown
 
         case .binary(let leftExpr, let op, let rightExpr, let line):
@@ -974,20 +1068,162 @@ final class Checker {
     // never work and is refused before the run. (Which items
     // exist — the range — is the run's business, as always.)
     private func checkIndexKind(base: StaticKind, index: StaticKind, line: Int) throws {
+        // Stone 19: the empty value has no items, and can't
+        // pick one; a maybe must be checked before either use.
+        if base == .nothing {
+            throw NiflaError(line: line, message: "I can't take an item from nothing. Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character. I caught this before the program ran, so nothing ran.")
+        }
+        if isMaybe(base) {
+            throw unhandledMaybeError(kind: base, line: line)
+        }
+        if index == .nothing {
+            throw NiflaError(line: line, message: "I can't use nothing to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+        }
+        if isMaybe(index) {
+            throw unhandledMaybeError(kind: index, line: line)
+        }
         guard base == .list || base == .text || base == .bytes else { return }
         guard index != .unknown && index != .number else { return }
         throw NiflaError(line: line, message: "I can't use \(index.phrase) to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
     }
 
+    // Stone 19: reading a field of the empty value, or of a
+    // value that may be it, can never work — only an object has
+    // fields. (A field read from any other proven kind is the
+    // run's business, as it always has been.)
+    private func checkFieldBase(base: StaticKind, fieldName: String, line: Int) throws {
+        if base == .nothing {
+            throw NiflaError(line: line, message: "I can't read the field '\(fieldName)' of nothing, because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.\(fieldName) works. I caught this before the program ran, so nothing ran.")
+        }
+        if isMaybe(base) {
+            throw unhandledMaybeError(kind: base, line: line)
+        }
+    }
+
+    // Stone 19: a 'repeat' count that is the empty value, or
+    // may be it, can never count — in the run's own words.
+    private func checkCountKind(kind: StaticKind, line: Int) throws {
+        if kind == .nothing {
+            throw NiflaError(line: line, message: "'repeat' needs a number saying how many times to run, but here it was given nothing. Write it like: repeat 3 { ... } I caught this before the program ran, so nothing ran.")
+        }
+        if isMaybe(kind) {
+            throw unhandledMaybeError(kind: kind, line: line)
+        }
+    }
+
+    // Stone 19: a 'for' walk over the empty value, or over a
+    // value that may be it, has nothing to walk — in the run's
+    // own words.
+    private func checkWalkKind(kind: StaticKind, line: Int) throws {
+        if kind == .nothing {
+            throw NiflaError(line: line, message: "'for' needs a list, some text, or a block of bytes to walk through, but here it was given nothing. Write it like: for item in items { ... } I caught this before the program ran, so nothing ran.")
+        }
+        if isMaybe(kind) {
+            throw unhandledMaybeError(kind: kind, line: line)
+        }
+    }
+
+    // Stone 19: a minus sign in front of the empty value, or of
+    // a value that may be it, can never work.
+    private func checkNegate(kind: StaticKind, line: Int) throws {
+        if kind == .nothing {
+            throw NiflaError(line: line, message: "I can only put a minus sign in front of a number, but here it was in front of nothing. I caught this before the program ran, so nothing ran.")
+        }
+        if isMaybe(kind) {
+            throw unhandledMaybeError(kind: kind, line: line)
+        }
+    }
+
+    // Stone 19: when a condition tests a 'maybe' variable
+    // against 'nothing', the two roads know more than the
+    // variable's kind alone says: on the road where the test
+    // held, the variable is the empty value (for '==') or the
+    // kind itself (for '!='); on the other road, the opposite.
+    // Returns the variable's name and the kind each road may
+    // narrow it to, or nil when the condition has another
+    // shape — narrowing is earned only by this plain test.
+    private func nothingTest(condition: Expr, env: StaticEnv) -> (name: String, thenKind: StaticKind, elseKind: StaticKind)? {
+        guard case .binary(let a, let op, let b, _) = condition, op == "==" || op == "!=" else { return nil }
+        for (varSide, otherSide) in [(a, b), (b, a)] {
+            guard case .variable(let name, _) = varSide,
+                  let kind = env.lookup(name) else { continue }
+            // The maybe the variable answers to: its proven
+            // kind, when that is a maybe — or its annotation,
+            // when the value it provably holds right now is one
+            // of the maybe's two roads (a 'maybe number'
+            // variable made from 'nothing' is proven to hold
+            // the empty value, but the mark still promises the
+            // number road is the other way it can go).
+            var inner: StaticKind? = nil
+            if case .maybe(let flowInner) = kind {
+                inner = flowInner
+            } else if let word = env.lookupAnnotation(name),
+                      let marked = StaticKind.fromKindWord(word),
+                      case .maybe(let markedInner) = marked,
+                      kind == .nothing || kind == markedInner {
+                inner = markedInner
+            }
+            guard let inner else { continue }
+            let otherIsNothing: Bool
+            if case .nothing = otherSide {
+                otherIsNothing = true
+            } else if case .variable(let otherName, _) = otherSide, env.lookup(otherName) == .nothing {
+                otherIsNothing = true
+            } else {
+                otherIsNothing = false
+            }
+            guard otherIsNothing else { continue }
+            if op == "==" {
+                return (name: name, thenKind: .nothing, elseKind: inner)
+            }
+            return (name: name, thenKind: inner, elseKind: .nothing)
+        }
+        return nil
+    }
+
     // MARK: Stone 18 — annotations and provable ranges
 
     // The kind a name is recorded under: an annotation's kind
-    // when there is one ('nothing' records as unknown — it is a
-    // promise about a function's giving, not a value's kind),
-    // otherwise the kind the value was proven to have.
+    // when there is one, otherwise the kind the value was
+    // proven to have. Stone 19: a proven kind that satisfies
+    // the annotation is the more precise record, and is kept —
+    // a 'maybe number' variable proven to hold a number right
+    // now is recorded as a number, until something that may be
+    // nothing is set into it. A 'nothing' mark records the
+    // empty kind itself: the guard at the boundary sees to it
+    // that nothing else can ever stand there.
     private func declaredKind(kindWord: String?, proven: StaticKind) -> StaticKind {
         guard let kindWord else { return proven }
-        return StaticKind.fromKindWord(kindWord) ?? .unknown
+        if kindWord == "nothing" { return .nothing }
+        guard let wanted = StaticKind.fromKindWord(kindWord) else { return .unknown }
+        if proven != .unknown && annotationSatisfied(proven: proven, wanted: wanted) {
+            return proven
+        }
+        return wanted
+    }
+
+    // Stone 19: whether a proven kind satisfies an annotation's
+    // kind — the kind itself, or, for a 'maybe' mark, the kind
+    // it names or the empty value.
+    private func annotationSatisfied(proven: StaticKind, wanted: StaticKind) -> Bool {
+        if proven == wanted { return true }
+        if case .maybe(let inner) = wanted {
+            return proven == inner || proven == .nothing
+        }
+        return false
+    }
+
+    // Whether a proven kind is a 'maybe' — a value that may be
+    // the empty value.
+    private func isMaybe(_ kind: StaticKind) -> Bool {
+        if case .maybe = kind { return true }
+        return false
+    }
+
+    // Stone 19: the refusal for a use of a value that may be
+    // nothing, where a value that is surely there is needed.
+    private func unhandledMaybeError(kind: StaticKind, line: Int) -> NiflaError {
+        NiflaError(line: line, message: "This uses \(kind.phrase) — a value that may be nothing — where a value that is surely there is needed, and nothing is the empty value: there is nothing there to use. Check the value first, like: if value == nothing { ... } else { ... } — in the 'else', the value is known to be there. I caught this before the program ran, so nothing ran.")
     }
 
     // Refuses when a proven kind can never satisfy an
@@ -995,13 +1231,16 @@ final class Checker {
     // the runtime guard at the boundary is the keeper there.
     private func checkAnnotation(kindWord: String, proven: StaticKind, line: Int, wording: String) throws {
         if kindWord == "nothing" {
-            if proven != .unknown {
+            // Stone 19: the empty value itself satisfies a
+            // 'nothing' mark now; any proven value besides it
+            // never can.
+            if proven != .unknown && proven != .nothing {
                 throw NiflaError(line: line, message: wording + " I caught this before the program ran, so nothing ran.")
             }
             return
         }
         guard let wanted = StaticKind.fromKindWord(kindWord) else { return }
-        if proven != .unknown && proven != wanted {
+        if proven != .unknown && !annotationSatisfied(proven: proven, wanted: wanted) {
             throw NiflaError(line: line, message: wording + " I caught this before the program ran, so nothing ran.")
         }
     }
@@ -1286,6 +1525,41 @@ final class Checker {
     // different kinds are simply unequal — so they are never
     // flagged.)
     private func checkBinary(op: String, left: StaticKind, right: StaticKind, line: Int) throws -> StaticKind {
+        // Stone 19: the empty value, and values that may be it.
+        // Equality is how a maybe is checked, so '==' and '!='
+        // are always allowed. Text joining is the other safe
+        // road: '+' with text on either side joins anything,
+        // the empty value by its name, as the run does. Every
+        // other use of a proven nothing is refused in the run's
+        // own words; every other use of a maybe is refused as
+        // an unhandled maybe — the nothing road is not taken
+        // care of there.
+        if op != "==" && op != "!=" {
+            let leftMaybe = isMaybe(left), rightMaybe = isMaybe(right)
+            if leftMaybe || rightMaybe {
+                if op == "+" && (left == .text || right == .text) {
+                    return .text
+                }
+                throw unhandledMaybeError(kind: leftMaybe ? left : right, line: line)
+            }
+            if left == .nothing || right == .nothing {
+                if op == "+" && (left == .text || right == .text) {
+                    return .text
+                }
+                let note = " Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there."
+                switch op {
+                case "+":
+                    throw NiflaError(line: line, message: "I can't add \(left.phrase) and \(right.phrase). '+' adds two numbers, or joins text together.\(note) I caught this before the program ran, so nothing ran.")
+                case "-", "*", "/":
+                    let verb = op == "-" ? "subtract" : (op == "*" ? "multiply" : "divide")
+                    throw NiflaError(line: line, message: "I can't \(verb) \(left.phrase) and \(right.phrase). '\(op)' works on two numbers. (Only '+' joins text.)\(note) I caught this before the program ran, so nothing ran.")
+                case "<", "<=", ">", ">=":
+                    throw NiflaError(line: line, message: "I can't compare \(left.phrase) and \(right.phrase) with '\(op)'. '\(op)' compares two numbers. (Text and true/false values can be checked with == and !=.)\(note) I caught this before the program ran, so nothing ran.")
+                default:
+                    break
+                }
+            }
+        }
         switch op {
         case "+":
             if left != .unknown && right != .unknown {

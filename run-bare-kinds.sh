@@ -21,6 +21,15 @@
 #      must be refused by the shared checker, as on the
 #      hosted side.
 #
+#   5. (Stone 19) A bare build using 'nothing' must be
+#      refused in plain words — absence stands apart on
+#      bare metal: a bare value is a machine word with one
+#      shape, and the empty value has no word to be.
+#
+#   6. (Stone 19) A bare build with a 'maybe' annotation
+#      must be refused the same way — a kind bare metal
+#      can't hold.
+#
 # Prints PASS or FAIL. QEMU is the bench machine's extracted
 # QEMU 10 (~/qemu10-root), as in run-bare.sh; set QEMU to a
 # plain qemu-system-x86_64 command line instead if one is
@@ -83,6 +92,36 @@ if ! grep -q "'repeat' was told to run -1 times" "$WORK/repeatneg.txt"; then
     exit 1
 fi
 echo "Refused, as expected (negative repeat): $(cat "$WORK/repeatneg.txt")"
+
+cat > "$WORK/nothing.nifla" <<'EOF'
+let x = nothing
+say "never"
+EOF
+if ./niflac --bare "$WORK/nothing.nifla" -o "$WORK/nothing.elf" > "$WORK/nothing.txt" 2>&1; then
+    echo "FAIL: 'nothing' was allowed to build for bare metal"
+    exit 1
+fi
+if ! grep -q "Bare metal has no 'nothing'" "$WORK/nothing.txt"; then
+    echo "FAIL: the bare nothing refusal said the wrong words:"
+    cat "$WORK/nothing.txt"
+    exit 1
+fi
+echo "Refused, as expected (nothing on bare metal): $(cat "$WORK/nothing.txt")"
+
+cat > "$WORK/maybekind.nifla" <<'EOF'
+let x: maybe number = 5
+say x
+EOF
+if ./niflac --bare "$WORK/maybekind.nifla" -o "$WORK/maybekind.elf" > "$WORK/maybekind.txt" 2>&1; then
+    echo "FAIL: a 'maybe' annotation was allowed to build for bare metal"
+    exit 1
+fi
+if ! grep -q "Bare metal can't hold a number or nothing" "$WORK/maybekind.txt"; then
+    echo "FAIL: the bare maybe-annotation refusal said the wrong words:"
+    cat "$WORK/maybekind.txt"
+    exit 1
+fi
+echo "Refused, as expected (a maybe kind bare can't hold): $(cat "$WORK/maybekind.txt")"
 
 # --- part 1: the annotated program boots ---------------------
 

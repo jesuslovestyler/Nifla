@@ -1,0 +1,12 @@
+// Stone 19: a maybe set into a variable marked with a
+// plain kind — the mark promises a number stands there,
+// and a maybe can't promise that.
+
+make lookup(name) -> maybe number {
+    if name == "Tyler" {
+        give 29
+    }
+}
+
+let n: number = lookup("Tyler")
+say n

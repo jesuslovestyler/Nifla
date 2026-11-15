@@ -68,6 +68,19 @@ enum Value {
     case object(NiflaObject)
     case list(NiflaList)
     case bytes(NiflaBytes)
+    // Stone 19: the empty value — what 'nothing' stands for, and
+    // what a 'maybe' variable holds when it holds nothing. It is
+    // a real value (it can be held, handed over, and compared
+    // with ==), but no work can be done on it: the operations
+    // refuse it in plain words, and the checker refuses the uses
+    // it can prove before the program runs.
+    case nothing
+
+    // Whether this value is the empty value.
+    var isNothing: Bool {
+        if case .nothing = self { return true }
+        return false
+    }
 
     // How the value is shown by `say`.
     var spoken: String {
@@ -109,6 +122,8 @@ enum Value {
             // no list can be mistaken for: bytes(72, 101, 108).
             let parts = bytes.data.map { String($0) }
             return "bytes(" + parts.joined(separator: ", ") + ")"
+        case .nothing:
+            return "nothing"
         }
     }
 
@@ -133,6 +148,8 @@ enum Value {
             case 1: return "a block of 1 byte"
             default: return "a block of \(bytes.data.count) bytes"
             }
+        case .nothing:
+            return "nothing"
         }
     }
 }
@@ -246,16 +263,39 @@ func valueKindWord(_ value: Value) -> String {
     case .object: return "object"
     case .list: return "list"
     case .bytes: return "bytes"
+    case .nothing: return "nothing"
     }
 }
 
 // Whether a value (or the lack of one, from a function that
 // gave nothing back) satisfies an annotation.
 func kindSatisfies(_ kindWord: String, _ value: Value?) -> Bool {
-    if kindWord == "nothing" { return value == nil }
+    // Stone 19: 'nothing' is a value now — the empty value
+    // satisfies a 'nothing' mark, and so does a function that
+    // gave nothing back at all (the two are the same absence,
+    // seen from the two sides of a call).
+    if kindWord == "nothing" {
+        guard let value else { return true }
+        return value.isNothing
+    }
+    // Stone 19: a 'maybe' mark is satisfied by the kind it
+    // names, by the empty value, and by a function that gave
+    // nothing back.
+    if kindWord.hasPrefix("maybe ") {
+        guard let value else { return true }
+        if value.isNothing { return true }
+        return valueKindWord(value) == String(kindWord.dropFirst("maybe ".count))
+    }
     guard let value else { return false }
     return valueKindWord(value) == kindWord
 }
+
+// Stone 19: the words that follow an operation's refusal when
+// one side was the empty value — why it failed, and the shape
+// that works. The checker speaks the same words (before the
+// run, with its own closing line added), and the compiled
+// runtime carries the same text.
+let nothingNote = " Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there."
 
 // A built-in tool (Stone 6): a function every Nifla program has
 // from the start, without making it. `params` names the values it
@@ -351,6 +391,8 @@ func firstFloorLine(in statements: [Stmt]) -> Int? {
 
 func firstFloorLine(in expr: Expr) -> Int? {
     switch expr {
+    case .nothing:
+        return nil
     case .floor(_, _, let line):
         // The block's own line is where the floor construct starts;
         // a program holding any floor block is refused at the
@@ -746,10 +788,25 @@ final class Interpreter {
             if let returnKind = def.returnKind, !kindSatisfies(returnKind, signal.value) {
                 throw NiflaError(line: signal.line, message: "'\(name)' is marked to give back \(StaticKind.phrase(forKindWord: returnKind)) by its annotation, but this 'give' hands back \(signal.value.described). Change the value, or change the annotation.")
             }
+            // Stone 19: a function marked '-> nothing' never
+            // hands a value back — a 'give nothing' line inside
+            // it is an early way out, and the empty value it
+            // names is absorbed by the promise.
+            if def.returnKind == "nothing" {
+                return nil
+            }
             return signal.value
         }
-        if let returnKind = def.returnKind, returnKind != "nothing" {
-            throw NiflaError(line: line, message: "'\(name)' is marked to give back \(StaticKind.phrase(forKindWord: returnKind)) by its annotation, but it finished without giving a value back. Add a 'give' line inside '\(name)', or change the annotation.")
+        if let returnKind = def.returnKind {
+            // Stone 19: a function marked 'maybe' that finishes
+            // without a 'give' hands back the empty value —
+            // that is exactly what the mark says may happen.
+            if returnKind.hasPrefix("maybe ") {
+                return .nothing
+            }
+            if returnKind != "nothing" {
+                throw NiflaError(line: line, message: "'\(name)' is marked to give back \(StaticKind.phrase(forKindWord: returnKind)) by its annotation, but it finished without giving a value back. Add a 'give' line inside '\(name)', or change the annotation.")
+            }
         }
         return nil
     }
@@ -1042,6 +1099,8 @@ final class Interpreter {
             return .text(value)
         case .boolean(let value, _):
             return .boolean(value)
+        case .nothing:
+            return .nothing
 
         case .variable(let name, let line):
             if let value = scope.lookup(name) {
@@ -1157,11 +1216,17 @@ final class Interpreter {
             if case .number(let a) = left, case .number(let b) = right {
                 return .number(a + b)
             }
+            if left.isNothing || right.isNothing {
+                throw NiflaError(line: line, message: "I can't add \(left.described) and \(right.described). '+' adds two numbers, or joins text together.\(nothingNote)")
+            }
             throw NiflaError(line: line, message: "I can't add \(left.described) and \(right.described). '+' adds two numbers, or joins text together.")
 
         case "-", "*", "/":
             guard case .number(let a) = left, case .number(let b) = right else {
                 let verb = op == "-" ? "subtract" : (op == "*" ? "multiply" : "divide")
+                if left.isNothing || right.isNothing {
+                    throw NiflaError(line: line, message: "I can't \(verb) \(left.described) and \(right.described). '\(op)' works on two numbers. (Only '+' joins text.)\(nothingNote)")
+                }
                 throw NiflaError(line: line, message: "I can't \(verb) \(left.described) and \(right.described). '\(op)' works on two numbers. (Only '+' joins text.)")
             }
             switch op {
@@ -1183,12 +1248,16 @@ final class Interpreter {
             case (.object(let a), .object(let b)): equal = a === b  // the very same object, not just alike
             case (.list(let a), .list(let b)): equal = a === b  // the very same list, not just alike
             case (.bytes(let a), .bytes(let b)): equal = a === b  // the very same block, not just alike
+            case (.nothing, .nothing): equal = true  // Stone 19: the empty value is equal to itself — that is how a maybe is checked
             default: equal = false  // different kinds are never equal
             }
             return .boolean(op == "==" ? equal : !equal)
 
         case "<", "<=", ">", ">=":
             guard case .number(let a) = left, case .number(let b) = right else {
+                if left.isNothing || right.isNothing {
+                    throw NiflaError(line: line, message: "I can't compare \(left.described) and \(right.described) with '\(op)'. '\(op)' compares two numbers. (Text and true/false values can be checked with == and !=.)\(nothingNote)")
+                }
                 throw NiflaError(line: line, message: "I can't compare \(left.described) and \(right.described) with '\(op)'. '\(op)' compares two numbers. (Text and true/false values can be checked with == and !=.)")
             }
             switch op {

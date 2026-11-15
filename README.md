@@ -1683,6 +1683,178 @@ remaining one named with its reason.
 The guards' numbers are unchanged: a million loop passes,
 five hundred calls deep, 16,777,216 bytes to a block.
 
+## Stone 19 — checked absence: `maybe` and `nothing`
+
+Stone 18 gave values marks of kind. This stone gives the
+language the kind of value every real program meets sooner
+or later: **absence** — and makes it a checked thing, in
+the same spirit. A value that may not be there is marked
+`maybe`; the empty value itself is written `nothing`; and
+using a maybe where the nothing road is unhandled is
+refused — before the run, wherever the checker can prove
+it, and at the boundary everywhere else.
+
+### The words
+
+`nothing` is a value now, the way `true` and `false` are:
+
+```
+say nothing            // prints: nothing
+nothing == nothing     // true — that is how a maybe is checked
+nothing == 5           // false
+```
+
+A `maybe` mark stands before any kind but `nothing`
+(`maybe nothing` is refused at the reading — it says no
+more than `nothing` itself):
+
+```
+make lookup(name) -> maybe number {
+    if name == "Tyler" {
+        give 29
+    }
+}
+
+let a: maybe number = lookup("Tyler")
+let b: maybe number = lookup("Noki")
+```
+
+A function marked `maybe` that finishes without a `give`
+hands back the empty value — that is exactly what the mark
+says may happen. A function marked `-> nothing` still
+hands nothing back at all: a `give nothing` line inside it
+is an early way out, and the empty value it names is
+absorbed by the promise.
+
+### Handling both roads
+
+The unwrapping shape is the language's own `if`, and it
+*forces* nothing new to be learned — a maybe is handled by
+checking it against `nothing`, and the checker **narrows**
+the variable on each road:
+
+```
+if b == nothing {
+    say "b is missing"
+} else {
+    say b + 1          // here the checker knows b is a number
+}
+```
+
+Inside the `== nothing` road the variable is known to be
+the empty value; in the `else` it is known to be the kind
+itself. `!=` narrows the other way around. A `while` body
+sees the road where its test held, and what follows the
+loop sees the road where it failed — the only way out —
+so the fill-in loop reads plainly:
+
+```
+let c: maybe number = nothing
+while c == nothing {
+    c = 7
+}
+say c * 2              // the checker knows c is a number here
+```
+
+Narrowing is earned only by that plain test — a variable
+tested against `nothing` (or against a variable proven to
+hold it). Anything cleverer stays unproven, and the
+runtime guard speaks instead, as everywhere in Nifla.
+
+### What is refused, and where
+
+**The checker refuses, before anything runs**, a proven
+maybe — or a proven `nothing` — used where a value that is
+surely there is needed:
+
+- in `+ - * /` or a size comparison (`< <= > >=`) —
+  except `+` with text on either side, which joins
+  anything, the empty value by its name, as the run does;
+- under a minus sign, as an item-picker, as the value
+  picked from, or as the object a field is read from;
+- as a `repeat` count, or as what a `for` walks;
+- handed to a built-in tool that needs a definite kind
+  (the refusal names the check to make first);
+- handed to a parameter, a `give`, a `let`, or a setting
+  whose mark is a plain kind — the Stone 18 boundary
+  refusals, with the maybe now one of the kinds that can
+  break them.
+
+**The runtime guards catch the rest**, in all four
+mirrors, in the same plain words: an operation that meets
+the empty value stops and says why, and names the check
+("Nothing is the empty value: there is nothing there to
+work with. If a value might be nothing, check it first —
+if value == nothing { ... } else { ... } — and use it in
+the 'else', where it is known to be there."). The Stone 18
+annotation guards speak for `maybe` marks unchanged: a
+maybe boundary accepts the kind it names or the empty
+value, and nothing else.
+
+Nothing else about values changed. `nothing` can be held
+in a list or an object, said, joined onto text (by its
+name), and compared with `==` and `!=`. Tools that need a
+definite kind refuse it at the run, as they refuse any
+wrong kind.
+
+### Bare metal stands apart — plainly
+
+Absence is **not** part of the bare subset, and the
+refusal says why: a bare value is a machine word with one
+pinned shape, and the empty value has no word to be;
+there is no runtime there to hold the difference. A bare
+build that uses `nothing`, or marks a `maybe`, is refused
+before building, in plain words (`run-bare-kinds.sh`
+proves both refusals, beside the Stone 18 ones). This is
+recorded as a standing-apart, not a gap to close later
+without thought: a bare maybe would need a second word
+everywhere a value travels, which is a different machine
+contract, to be taken up as its own stone if ever.
+
+### Proofs
+
+- `examples/maybe.nifla` — the happy road in full: the
+  empty value said and compared, a `-> maybe number`
+  finder found and missing, both narrowings, the
+  fill-in loop, joining with nothing — run by the
+  interpreted, compiled, and self-hosted suites alike.
+- `examples/nothingguard.nifla` — the runtime guard: the
+  empty value carried through an unannotated function
+  (where the checker honestly can't prove it) meets `+`,
+  and every mirror refuses it in the same words.
+- `checker-examples/maybearith.nifla`,
+  `maybegive.nifla`, `maybeparam.nifla`,
+  `maybeset.nifla`, `nothingarith.nifla` — the checker's
+  refusals: a maybe in arithmetic, the empty value given
+  against a plain promise, a maybe handed to a plain
+  parameter, a maybe set into a plain mark, and proven
+  `nothing` itself in arithmetic.
+- `run-bare-kinds.sh` parts 5 and 6 — bare metal refuses
+  `nothing` and the `maybe` mark, in plain words.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- Absence itself was the remaining unmarked kind of
+  value: a function that found nothing had to hand back
+  a lie (a 0, an empty text) or stop the program. A
+  `maybe` mark now says the truth, and the checker and
+  the guards keep it — a maybe cannot flow silently into
+  a place that needs a value surely there.
+
+**Remaining, named:**
+
+- **Narrowing is earned only by the plain test** — a
+  variable compared with `nothing` (or with a variable
+  proven to hold it). A maybe learned from a tool, a
+  field, or a compound condition is not narrowed; the
+  runtime guard is the keeper there. Widening what the
+  checker can prove is future work, taken up only where
+  the proof stays honest.
+- **Bare metal has no absence** — recorded above as a
+  standing-apart with its reason, not an oversight.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

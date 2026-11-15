@@ -1,0 +1,12 @@
+// Stone 19: a maybe used in arithmetic without checking
+// it against nothing first. The checker refuses it before
+// anything runs — the nothing road is unhandled.
+
+make lookup(name) -> maybe number {
+    if name == "Tyler" {
+        give 29
+    }
+}
+
+let b: maybe number = lookup("Noki")
+say b + 1

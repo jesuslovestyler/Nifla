@@ -1,0 +1,1 @@
+Line 11: 'n' is marked as a number by its annotation, but this value is a number or nothing. Change the value, or change the annotation. I caught this before the program ran, so nothing ran.

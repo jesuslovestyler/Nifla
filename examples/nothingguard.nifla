@@ -1,0 +1,12 @@
+// Stone 19: what the checker can't prove, the run's own
+// guards catch. 'hide' makes no promise, so the checker
+// stays silent about what flows through it — and when the
+// empty value reaches the '+', the run refuses it in plain
+// words, in every mirror alike.
+
+make hide(value) {
+    give value
+}
+
+let x = hide(nothing)
+say x + 1

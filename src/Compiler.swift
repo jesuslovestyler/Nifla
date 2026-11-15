@@ -358,6 +358,7 @@ func compileMain(arguments: [String]) -> Int32 {
     var output: String? = nil
     var bare = false
     var guest = false
+    var feather = false
     var videoRequest: (width: Int, height: Int, depth: Int)? = nil
     var preludes: [String] = []
     var index = 1
@@ -367,6 +368,8 @@ func compileMain(arguments: [String]) -> Int32 {
             bare = true
         } else if argument == "--guest" {
             guest = true
+        } else if argument == "--feather" {
+            feather = true
         } else if argument == "--video" {
             index += 1
             guard index < arguments.count else {
@@ -426,6 +429,13 @@ func compileMain(arguments: [String]) -> Int32 {
     if guest && !bare {
         return fail("A guest is a bare-metal program that a host loads and calls instead of booting — add '--bare' to build one, like: niflac --bare --guest guest.nifla -o guest.bin", code: 2)
     }
+    // Stone 20: a feather is a guest together with its card —
+    // the plain-text card the door reads before it runs
+    // anything (see compileBare's feather wrapping). It only
+    // makes sense beside '--bare --guest'.
+    if feather && !guest {
+        return fail("A feather is a guest program together with its card — the card is what a host's door reads before running it. Build the program as a guest to make it a feather, like: niflac --bare --guest --feather guest.nifla -o guest.feather", code: 2)
+    }
     // The video request belongs to a booted bare program: it
     // is the loader who is asked, and only a host is booted.
     if videoRequest != nil && !bare {
@@ -472,7 +482,7 @@ func compileMain(arguments: [String]) -> Int32 {
     // and build (BareCompiler.swift) — no Swift runtime, no
     // hosted runtime file, nothing underneath the program.
     if bare {
-        return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, videoRequest: videoRequest, fail: fail)
+        return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, videoRequest: videoRequest, feather: feather, fail: fail)
     }
 
     guard let runtimePath = findRuntime() else {

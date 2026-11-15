@@ -2159,6 +2159,50 @@ struct BareTranslator {
     }
 }
 
+// MARK: - Feathers (Stone 20)
+
+// The FNV-1a checksum, 64-bit form — the feather card's
+// reckoning: begin at the offset basis, then for each byte,
+// xor the byte in and multiply by the FNV prime. The same
+// reckoning the guest door (Stone 17) and Cardnull OS 2's
+// feather door do by hand; it is an integrity checksum, not
+// a signature — it proves the bytes match the card, and
+// nothing more.
+func fnv1a64(_ bytes: [UInt8]) -> UInt64 {
+    var hash: UInt64 = 0xcbf29ce484222325
+    for byte in bytes {
+        hash = (hash ^ UInt64(byte)) &* 0x100000001b3
+    }
+    return hash
+}
+
+// A feather's card: the plain-text lines that stand at the
+// head of a .feather file, before a blank line and the
+// program's own bytes. The shape is the .feather format's
+// own — a card anyone can read, then the program:
+//
+//   CARDNULL FEATHER 1
+//   name: welcome-feather
+//   needs: the guest door (desk version 1)
+//   bytes: 12345
+//   checksum: 1a2b3c4d5e6f7788
+//
+// The name is the program's own file name without its
+// ending. What it needs is the one thing every guest needs:
+// a host that opens the guest door. The byte count and the
+// checksum are over the program bytes alone — everything
+// after the blank line.
+func featherCard(name: String, programBytes: [UInt8]) -> String {
+    let raw = String(fnv1a64(programBytes), radix: 16)
+    let checksum = String(repeating: "0", count: 16 - raw.count) + raw
+    return "CARDNULL FEATHER 1\n"
+        + "name: \(name)\n"
+        + "needs: the guest door (desk version 1)\n"
+        + "bytes: \(programBytes.count)\n"
+        + "checksum: \(checksum)\n"
+        + "\n"
+}
+
 // MARK: - Building the bare binary
 
 private func findTool(_ candidates: [String]) -> String? {
@@ -2197,7 +2241,7 @@ private func runTool(_ path: String, _ arguments: [String]) -> (status: Int32, w
 // GRUB reads either form). The assembly is kept beside the
 // binary, like the hosted path keeps its Swift and floor
 // assembly.
-func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode: Bool = false, videoRequest: (width: Int, height: Int, depth: Int)? = nil, fail: (String, Int32) -> Int32) -> Int32 {
+func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode: Bool = false, videoRequest: (width: Int, height: Int, depth: Int)? = nil, feather: Bool = false, fail: (String, Int32) -> Int32) -> Int32 {
     let validator = BareValidator(guestMode: guestMode)
     do {
         try validator.validate(program)
@@ -2300,6 +2344,27 @@ func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode:
         }
         if packaged.status != 0 {
             return fail("The guest in '\(inputPath)' couldn't be packaged. What objcopy said:\n\(packaged.words)", 1)
+        }
+        if feather {
+            // Stone 20: lay the card at the head of the image,
+            // and the image becomes a feather — the form a
+            // host's door receives: the card first (plain text
+            // anyone can read), a blank line, then the
+            // program's own bytes, exactly as they were.
+            guard let image = try? Data(contentsOf: URL(fileURLWithPath: outputPath)) else {
+                return fail("I couldn't read back the guest image at '\(outputPath)' to lay its card on it.", 2)
+            }
+            let name = URL(fileURLWithPath: inputPath).deletingPathExtension().lastPathComponent
+            var wrapped = Data(featherCard(name: name, programBytes: [UInt8](image)).utf8)
+            wrapped += image
+            do {
+                try wrapped.write(to: URL(fileURLWithPath: outputPath))
+            } catch {
+                return fail("I couldn't write the feather to '\(outputPath)'.", 2)
+            }
+            print("Made \(outputPath) — a feather, compiled from \(inputPath): the guest program together with its card, linked for the doorstep at 2 MiB. A host's door reads the card and checks the checksum before it runs anything.")
+            print("The assembly it was made from is kept at \(asmPath), if you'd like to read it.")
+            return 0
         }
         print("Made \(outputPath) — a guest program, compiled from \(inputPath), linked for the doorstep at 2 MiB. It does not boot: a host copies it to the doorstep, checks it, and calls it, and it returns to the host.")
         print("The assembly it was made from is kept at \(asmPath), if you'd like to read it.")

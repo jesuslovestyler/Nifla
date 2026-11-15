@@ -10,6 +10,11 @@
 //                          compile a bare-metal subset of Nifla
 //                          into a binary that boots on its own
 //                          (Stone 11; see BareCompiler.swift)
+//   niflac --bare --guest --feather program.nifla
+//                          compile a bare guest and lay its
+//                          card on it, making a .feather — the
+//                          form a host's door receives
+//                          (Stone 20; see BareCompiler.swift)
 //
 // Which program this is is decided by the name it was called by.
 // Either way, the checker (Stone 5) reads the program first, and a

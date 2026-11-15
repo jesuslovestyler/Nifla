@@ -1855,6 +1855,78 @@ contract, to be taken up as its own stone if ever.
 - **Bare metal has no absence** — recorded above as a
   standing-apart with its reason, not an oversight.
 
+## Stone 20 — feathers from the compiler (November 15, 2026)
+
+A guest program has always traveled with a card in spirit:
+a host's door wants to know a program's name, what it
+needs, and whether its bytes are whole, before it runs
+anything. Until this stone the card was somebody else's
+job — Cardnull OS 2's build laid a separate binary card
+beside its welcome feather with a Python tool. Now the
+compiler lays the card itself:
+
+```
+niflac --bare --guest --feather program.nifla -o program.feather
+```
+
+`--feather` without `--guest` is refused in plain words:
+a feather is a guest program together with its card. The
+`.feather` file is the plain guest build, byte for byte,
+with a plain-text card standing at its head — the OS 1
+format's shape, a card and not a signature:
+
+```
+CARDNULL FEATHER 1
+name: welcome-feather
+needs: the guest door (desk version 1)
+bytes: 2656
+checksum: 0b2452a707571de8
+
+<the program bytes>
+```
+
+The name is the program file's own name; the needs line
+names the guest door (desk version 1) every guest is built
+for today; the byte count and the FNV-1a-64 checksum (the
+same reckoning the language's Stone 17 card check uses)
+are over the program bytes alone — everything after the
+card's blank line. A door reads the card, reckons the
+checksum over the program, and runs it only when the two
+agree. The checksum proves the bytes match the card and
+nothing more; it is not a signature, and the door's
+standing honesty (no isolation yet) is unchanged.
+
+Standing proof: `run-feather.sh` — it builds a guest both
+ways and checks the card line by line (name, needs, byte
+count against the program part, checksum against a fresh
+independent reckoning), checks the program part is the
+plain guest build byte for byte, and checks the
+`--feather`-without-`--guest` refusal and that it leaves
+no file behind.
+
+**Adoption — Cardnull OS 2 took the mode the same day.**
+Its build now produces `build/welcome.feather` with
+`--feather`, and its disc carries two modules where three
+rode before: the settings, and the feather as ONE file
+(`feather.fea` on the disc), its card at its head. The
+OS's door (its `featherdoor.nifla`) reads the card from
+the feather itself — the card's lines parsed in plain
+Nifla, the checksum reckoned over the program bytes after
+the card's blank line, a tampered feather still refused
+in the same plain words ("The feather on this disc is not
+whole, so it was not let in."). Both of the OS's own
+loaders (BIOS and EFI) lay two module entries now. The
+OS's `tools/make-modules.py` shrank to the one thing that
+is still honestly its own — the settings module; the card
+half retired, and the tool says so in its header. The
+OS's full proof regression (all fifteen proofs) passes on
+the adopted build, including its Stone 5 door proof: the
+feather as laid visits, and a copy with one program byte
+flipped is refused and never appears. The language's own
+words for the guest machinery (`callguest`, `guestvalue`,
+`guestgive`, `--guest`) are plumbing and did not change;
+feather is the format's name, not a renaming.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

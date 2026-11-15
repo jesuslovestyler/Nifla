@@ -1,0 +1,18 @@
+// Stone 10: working on lists and objects after they are
+// made — taking an item out of a list (and being handed the
+// item), putting one in, sorting a copy, and asking an object
+// its field names or taking a field out of it.
+let prices = [5, 2, 9, 2]
+say removeat(prices, 0)
+say prices
+insertat(prices, 1, 7)
+say prices
+say sorted(prices)
+say prices
+let words = ["pear", "apple", "plum"]
+say sorted(words)
+let person = { name: "Tyler", years: 29, town: "Washington" }
+say fieldnames(person)
+say removefield(person, "town")
+say person
+say length(person)

@@ -13,6 +13,7 @@
 //              | "for" name "in" expression block
 //              | "make" name "(" [ name ( "," name )* ] ")" block
 //              | "give" expression
+//              | "attempt" block "if" "it" "fails" block
 //              | name "(" [ expression ( "," expression )* ] ")"
 //              | floor-block
 //   block      = "{" statement* "}"
@@ -59,6 +60,7 @@ enum Stmt {
     case forEach(name: String, over: Expr, body: [Stmt], line: Int)
     case define(name: String, params: [String], body: [Stmt], line: Int)
     case give(Expr, line: Int)
+    case attempt(body: [Stmt], recovery: [Stmt], line: Int)
     case doCall(name: String, args: [Expr], line: Int)
     case doExpr(Expr, line: Int)  // an expression run for what it does (a floor block, Stone 7)
 }
@@ -264,6 +266,42 @@ final class Parser {
             return .give(value, line: token.line)
         }
 
+        if checkKeyword("attempt") {
+            // attempt { ... } if it fails { ... } — do something
+            // that might go wrong, and say what to do when it does
+            // (Stone 10). The 'if it fails' is part of the shape:
+            // those three words after the block can only mean this
+            // (an ordinary 'if' could never be followed by two
+            // names in a row), so there is no mistaking them.
+            advance()
+            guard checkSymbol("{") else {
+                throw NiflaError(line: current.line, message: "After 'attempt' I need a '{' to start the block that tries, like: attempt { ... } if it fails { ... }. Instead I found \(current.spoken).")
+            }
+            let openLine = current.line
+            advance()
+            let body = try parseBlock(openLine: openLine)
+            let itToken = tokens[min(pos + 1, tokens.count - 1)]
+            let failsToken = tokens[min(pos + 2, tokens.count - 1)]
+            let braceToken = tokens[min(pos + 3, tokens.count - 1)]
+            var shape = false
+            if checkKeyword("if"),
+               case .name(let itWord) = itToken.kind, itWord == "it",
+               case .name(let failsWord) = failsToken.kind, failsWord == "fails",
+               case .symbol(let brace) = braceToken.kind, brace == "{" {
+                shape = true
+            }
+            guard shape else {
+                throw NiflaError(line: current.line, message: "After an 'attempt' block I need 'if it fails' and a block saying what to do when something goes wrong, like: attempt { ... } if it fails { ... }.")
+            }
+            advance()  // 'if'
+            advance()  // 'it'
+            advance()  // 'fails'
+            let recoveryOpenLine = current.line
+            advance()  // '{'
+            let recovery = try parseBlock(openLine: recoveryOpenLine)
+            return .attempt(body: body, recovery: recovery, line: token.line)
+        }
+
         // Setting an existing variable: a name followed by '='.
         // Setting a field or an item: a name followed by one or
         // more '.field' or '[...]' steps and then '='.
@@ -314,7 +352,7 @@ final class Parser {
             throw NiflaError(line: token.line, message: "I found the name '\(name)' at the start of a line, but a line needs to do something: make a variable with 'let \(name) = ...', set it with '\(name) = ...', set a field with '\(name).field = ...', set an item with '\(name)[0] = ...', show it with 'say \(name)', or call a function with '\(name)(...)'.")
         }
 
-        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'for', 'make', 'give', or the name of a variable to set — but I found \(token.spoken).")
+        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'for', 'make', 'give', 'attempt', or the name of a variable to set — but I found \(token.spoken).")
     }
 
     // The "( value, value )" part of a call, shared by call statements

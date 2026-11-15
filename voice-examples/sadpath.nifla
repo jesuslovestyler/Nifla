@@ -1,0 +1,12 @@
+// Stone 10: the whole grown-up voice at once. An attempt
+// catches a file that isn't there; 'problem' holds what went
+// wrong; sayerr reports it on the error channel; and
+// exitwith leaves with a number that says it failed.
+attempt {
+    let notes = readfile("voice-missing.txt")
+    say notes
+} if it fails {
+    sayerr("It went wrong: " + problem)
+    exitwith(2)
+}
+say "This is never said."

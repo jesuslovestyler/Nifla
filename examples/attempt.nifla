@@ -1,0 +1,18 @@
+// Stone 10: attempt — do something that might go wrong, and
+// say what to do when it does, in plain words. When a problem
+// stops the first block, the second block runs instead, with
+// the problem's words held in a variable called 'problem' —
+// and the program carries on.
+attempt {
+    let notes = readfile("notes-that-are-not-there.txt")
+    say notes
+} if it fails {
+    say "No notes yet — starting fresh."
+}
+attempt {
+    let answer = 10 / 0
+    say answer
+} if it fails {
+    say "That sum went wrong: " + problem
+}
+say "Carrying on."

@@ -1,0 +1,7 @@
+// Stone 10: a program with two voices. 'say' speaks to the
+// screen, as always; sayerr speaks to the error channel,
+// where warnings and problems belong — and the program still
+// ends well, with the usual parting number of 0.
+say "All is well."
+sayerr("But mind the step.")
+say "Carried on."

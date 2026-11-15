@@ -619,6 +619,130 @@ Honest limits of Stone 9:
   the memory it was handed is writing outside the language's
   protection entirely. That is what the marking is for.
 
+## Stone 10 — a grown-up voice
+
+Laid on **November 14, 2026**, the same evening, second of the
+three. Until now a Nifla program that met a problem had exactly
+one move: stop, and let the interpreter say what happened. And
+everything a program said went to one place, with one parting
+number it couldn't choose. This stone gives programs a voice
+like a grown-up tool's: catch a problem and carry on, speak to
+the error channel, and choose the number you leave behind.
+
+**Catching a problem** is written in plain words:
+
+```
+attempt {
+    let notes = readfile("notes.txt")
+    say notes
+} if it fails {
+    say "No notes yet — starting fresh."
+}
+```
+
+The first block runs in its own scope, like any block. If a
+problem stops it, the second block runs instead, also in its
+own scope, with the problem's words held in a variable called
+**`problem`** — the message itself, without its "Line N:" —
+and the program carries on after the whole construct. A `give`
+inside either block gives from the function as usual; only
+Nifla problems are caught. When nothing goes wrong, the
+recovery block simply doesn't run. (`examples/attempt.nifla`
+catches a missing file and a division by zero, and carries
+on.) An `attempt` must have its recovery block — there is no
+form that catches a problem and says nothing about it.
+
+**Two new tools speak with the grown-up voice:**
+
+- `sayerr(value)` — says a value's spoken form on the
+  **error channel**, the way `say` speaks to the screen, and
+  gives back how many characters it wrote, the newline
+  counted.
+- `exitwith(code)` — ends the program at once and chooses its
+  **parting number**, a whole number from 0 to 255: 0 for
+  success, anything else for the kinds of failure a program
+  knows how to name.
+
+A third small suite, `voice-examples/`, proves the three
+channels together — screen, error channel, and parting
+number, interpreted and compiled — under `./run-voice.sh`,
+including a program that catches a missing file, reports it
+on the error channel, and leaves with 2.
+
+**Working on what's already made** — five more tools, all in
+the one shared table the interpreter, the compiled runtime,
+the checker, and now the self-host all keep:
+
+- `removeat(list, index)` — takes the item at that place out
+  of the list and **gives the item back**
+- `insertat(list, index, value)` — puts a value into a list
+  at that place (the end is a fair place), and gives the list
+- `sorted(list)` — gives back a **new list**, sorted: all
+  numbers, smallest first, or all text, in the machine's
+  character order (capitals before small letters, as the
+  characters themselves are numbered). A mixed list, or one
+  starting with anything else, is refused in plain words. The
+  list handed in is left as it was
+- `fieldnames(object)` — the object's field names, as a list
+  of text, in the order they were made
+- `removefield(object, name)` — takes a field out of an
+  object and **gives its value back**; a field that isn't
+  there is the usual missing-field problem
+
+(`examples/surgery.nifla` exercises all five.) The checker
+knows each tool's shape as it knows every tool's, and checks
+`attempt` the way it checks `if`: both blocks are checked
+from the state before, `problem` is known text in the
+recovery block, and what follows sees the merge.
+
+**The self-host caught up — both of its Stone 8 differences
+are closed.** The interpreter written in Nifla now reports an
+interpreted program's problems on the error channel and
+leaves with 1 (2 when the program file itself can't be
+opened), exactly as the Swift interpreter does; and a
+`readfile` or `writefile` failing inside the program it runs
+is caught with `attempt` and re-said with the program's own
+line number, instead of escaping as the self-host's own
+error. `./run-selfhost.sh` now compares all three channels,
+the way `run_tests.sh` rules them. The self-host also learned
+Stone 9's `makebytes` and blocks of bytes with this stone —
+**owning Stone 9's one unfinished edge: for that one stone
+the self-host was behind the hosted tools**, and
+`examples/bytebox.nifla` was the example it couldn't run. It
+runs it now.
+
+```sh
+./run_tests.sh      # the interpreter: 36 passed, 0 failed
+./run-compiled.sh   # the compiler, checker, and Floor: 71 passed, 0 failed
+./run-voice.sh      # the grown-up voice, three channels: 6 passed, 0 failed
+./run-selfhost.sh   # the interpreter in Nifla: 34 passed, 0 failed (of 36)
+```
+
+Honest limits of Stone 10:
+
+- `attempt` catches **Nifla problems only** — the plain-words
+  errors the language itself raises. A floor instruction that
+  faults in a compiled program still takes the whole program
+  down; there is no catching that, and this stone doesn't
+  pretend otherwise.
+- `problem` holds the message **without** its line number —
+  the words alone. A program that wants the line must keep
+  its own count; the message text is what it is.
+- `exitwith` codes are 0 to 255 because that is what the
+  system keeps of a parting number; a bigger or part number
+  is refused in plain words.
+- `sorted` orders text by the characters' own numbers, so
+  capitals sort before small letters and the order is the
+  machine's, not a dictionary's.
+- Through the self-host, `makebytes` is bounded by the
+  host's own loop guard (a million passes shared across the
+  whole run), so a block near the hosted 16 MiB cap can't be
+  made there; the hosted tools keep the full cap.
+- The two self-host exclusions from Stone 8 stand, for the
+  measured host-guard reasons recorded there: `endless` and
+  `forever` remain uncovered, and nothing in this stone was
+  bent to change that.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

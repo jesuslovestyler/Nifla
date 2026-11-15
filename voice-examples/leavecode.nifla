@@ -1,0 +1,6 @@
+// Stone 10: exitwith ends a program early and chooses the
+// number it leaves behind — its parting word to the system.
+// Nothing after it runs.
+say "Starting."
+exitwith(3)
+say "This is never said."

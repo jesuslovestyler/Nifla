@@ -9,13 +9,13 @@
 // lexer and parser, and runs it with its own interpreter — the
 // same plain-words errors, the same guards, the same output as
 // the Swift interpreter gives, on every program it covers. (The
-// README's Stone 8 section names exactly what it covers, and the
-// two differences it can't help: an interpreted program's error
-// is said out loud here instead of going to standard error with a
-// failing exit, because Nifla has no way to write to standard
-// error or to choose an exit code; and a readfile or writefile
-// that fails inside the program it runs escapes as this
-// interpreter's own error, because Nifla has no way to catch one.)
+// README's Stone 8 section names exactly what it covers. Stone 8
+// also named two differences it couldn't help — errors spoken on
+// the screen instead of the error channel, and file failures
+// inside the interpreted program escaping uncatchably. Stone 10
+// closed both: Nifla grew an error channel, exit codes, and
+// 'attempt', and this interpreter now uses all three, so its
+// behavior matches the Swift interpreter on those cases too.)
 //
 // How values are held: Nifla can't build field names out of text
 // at run time, so everything structured is a tagged object whose
@@ -30,6 +30,7 @@
 //   { kind: "boolean", flag: true or false }
 //   { kind: "object", names: [field names], values: [field values] }
 //   { kind: "list", items: [the values] }
+//   { kind: "bytes", data: [the bytes, as host numbers] }
 //   { kind: "nothing" } — what a function that never 'give's
 //   hands back; only this interpreter ever sees it.
 //
@@ -38,6 +39,11 @@
 //   { ok: true, value: ... }        — it worked
 //   { ok: false, message: "..." }   — the plain-words error,
 //                                     already wearing its "Line N:"
+//                                     (it also carries "bare", the
+//                                     message without the prefix,
+//                                     and "line" — Stone 10's
+//                                     'attempt' needs the bare
+//                                     words for its 'problem')
 // A statement's result also carries "gave": true when a 'give'
 // line ended the function it was running in.
 
@@ -47,7 +53,7 @@
 let NOTHING = { kind: "nothing" }
 
 make errAt(line, message) {
-    give { ok: false, message: "Line " + line + ": " + message }
+    give { ok: false, message: "Line " + line + ": " + message, bare: message, line: line }
 }
 
 make okVal(value) {
@@ -251,6 +257,13 @@ make vList(items) {
     give { kind: "list", items: items }
 }
 
+// A block of bytes (Stone 9): the bytes themselves are held as
+// a list of host numbers, each a whole number from 0 to 255.
+// The value is shared, the way lists and objects are.
+make vBytes(data) {
+    give { kind: "bytes", data: data }
+}
+
 // Where a name lives in a names list, or -1 when it isn't there.
 make nameIndex(names, name) {
     let i = 0
@@ -341,6 +354,13 @@ make renderValue(v, seen, quoted) {
         }
         give "[" + join(parts, ", ") + "]"
     }
+    if v.kind == "bytes" {
+        let parts = []
+        for b in v.data {
+            append(parts, numText(b))
+        }
+        give "bytes(" + join(parts, ", ") + ")"
+    }
     give ""
 }
 
@@ -372,6 +392,15 @@ make described(v) {
             give "a list of 1 item"
         }
         give "a list of " + length(v.items) + " items"
+    }
+    if v.kind == "bytes" {
+        if length(v.data) == 0 {
+            give "an empty block of bytes"
+        }
+        if length(v.data) == 1 {
+            give "a block of 1 byte"
+        }
+        give "a block of " + length(v.data) + " bytes"
     }
     give ""
 }
@@ -448,6 +477,12 @@ let gChars = []
 let gPos = 0
 let gLine = 1
 
+// Tokens already lexed and waiting their turn (Stone 9): a
+// floor block handed values reads its "( ... )" first and then
+// captures its raw lines, so the tokens inside the parentheses
+// are lexed early and handed out one by one from here.
+let gPending = []
+
 make lexPeek() {
     if gPos < length(gChars) {
         give gChars[gPos]
@@ -515,7 +550,7 @@ make trimSpaceLine(t) {
 }
 
 make isKeywordWord(w) {
-    let words = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor"]
+    let words = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor", "attempt"]
     for word in words {
         if word == w {
             give true
@@ -550,6 +585,11 @@ make lexAll(source) {
 
 // One token, from wherever the lexer stands.
 make lexOne() {
+    if length(gPending) > 0 {
+        let waiting = gPending[0]
+        removeat(gPending, 0)
+        give okVal(waiting)
+    }
     // Skip spaces and blank lines; remember line numbers.
     let skipping = true
     while skipping {
@@ -729,7 +769,11 @@ make lexWordTok(startLine) {
         // A floor block: 'floor' followed on the same line by '{'
         // opens a stretch of raw lines — processor instructions,
         // taken exactly as written — until a line holding only
-        // '}'. Those lines are never lexed as Nifla.
+        // '}'. Those lines are never lexed as Nifla. Since Stone
+        // 9 the block can be handed values first: 'floor' then
+        // '( ... )' then '{'. The values are ordinary Nifla, so
+        // their tokens are lexed now and wait in gPending behind
+        // the 'floor' keyword token this gives back.
         let savedPos = gPos
         let skipping = true
         while skipping {
@@ -744,8 +788,32 @@ make lexWordTok(startLine) {
                 }
             }
         }
-        if lexPeek() == "{" {
-            gPos = gPos + 1  // the '{'
+        if lexPeek() == "(" {
+            gPos = gPos + 1  // the '('
+            let handed = [{ kind: "symbol", symbol: "(", line: startLine }]
+            let depth = 1
+            let collecting = true
+            while collecting {
+                let r = lexOne()
+                if r.ok == false {
+                    give r
+                }
+                if r.value.kind == "end" {
+                    give errAt(startLine, "The '(' after 'floor' is never closed. Close the values being handed to the block with ')', then give the block itself: floor(values) { ... }.")
+                }
+                append(handed, r.value)
+                if r.value.kind == "symbol" {
+                    if r.value.symbol == "(" {
+                        depth = depth + 1
+                    }
+                    if r.value.symbol == ")" {
+                        depth = depth - 1
+                    }
+                }
+                if depth == 0 {
+                    collecting = false
+                }
+            }
             skipping = true
             while skipping {
                 let c = lexPeek()
@@ -759,63 +827,23 @@ make lexWordTok(startLine) {
                     }
                 }
             }
-            if lexPeek() == "/" {
-                if lexPeek2() == "/" {
-                    let eatingComment = true
-                    while eatingComment {
-                        let ch = lexPeek()
-                        if ch == "\n" {
-                            eatingComment = false
-                        }
-                        if ch == "" {
-                            eatingComment = false
-                        }
-                        if eatingComment {
-                            gPos = gPos + 1
-                        }
-                    }
-                }
+            if lexPeek() != "{" {
+                give errAt(gLine, "After the values handed to 'floor' I need the block itself: '{' on the same line, then the processor instructions on the lines below, until a line holding only '}'.")
             }
-            if lexPeek() == "\n" {
-                gPos = gPos + 1
-                gLine = gLine + 1
-            } else {
-                if lexPeek() != "" {
-                    give errAt(startLine, "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
-                }
+            gPos = gPos + 1  // the '{'
+            let rest = lexFloorRest(startLine)
+            if rest.ok == false {
+                give rest
             }
-            let asmLines = []
-            let capturing = true
-            while capturing {
-                if lexPeek() == "" {
-                    give errAt(startLine, "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
-                }
-                let lineText = ""
-                let eatingLine = true
-                while eatingLine {
-                    let ch = lexPeek()
-                    if ch == "\n" {
-                        eatingLine = false
-                    }
-                    if ch == "" {
-                        eatingLine = false
-                    }
-                    if eatingLine {
-                        lineText = lineText + ch
-                        gPos = gPos + 1
-                    }
-                }
-                if lexPeek() == "\n" {
-                    gPos = gPos + 1
-                    gLine = gLine + 1
-                }
-                if trimSpaceLine(lineText) == "}" {
-                    capturing = false
-                } else {
-                    append(asmLines, lineText)
-                }
+            for t in handed {
+                append(gPending, t)
             }
-            give okVal({ kind: "floor", asm: join(asmLines, "\n"), line: startLine })
+            append(gPending, rest.value)
+            give okVal({ kind: "keyword", word: "floor", line: startLine })
+        }
+        if lexPeek() == "{" {
+            gPos = gPos + 1  // the '{'
+            give lexFloorRest(startLine)
         }
         gPos = savedPos
     }
@@ -823,6 +851,82 @@ make lexWordTok(startLine) {
         give okVal({ kind: "keyword", word: word, line: startLine })
     }
     give okVal({ kind: "name", name: word, line: startLine })
+}
+
+// The rest of a floor block, once its '{' has been read: an
+// optional comment, then the raw lines, one per line, until a
+// line holding only '}'. Gives back the floor token.
+make lexFloorRest(startLine) {
+    let skipping = true
+    while skipping {
+        let c = lexPeek()
+        if c == " " {
+            gPos = gPos + 1
+        } else {
+            if c == "\t" {
+                gPos = gPos + 1
+            } else {
+                skipping = false
+            }
+        }
+    }
+    if lexPeek() == "/" {
+        if lexPeek2() == "/" {
+            let eatingComment = true
+            while eatingComment {
+                let ch = lexPeek()
+                if ch == "\n" {
+                    eatingComment = false
+                }
+                if ch == "" {
+                    eatingComment = false
+                }
+                if eatingComment {
+                    gPos = gPos + 1
+                }
+            }
+        }
+    }
+    if lexPeek() == "\n" {
+        gPos = gPos + 1
+        gLine = gLine + 1
+    } else {
+        if lexPeek() != "" {
+            give errAt(startLine, "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
+        }
+    }
+    let asmLines = []
+    let capturing = true
+    while capturing {
+        if lexPeek() == "" {
+            give errAt(startLine, "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
+        }
+        let lineText = ""
+        let eatingLine = true
+        while eatingLine {
+            let ch = lexPeek()
+            if ch == "\n" {
+                eatingLine = false
+            }
+            if ch == "" {
+                eatingLine = false
+            }
+            if eatingLine {
+                lineText = lineText + ch
+                gPos = gPos + 1
+            }
+        }
+        if lexPeek() == "\n" {
+            gPos = gPos + 1
+            gLine = gLine + 1
+        }
+        if trimSpaceLine(lineText) == "}" {
+            capturing = false
+        } else {
+            append(asmLines, lineText)
+        }
+    }
+    give okVal({ kind: "floor", asm: join(asmLines, "\n"), line: startLine })
 }
 
 // ---------- the parser ----------
@@ -838,6 +942,7 @@ make lexWordTok(startLine) {
 //               { type: "for", name, over, body, line }
 //               { type: "define", name, params, body, line }
 //               { type: "give", value, line }
+//               { type: "attempt", body, recovery, line }
 //               { type: "doCall", name, args, line }
 //               { type: "doExpr", expr, line }
 //   expressions: { type: "number", value, line }
@@ -849,7 +954,7 @@ make lexWordTok(startLine) {
 //               { type: "list", items, line }
 //               { type: "field", base, name, line }
 //               { type: "index", base, index, line }
-//               { type: "floor", asm, line }
+//               { type: "floor", asm, args, line }
 //               { type: "negate", inner, line }
 //               { type: "binary", op, left, right, line }
 
@@ -960,7 +1065,18 @@ make parseStatement() {
     // A floor block standing on its own.
     if token.kind == "floor" {
         pAdvance()
-        give okVal({ type: "doExpr", expr: { type: "floor", asm: token.asm, line: token.line }, line: token.line })
+        give okVal({ type: "doExpr", expr: { type: "floor", asm: token.asm, args: [], line: token.line }, line: token.line })
+    }
+
+    // A floor block handed values, standing on its own:
+    // floor(values) { ... } — the same expression, run for
+    // what it does to the memory it was handed.
+    if pIsKw("floor") {
+        let f = parseFloorExpr()
+        if f.ok == false {
+            give f
+        }
+        give okVal({ type: "doExpr", expr: f.value, line: token.line })
     }
 
     if pIsKw("let") {
@@ -1149,6 +1265,50 @@ make parseStatement() {
         give okVal({ type: "give", value: v.value, line: token.line })
     }
 
+    if pIsKw("attempt") {
+        pAdvance()
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'attempt' I need a '{' to start the block that tries something, like: attempt { ... } if it fails { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        let follows = false
+        if pIsKw("if") {
+            let second = pNext()
+            if second.kind == "name" {
+                if second.name == "it" {
+                    follows = true
+                }
+            }
+        }
+        if follows == false {
+            give errAt(pCur().line, "After an 'attempt' block I need 'if it fails' and a block saying what to do when something goes wrong, like: attempt { ... } if it fails { ... }.")
+        }
+        pAdvance()  // 'if'
+        pAdvance()  // 'it'
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After an 'attempt' block I need 'if it fails' and a block saying what to do when something goes wrong, like: attempt { ... } if it fails { ... }.")
+        }
+        if pCur().name != "fails" {
+            give errAt(pCur().line, "After an 'attempt' block I need 'if it fails' and a block saying what to do when something goes wrong, like: attempt { ... } if it fails { ... }.")
+        }
+        pAdvance()  // 'fails'
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'if it fails' I need a '{' to start the block that runs when something goes wrong. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let recoveryOpen = pCur().line
+        pAdvance()
+        let recoveryR = parseBlock(recoveryOpen)
+        if recoveryR.ok == false {
+            give recoveryR
+        }
+        give okVal({ type: "attempt", body: bodyR.value, recovery: recoveryR.value, line: token.line })
+    }
+
     // Lines that start with a name: setting a variable, setting a
     // field or an item, or calling a function for what it does.
     if token.kind == "name" {
@@ -1198,7 +1358,29 @@ make parseStatement() {
         give errAt(token.line, "I found the name '" + name + "' at the start of a line, but a line needs to do something: make a variable with 'let " + name + " = ...', set it with '" + name + " = ...', set a field with '" + name + ".field = ...', set an item with '" + name + "[0] = ...', show it with 'say " + name + "', or call a function with '" + name + "(...)'.")
     }
 
-    give errAt(token.line, "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'for', 'make', 'give', or the name of a variable to set — but I found " + pSpoken(token) + ".")
+    give errAt(token.line, "I expected a line to start with 'let', 'say', 'if', 'attempt', 'while', 'repeat', 'for', 'make', 'give', or the name of a variable to set — but I found " + pSpoken(token) + ".")
+}
+
+// A floor expression: the 'floor' keyword, the values handed
+// to the block in parentheses when there are any, and the
+// block itself (which the lexer captured whole, as one token).
+make parseFloorExpr() {
+    let token = pCur()
+    pAdvance()  // the 'floor' keyword
+    let args = []
+    if pIsSym("(") {
+        let argsR = parseCallArgs("floor")
+        if argsR.ok == false {
+            give argsR
+        }
+        args = argsR.value
+    }
+    if pCur().kind != "floor" {
+        give errAt(pCur().line, "After 'floor' I need the block itself: '{' on the same line, then the processor instructions on the lines below, until a line holding only '}'.")
+    }
+    let block = pCur()
+    pAdvance()
+    give okVal({ type: "floor", asm: block.asm, args: args, line: token.line })
 }
 
 // A target chain after a leading name — ".field" and "[...]"
@@ -1410,6 +1592,9 @@ make parseAtom() {
             pAdvance()
             give okVal({ type: "boolean", flag: false, line: token.line })
         }
+        if token.word == "floor" {
+            give parseFloorExpr()
+        }
     }
     if token.kind == "name" {
         pAdvance()
@@ -1444,7 +1629,7 @@ make parseAtom() {
     }
     if token.kind == "floor" {
         pAdvance()
-        give okVal({ type: "floor", asm: token.asm, line: token.line })
+        give okVal({ type: "floor", asm: token.asm, args: [], line: token.line })
     }
     give errAt(token.line, "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, a list like [1, 2, 3], or a floor block here, but I found " + pSpoken(token) + ".")
 }
@@ -1683,7 +1868,13 @@ make execStmt(s, scope) {
                     append(items, vText(ch))
                 }
             } else {
-                give errAt(s.line, "'for' needs a list or some text to walk through, but here it was given " + described(v.value) + ". Write it like: for item in items { ... }")
+                if v.value.kind == "bytes" {
+                    for b in v.value.data {
+                        append(items, vNumber(b))
+                    }
+                } else {
+                    give errAt(s.line, "'for' needs a list, some text, or a block of bytes to walk through, but here it was given " + described(v.value) + ". Write it like: for item in items { ... }")
+                }
             }
         }
         for item in items {
@@ -1723,6 +1914,20 @@ make execStmt(s, scope) {
             give v
         }
         give { ok: true, gave: true, value: v.value }
+    }
+    if s.type == "attempt" {
+        // Run the first block in its own scope. A 'give' inside
+        // it hands back from the function, as anywhere; an error
+        // runs the second block instead, in its own scope, with
+        // the problem's bare words held in 'problem'.
+        let child = makeScope(scope)
+        let r = execBlock(s.body, child)
+        if r.ok {
+            give r
+        }
+        let recoveryScope = makeScope(scope)
+        scopeDeclare(recoveryScope, "problem", vText(r.bare))
+        give execBlock(s.recovery, recoveryScope)
     }
     if s.type == "doCall" {
         let r = callFunction(s.name, s.args, s.line, scope)
@@ -1794,6 +1999,44 @@ make assignTo(target, valueExpr, stmtLine, scope) {
         if b.value.kind == "text" {
             give errAt(target.line, "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
         }
+        if b.value.kind == "bytes" {
+            let iv = evalExpr(target.index, scope)
+            if iv.ok == false {
+                give iv
+            }
+            let num = itemNumber(iv.value, target.line)
+            if num.ok == false {
+                give num
+            }
+            let idx = num.value
+            if length(b.value.data) == 0 {
+                give errAt(target.line, "This block of bytes has no bytes yet, so there is no byte " + idx + " to set. Make a bigger block with makebytes — like: makebytes(8).")
+            }
+            if idx < 0 {
+                give errAt(target.line, "This block of bytes has " + length(b.value.data) + " bytes, numbered 0 to " + (length(b.value.data) - 1) + ", so there is no byte " + idx + " to set.")
+            }
+            if idx >= length(b.value.data) {
+                give errAt(target.line, "This block of bytes has " + length(b.value.data) + " bytes, numbered 0 to " + (length(b.value.data) - 1) + ", so there is no byte " + idx + " to set.")
+            }
+            let v = evalExpr(valueExpr, scope)
+            if v.ok == false {
+                give v
+            }
+            if v.value.kind != "number" {
+                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
+            }
+            if isWholeNum(v.value.num) == false {
+                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
+            }
+            if v.value.num < 0 {
+                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
+            }
+            if v.value.num > 255 {
+                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
+            }
+            b.value.data[idx] = v.value.num
+            give okDone()
+        }
         give errAt(target.line, "I can only set an item in a list, like: items[0] = 30 — but this is " + described(b.value) + ", which has no items to set.")
     }
     give errAt(stmtLine, "I can only set a field on an object or an item in a list, like: person.years = 30 or items[0] = 30.")
@@ -1860,6 +2103,23 @@ make readIndex(base, indexValue, line) {
             give errAt(line, "This text has " + length(chars) + " characters, numbered 0 to " + (length(chars) - 1) + ", but I was asked for character " + idx + ".")
         }
         give okVal(vText(chars[idx]))
+    }
+    if base.kind == "bytes" {
+        let num = itemNumber(indexValue, line)
+        if num.ok == false {
+            give num
+        }
+        let idx = num.value
+        if length(base.data) == 0 {
+            give errAt(line, "This block of bytes has no bytes yet, so there is no byte " + idx + " to take from it. Make a bigger block with makebytes — like: makebytes(8).")
+        }
+        if idx < 0 {
+            give errAt(line, "This block of bytes has " + length(base.data) + " bytes, numbered 0 to " + (length(base.data) - 1) + ", but I was asked for byte " + idx + ".")
+        }
+        if idx >= length(base.data) {
+            give errAt(line, "This block of bytes has " + length(base.data) + " bytes, numbered 0 to " + (length(base.data) - 1) + ", but I was asked for byte " + idx + ".")
+        }
+        give okVal(vNumber(base.data[idx]))
     }
     give errAt(line, "I can't take an item from " + described(base) + ". Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character.")
 }
@@ -2095,6 +2355,9 @@ make valuesEqual(l, r) {
     if l.kind == "list" {
         give l == r
     }
+    if l.kind == "bytes" {
+        give l == r
+    }
     give false
 }
 
@@ -2185,13 +2448,16 @@ make callFunction(name, argExprs, line, scope) {
 }
 
 // ---------- the built-in tools ----------
-// The nine tools every Nifla program has from the start, in one
+// The tools every Nifla program has from the start, in one
 // place: their names, the names of the values they take, and an
-// example call of each — for the plain-words messages.
+// example call of each — for the plain-words messages. The
+// Stone 9 and Stone 10 tools joined the table with their
+// stones; 'makebytes' and the bytes it makes are mirrored here
+// with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "writefile", "arguments"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path", "text"], []]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -2253,7 +2519,10 @@ make runBuiltin(name, args, line) {
         if v.kind == "object" {
             give okVal(vNumber(length(v.names)))
         }
-        give errAt(line, "'length' measures some text, a list, or an object, but it was given " + described(v) + ".")
+        if v.kind == "bytes" {
+            give okVal(vNumber(length(v.data)))
+        }
+        give errAt(line, "'length' measures some text, a list, an object, or a block of bytes, but it was given " + described(v) + ".")
     }
     if name == "join" {
         if args[0].kind != "list" {
@@ -2342,7 +2611,17 @@ make runBuiltin(name, args, line) {
         if args[0].kind != "text" {
             give errAt(line, "'readfile' needs the name of a file, as text, but it was given " + described(args[0]) + ".")
         }
-        give okVal(vText(readfile(args[0].text)))
+        // The host's own readfile speaks with the host's line
+        // numbers when it fails; catch its problem (Stone 10)
+        // and say it again with the interpreted program's line,
+        // the way the Swift interpreter says it.
+        let contents = ""
+        attempt {
+            contents = readfile(args[0].text)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vText(contents))
     }
     if name == "writefile" {
         if args[0].kind != "text" {
@@ -2351,7 +2630,13 @@ make runBuiltin(name, args, line) {
         if args[1].kind != "text" {
             give errAt(line, "'writefile' writes some text to a file, but it was given " + described(args[1]) + " to write.")
         }
-        give okVal(vNumber(writefile(args[0].text, args[1].text)))
+        let written = 0
+        attempt {
+            written = writefile(args[0].text, args[1].text)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vNumber(written))
     }
     if name == "arguments" {
         let out = []
@@ -2359,6 +2644,161 @@ make runBuiltin(name, args, line) {
             append(out, vText(a))
         }
         give okVal(vList(out))
+    }
+    if name == "makebytes" {
+        if args[0].kind != "number" {
+            give errAt(line, "The number of bytes to make must be a number, but I was given " + described(args[0]) + ".")
+        }
+        if isWholeNum(args[0].num) == false {
+            give errAt(line, "The number of bytes to make must be a whole number, but I was given " + numText(args[0].num) + ".")
+        }
+        let count = args[0].num
+        if count < 0 {
+            give errAt(line, "'makebytes' was told to make " + count + " bytes, but a count can't be less than 0.")
+        }
+        if count > 16777216 {
+            give errAt(line, "'makebytes' was told to make " + count + " bytes, but one block can hold at most 16777216 bytes.")
+        }
+        let data = []
+        repeat count {
+            append(data, 0)
+        }
+        give okVal(vBytes(data))
+    }
+    if name == "sayerr" {
+        let spoken = spokenOf(args[0])
+        sayerr(spoken)
+        give okVal(vNumber(length(spoken) + 1))
+    }
+    if name == "exitwith" {
+        if args[0].kind != "number" {
+            give errAt(line, "'exitwith' ends the program with a number as its parting word to the system, but it was given " + described(args[0]) + ".")
+        }
+        let code = args[0].num
+        if isWholeNum(code) == false {
+            give errAt(line, "'exitwith' needs a whole number from 0 to 255, but it was given " + numText(code) + ".")
+        }
+        if code < 0 {
+            give errAt(line, "'exitwith' needs a whole number from 0 to 255, but it was given " + numText(code) + ".")
+        }
+        if code > 255 {
+            give errAt(line, "'exitwith' needs a whole number from 0 to 255, but it was given " + numText(code) + ".")
+        }
+        exitwith(code)
+        give okVal(NOTHING)
+    }
+    if name == "removeat" {
+        if args[0].kind != "list" {
+            give errAt(line, "'removeat' takes an item out of a list, but it was given " + described(args[0]) + " to take from.")
+        }
+        let num = itemNumber(args[1], line)
+        if num.ok == false {
+            give num
+        }
+        let idx = num.value
+        if length(args[0].items) == 0 {
+            give errAt(line, "This list has no items yet, so there is no item " + idx + " to remove.")
+        }
+        if idx < 0 {
+            give errAt(line, "This list has " + length(args[0].items) + " items, numbered 0 to " + (length(args[0].items) - 1) + ", but I was asked to remove item " + idx + ".")
+        }
+        if idx >= length(args[0].items) {
+            give errAt(line, "This list has " + length(args[0].items) + " items, numbered 0 to " + (length(args[0].items) - 1) + ", but I was asked to remove item " + idx + ".")
+        }
+        give okVal(removeat(args[0].items, idx))
+    }
+    if name == "insertat" {
+        if args[0].kind != "list" {
+            give errAt(line, "'insertat' puts an item into a list, but it was given " + described(args[0]) + " to put into.")
+        }
+        let num = itemNumber(args[1], line)
+        if num.ok == false {
+            give num
+        }
+        let idx = num.value
+        if idx < 0 {
+            give errAt(line, "This list has " + length(args[0].items) + " items, so a new item can be put in at numbers 0 to " + length(args[0].items) + ", but I was asked for number " + idx + ".")
+        }
+        if idx > length(args[0].items) {
+            give errAt(line, "This list has " + length(args[0].items) + " items, so a new item can be put in at numbers 0 to " + length(args[0].items) + ", but I was asked for number " + idx + ".")
+        }
+        insertat(args[0].items, idx, args[2])
+        give okVal(args[0])
+    }
+    if name == "sorted" {
+        if args[0].kind != "list" {
+            give errAt(line, "'sorted' sorts a list, but it was given " + described(args[0]) + " to sort.")
+        }
+        let items = args[0].items
+        if length(items) == 0 {
+            give okVal(vList([]))
+        }
+        let first = items[0]
+        if first.kind == "number" {
+            let i = 0
+            while i < length(items) {
+                if items[i].kind != "number" {
+                    give errAt(line, "'sorted' needs every item in the list to be the same kind — numbers with numbers, text with text — but item " + i + " is " + described(items[i]) + ", while the first item is " + described(first) + ".")
+                }
+                i = i + 1
+            }
+            let raw = []
+            for item in items {
+                append(raw, item.num)
+            }
+            let ordered = sorted(raw)
+            let wrapped = []
+            for n in ordered {
+                append(wrapped, vNumber(n))
+            }
+            give okVal(vList(wrapped))
+        }
+        if first.kind == "text" {
+            let i = 0
+            while i < length(items) {
+                if items[i].kind != "text" {
+                    give errAt(line, "'sorted' needs every item in the list to be the same kind — numbers with numbers, text with text — but item " + i + " is " + described(items[i]) + ", while the first item is " + described(first) + ".")
+                }
+                i = i + 1
+            }
+            let raw = []
+            for item in items {
+                append(raw, item.text)
+            }
+            let ordered = sorted(raw)
+            let wrapped = []
+            for t in ordered {
+                append(wrapped, vText(t))
+            }
+            give okVal(vList(wrapped))
+        }
+        give errAt(line, "'sorted' can sort a list of numbers or a list of text, but this list starts with " + described(first) + ".")
+    }
+    if name == "fieldnames" {
+        if args[0].kind != "object" {
+            give errAt(line, "'fieldnames' lists the field names of an object, as a list of text, but it was given " + described(args[0]) + ".")
+        }
+        let out = []
+        for fieldName in args[0].names {
+            append(out, vText(fieldName))
+        }
+        give okVal(vList(out))
+    }
+    if name == "removefield" {
+        if args[0].kind != "object" {
+            give errAt(line, "'removefield' takes a field out of an object, but it was given " + described(args[0]) + " to take from.")
+        }
+        if args[1].kind != "text" {
+            give errAt(line, "'removefield' needs the name of a field, as text, but it was given " + described(args[1]) + ".")
+        }
+        let i = nameIndex(args[0].names, args[1].text)
+        if i < 0 {
+            give missingField(args[0], args[1].text, line)
+        }
+        let removed = args[0].values[i]
+        removeat(args[0].names, i)
+        removeat(args[0].values, i)
+        give okVal(removed)
     }
     give errAt(line, "I don't know a tool called '" + name + "'.")
 }
@@ -2397,6 +2837,13 @@ make firstFloorInStmt(s) {
     }
     if s.type == "give" {
         give firstFloorInExpr(s.value)
+    }
+    if s.type == "attempt" {
+        let r = firstFloorInStmts(s.body)
+        if r.found {
+            give r
+        }
+        give firstFloorInStmts(s.recovery)
     }
     if s.type == "if" {
         let r = firstFloorInExpr(s.condition)
@@ -2450,6 +2897,12 @@ make firstFloorInStmt(s) {
 
 make firstFloorInExpr(e) {
     if e.type == "floor" {
+        for a in e.args {
+            let r = firstFloorInExpr(a)
+            if r.found {
+                give r
+            }
+        }
         give { found: true, line: e.line }
     }
     if e.type == "call" {
@@ -2508,7 +2961,12 @@ make firstFloorInExpr(e) {
 // words to the program as its arguments, read the program, take
 // it apart, refuse it if it holds floor code, and run it. A
 // problem at any step is said in the same plain words the Swift
-// interpreter would print.
+// interpreter would print — on the error channel, since Stone
+// 10 gave programs one, leaving with the same parting numbers:
+// 2 when the program file itself can't be opened, 1 when the
+// program is refused or goes wrong. (Before Stone 10 these
+// problems were said on the screen and the interpreter left
+// with 0; the Swift one never did either of those.)
 
 let allArgs = arguments()
 if length(allArgs) == 0 {
@@ -2520,22 +2978,32 @@ if length(allArgs) == 0 {
         append(gArgs, allArgs[argi])
         argi = argi + 1
     }
-    let source = readfile(path)
+    let source = ""
+    attempt {
+        source = readfile(path)
+    } if it fails {
+        sayerr("I couldn't open the file '" + path + "'. Check the name and the folder, and try again.")
+        exitwith(2)
+    }
     let lexed = lexAll(source)
     if lexed.ok == false {
-        say lexed.message
+        sayerr(lexed.message)
+        exitwith(1)
     } else {
         let parsed = parseProgramAll(lexed.value)
         if parsed.ok == false {
-            say parsed.message
+            sayerr(parsed.message)
+            exitwith(1)
         } else {
             let fl = firstFloorInStmts(parsed.value)
             if fl.found {
-                say "Line " + fl.line + ": This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes."
+                sayerr("Line " + fl.line + ": This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.")
+                exitwith(1)
             } else {
                 let r = execBlock(parsed.value, makeScope(NOTHING))
                 if r.ok == false {
-                    say r.message
+                    sayerr(r.message)
+                    exitwith(1)
                 }
             }
         }

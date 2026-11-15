@@ -73,6 +73,13 @@ private let builtinRules: [String: BuiltinRule] = [
     "writefile": BuiltinRule(result: .number, needs: [([.text], "the name of a file, as text"), ([.text], "some text to write")]),
     "arguments": BuiltinRule(result: .list, needs: []),
     "makebytes": BuiltinRule(result: .bytes, needs: [([.number], "a number saying how many bytes to make")]),
+    "sayerr": BuiltinRule(result: .number, needs: [(nil, "")]),
+    "exitwith": BuiltinRule(result: .unknown, needs: [([.number], "a whole number from 0 to 255 to end with")]),
+    "removeat": BuiltinRule(result: .unknown, needs: [([.list], "a list to take an item from"), ([.number], "a number saying which item to take out")]),
+    "insertat": BuiltinRule(result: .list, needs: [([.list], "a list to put an item into"), ([.number], "a number saying where to put the new item"), (nil, "")]),
+    "sorted": BuiltinRule(result: .list, needs: [([.list], "a list to sort")]),
+    "fieldnames": BuiltinRule(result: .list, needs: [([.object], "an object to list the field names of")]),
+    "removefield": BuiltinRule(result: .unknown, needs: [([.object], "an object to take a field from"), ([.text], "the name of a field, as text")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each
@@ -187,6 +194,9 @@ final class Checker {
             case .define(let name, let params, let body, _):
                 if functions[name] == nil { functions[name] = params }
                 collectFunctions(body)
+            case .attempt(let body, let recovery, _):
+                collectFunctions(body)
+                collectFunctions(recovery)
             case .ifElse(_, let thenBlock, let elseBlock, _):
                 collectFunctions(thenBlock)
                 if let elseBlock { collectFunctions(elseBlock) }
@@ -290,6 +300,22 @@ final class Checker {
 
         case .give(let valueExpr, _):
             _ = try checkExpr(valueExpr, env: &env, outerNames: outerNames)
+
+        case .attempt(let body, let recovery, _):
+            // Either block may be the one that runs to the end —
+            // the attempt may fail partway through — so both are
+            // checked from the state before, and what follows sees
+            // the merge of the two ways it could have gone. The
+            // recovery block also holds 'problem', some text.
+            let before = env
+            try checkChildBlock(body, env: &env, outerNames: outerNames, mergeWithBefore: false)
+            let afterBody = env
+            env = before
+            env.pushScope()
+            env.declare("problem", .text)
+            try checkBlock(recovery, env: &env, outerNames: outerNames)
+            env.popScope()
+            env = StaticEnv.merged(afterBody, env)
 
         case .doCall(let name, let args, let line):
             try checkCall(name: name, args: args, line: line, env: &env, outerNames: outerNames)
@@ -401,6 +427,25 @@ final class Checker {
 
         case .give(let valueExpr, _):
             _ = try checkExprForgiving(valueExpr, env: &env, outerNames: outerNames)
+
+        case .attempt(let body, let recovery, _):
+            let before = env
+            env.pushScope()
+            let bodyOuter = outerNames.union(declaredNames(in: body))
+            for inner in body {
+                try checkStatementInFunction(inner, env: &env, outerNames: bodyOuter)
+            }
+            env.popScope()
+            let afterBody = env
+            env = before
+            env.pushScope()
+            env.declare("problem", .text)
+            let recoveryOuter = outerNames.union(declaredNames(in: recovery))
+            for inner in recovery {
+                try checkStatementInFunction(inner, env: &env, outerNames: recoveryOuter)
+            }
+            env.popScope()
+            env = StaticEnv.merged(afterBody, env)
 
         case .doCall(let name, let args, let line):
             try checkCallForgiving(name: name, args: args, line: line, env: &env, outerNames: outerNames)

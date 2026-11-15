@@ -24,6 +24,15 @@ final class NiflaObject {
         if values[name] == nil { fieldNames.append(name) }
         values[name] = value
     }
+
+    // Takes a field out (Stone 10): hands back the value it held,
+    // or nil when the object has no such field.
+    func remove(_ name: String) -> Value? {
+        guard let value = values[name] else { return nil }
+        values[name] = nil
+        fieldNames.removeAll { $0 == name }
+        return value
+    }
 }
 
 // A list (Stone 6): values in order, held in a class on purpose —
@@ -231,6 +240,13 @@ let builtinTools: [String: BuiltinDef] = [
     "writefile": BuiltinDef(params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")"),
     "arguments": BuiltinDef(params: [], example: "arguments()"),
     "makebytes": BuiltinDef(params: ["count"], example: "makebytes(8)"),
+    "sayerr": BuiltinDef(params: ["value"], example: "sayerr(\"Mind the step.\")"),
+    "exitwith": BuiltinDef(params: ["code"], example: "exitwith(1)"),
+    "removeat": BuiltinDef(params: ["list", "index"], example: "removeat(items, 0)"),
+    "insertat": BuiltinDef(params: ["list", "index", "value"], example: "insertat(items, 0, 4)"),
+    "sorted": BuiltinDef(params: ["list"], example: "sorted(items)"),
+    "fieldnames": BuiltinDef(params: ["object"], example: "fieldnames(person)"),
+    "removefield": BuiltinDef(params: ["object", "name"], example: "removefield(person, \"town\")"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -280,6 +296,9 @@ func firstFloorLine(in statements: [Stmt]) -> Int? {
             if let line = firstFloorLine(in: body) { return line }
         case .define(_, _, let body, _):
             if let line = firstFloorLine(in: body) { return line }
+        case .attempt(let body, let recovery, _):
+            if let line = firstFloorLine(in: body) { return line }
+            if let line = firstFloorLine(in: recovery) { return line }
         case .doCall(_, let args, _):
             for arg in args {
                 if let line = firstFloorLine(in: arg) { return line }
@@ -485,6 +504,26 @@ final class Interpreter {
                 throw NiflaError(line: line, message: "'give' hands a value back from a function to whoever called it, but this line is not inside a function. To show a value here, use 'say' instead.")
             }
             throw ReturnSignal(value: try evaluate(valueExpr, in: scope))
+
+        case .attempt(let body, let recovery, _):
+            // Try the first block; if anything in it goes wrong —
+            // any plain-words problem, however deep inside it —
+            // run the second block instead, with the problem's
+            // words held in a variable called 'problem'. A 'give'
+            // in either block is not a problem: it hands its value
+            // back as always, straight through the attempt.
+            do {
+                let child = Scope(parent: scope)
+                for inner in body {
+                    try execute(inner, in: child)
+                }
+            } catch let error as NiflaError {
+                let child = Scope(parent: scope)
+                child.declare("problem", .text(error.message))
+                for inner in recovery {
+                    try execute(inner, in: child)
+                }
+            }
 
         case .doCall(let name, let args, let line):
             // A call on its own line: run it for what it does. Any
@@ -799,8 +838,112 @@ final class Interpreter {
         case "arguments":
             return .list(NiflaList(items: programArguments.map { Value.text($0) }))
 
+        case "sayerr":
+            // A program's second voice (Stone 10): the value's
+            // spoken form, on the error channel, with a new line —
+            // the way 'say' speaks to the screen. Gives back how
+            // many characters it wrote, the newline counted, the
+            // way writefile counts what it wrote.
+            let spoken = args[0].spoken
+            FileHandle.standardError.write(Data((spoken + "\n").utf8))
+            return .number(Double(spoken.count + 1))
+
+        case "exitwith":
+            // Ends the program now, leaving the given number as
+            // its parting word to the system (Stone 10). Anything
+            // already said is flushed out first.
+            guard case .number(let code) = args[0] else {
+                throw NiflaError(line: line, message: "'exitwith' ends the program with a number as its parting word to the system, but it was given \(args[0].described).")
+            }
+            guard code == code.rounded() && code >= 0 && code <= 255 else {
+                throw NiflaError(line: line, message: "'exitwith' needs a whole number from 0 to 255, but it was given \(formatNumber(code)).")
+            }
+            fflush(stdout)
+            exit(Int32(code))
+
+        case "removeat":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'removeat' takes an item out of a list, but it was given \(args[0].described) to take from.")
+            }
+            let index = try itemNumber(args[1], line: line)
+            if list.items.isEmpty {
+                throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(index) to remove.")
+            }
+            guard index >= 0 && index < list.items.count else {
+                throw NiflaError(line: line, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), but I was asked to remove item \(index).")
+            }
+            return list.items.remove(at: index)
+
+        case "insertat":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'insertat' puts an item into a list, but it was given \(args[0].described) to put into.")
+            }
+            let index = try itemNumber(args[1], line: line)
+            guard index >= 0 && index <= list.items.count else {
+                throw NiflaError(line: line, message: "This list has \(list.items.count) items, so a new item can be put in at numbers 0 to \(list.items.count), but I was asked for number \(index).")
+            }
+            list.items.insert(args[2], at: index)
+            return .list(list)
+
+        case "sorted":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'sorted' sorts a list, but it was given \(args[0].described) to sort.")
+            }
+            return .list(NiflaList(items: try sortedItems(list.items, line: line)))
+
+        case "fieldnames":
+            guard case .object(let object) = args[0] else {
+                throw NiflaError(line: line, message: "'fieldnames' lists the field names of an object, as a list of text, but it was given \(args[0].described).")
+            }
+            return .list(NiflaList(items: object.fieldNames.map { Value.text($0) }))
+
+        case "removefield":
+            guard case .object(let object) = args[0] else {
+                throw NiflaError(line: line, message: "'removefield' takes a field out of an object, but it was given \(args[0].described) to take from.")
+            }
+            guard case .text(let fieldName) = args[1] else {
+                throw NiflaError(line: line, message: "'removefield' needs the name of a field, as text, but it was given \(args[1].described).")
+            }
+            guard let removed = object.remove(fieldName) else {
+                throw missingFieldError(object: object, field: fieldName, line: line)
+            }
+            return removed
+
         default:
             throw NiflaError(line: line, message: "I don't know a tool called '\(name)'.")
+        }
+    }
+
+    // The items of a list in sorted order (Stone 10), as a new
+    // list's items — the list handed in is left as it was. Every
+    // item must be the same kind: numbers sort smallest first,
+    // text sorts in the order the machine's own letter order
+    // gives (the plain a-to-z of the characters as they stand).
+    private func sortedItems(_ items: [Value], line: Int) throws -> [Value] {
+        guard let first = items.first else { return [] }
+        switch first {
+        case .number:
+            for (index, item) in items.enumerated() {
+                guard case .number = item else {
+                    throw NiflaError(line: line, message: "'sorted' needs every item in the list to be the same kind — numbers with numbers, text with text — but item \(index) is \(item.described), while the first item is \(first.described).")
+                }
+            }
+            return items.sorted { a, b in
+                guard case .number(let x) = a, case .number(let y) = b else { return false }
+                return x < y
+            }
+        case .text:
+            for (index, item) in items.enumerated() {
+                guard case .text = item else {
+                    throw NiflaError(line: line, message: "'sorted' needs every item in the list to be the same kind — numbers with numbers, text with text — but item \(index) is \(item.described), while the first item is \(first.described).")
+                }
+            }
+            return items.sorted { a, b in
+                guard case .text(let x) = a, case .text(let y) = b else { return false }
+                return x < y
+            }
+        default:
+            throw NiflaError(line: line, message: "'sorted' can sort a list of numbers or a list of text, but this list starts with \(first.described).")
         }
     }
 

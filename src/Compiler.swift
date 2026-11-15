@@ -172,6 +172,22 @@ struct SwiftTranslator {
                 emit(indent, "try __m.giveOutside(line: \(line))")
             }
 
+        case .attempt(let body, let recovery, _):
+            // A Swift do/catch over NiflaError only: a 'give'
+            // (NiflaReturn) thrown inside either block passes
+            // straight through, as it does in the interpreter.
+            // The caught problem's words are declared as the
+            // variable 'problem' in the recovery block's scope.
+            let errorName = fresh("e")
+            emit(indent, "do {")
+            let bodyScope = childScope(of: scope, indent: indent + "    ")
+            translateBlock(body, scope: bodyScope, inFunction: inFunction, indent: indent + "    ")
+            emit(indent, "} catch let \(errorName) as NiflaError {")
+            let recoveryScope = childScope(of: scope, indent: indent + "    ")
+            emit(indent + "    ", "\(recoveryScope).declare(\"problem\", Value.text(\(errorName).message))")
+            translateBlock(recovery, scope: recoveryScope, inFunction: inFunction, indent: indent + "    ")
+            emit(indent, "}")
+
         case .doCall(let name, let args, let line):
             emit(indent, "try __m.callStatement(\(swiftText(name)), args: [\(argClosures(args, scope: scope))], line: \(line))")
 

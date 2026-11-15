@@ -66,6 +66,25 @@ let bareOnlyTools: [String: Int] = [
     "diskwrite": 2,
 ]
 
+// Stone 17: the guest door's tools, one set for each side.
+// A program built as a guest (niflac --bare --guest) is
+// handed a desk — a small card in memory the host fills in
+// — and speaks through it with guestvalue() (the number the
+// host sent) and guestgive(n) (the number it hands back as
+// it returns). A host program opens the door with
+// callguest(block, value): the block holds the guest's
+// image at its start, and the call hands back the guest's
+// parting number. The checker admits each name only on its
+// own side of the door, and refuses the machine's own tools
+// (above) inside a guest — the host keeps those.
+let guestDeskTools: [String: Int] = [
+    "guestvalue": 0,
+    "guestgive": 1,
+]
+let guestDoorTools: [String: Int] = [
+    "callguest": 2,
+]
+
 // The shape of a value, as far as bare metal needs to know it.
 // .unknown is a value whose shape the validator hasn't pinned
 // down — a function parameter before any use or call says what
@@ -80,6 +99,15 @@ enum BareKind {
 }
 
 final class BareValidator {
+    // Stone 17: a guest program (niflac --bare --guest) lives
+    // by the desk, not by the machine — the validator holds
+    // which side of the door is being built.
+    let guestMode: Bool
+
+    init(guestMode: Bool = false) {
+        self.guestMode = guestMode
+    }
+
     // Function shapes, by name: parameter names, and the kind
     // the function gives back (filled in as bodies are read).
     private(set) var functions: [String: (params: [String], giveKind: BareKind)] = [:]
@@ -100,7 +128,7 @@ final class BareValidator {
         // only; a 'make' anywhere else is refused when met.
         for statement in program {
             if case .define(let name, let params, _, let line) = statement {
-                if bareOnlyTools[name] != nil {
+                if bareOnlyTools[name] != nil || guestDeskTools[name] != nil || guestDoorTools[name] != nil {
                     throw NiflaError(line: line, message: "There is already a bare-metal tool called '\(name)' — every bare program has it from the start. A function can't be made with that name; rename the function.")
                 }
                 functions[name] = (params: params, giveKind: .unknown)
@@ -381,7 +409,43 @@ final class BareValidator {
     // Checks a call — a bare-only tool, a built-in tool, or a
     // made function — and gives back the kind it hands back.
     private func callKind(name: String, args: [Expr], line: Int) throws -> BareKind {
+        if let arity = guestDeskTools[name] {
+            // Stone 17: the desk tools belong to a guest. (The
+            // checker refuses them in a host program first;
+            // this is the same refusal in the validator's own
+            // voice, for safety.)
+            guard guestMode else {
+                throw NiflaError(line: line, message: "'\(name)' is a guest's tool — it speaks through the desk a host hands a guest, and this program is not being built as a guest. Build it with 'niflac --bare --guest' to make it a guest, or take the call out.")
+            }
+            if name == "guestgive" {
+                guard args.count == arity else {
+                    throw NiflaError(line: line, message: "'guestgive' takes 1 value — the number handed back to the host — but it was given \(args.count).")
+                }
+                try requireNumber(args[0], line: line, doing: "be handed back to the host")
+            }
+            return .number
+        }
+        if let arity = guestDoorTools[name] {
+            // Stone 17: the host's door. A guest cannot open
+            // it — the checker refuses that first; this is the
+            // same refusal in the validator's own voice.
+            guard !guestMode else {
+                throw NiflaError(line: line, message: "'\(name)' is the host's door — a guest cannot call a guest. Only the host program, the one that was booted, opens the door.")
+            }
+            guard args.count == arity else {
+                throw NiflaError(line: line, message: "'callguest' takes 2 values (address, value), but it was given \(args.count). Call it like: callguest(2097152, 7) — the address the guest's image was loaded at (guests are linked for the doorstep, 2097152), and a whole number to hand the guest.")
+            }
+            try requireNumber(args[0], line: line, doing: "say where the guest stands")
+            try requireNumber(args[1], line: line, doing: "be handed to the guest")
+            return .number
+        }
         if let arity = bareOnlyTools[name] {
+            if guestMode {
+                // Stone 17: the machine's own tools stay with
+                // the host. (The checker refuses them in a
+                // guest first, in these same words.)
+                throw NiflaError(line: line, message: "'\(name)' belongs to the host — a guest does not own the machine's timer, keyboard, memory map, or disk; the host keeps those. A guest's world is the screen, its own heap, and the desk the host hands it (guestvalue and guestgive).")
+            }
             // The bare-only tools (Stone 12) read the machine
             // itself and take no values; each hands back a
             // number. (The checker has verified the count
@@ -601,6 +665,11 @@ final class BareValidator {
 struct BareTranslator {
     private let functions: [String: (params: [String], giveKind: BareKind)]
     private let paramKinds: [String: [BareKind]]
+    // Stone 17: a guest is linked for the doorstep at 2 MiB
+    // and its entry is a door, not a boot (see translate()).
+    // Its runtime addresses are formed the same way a host's
+    // are, since it stands at the address it was linked for.
+    private let guestMode: Bool
 
     private var code: [String] = []
     private var literals: [(label: String, bytes: [UInt8])] = []
@@ -618,6 +687,16 @@ struct BareTranslator {
     init(validator: BareValidator) {
         functions = validator.functions
         paramKinds = validator.paramKinds
+        guestMode = validator.guestMode
+    }
+
+    // Loads the address of a symbol into a register. A host
+    // program is loaded at the address it was linked for, so
+    // the address is a plain number; a guest runs wherever
+    // the host put it, so the address is counted from where
+    // the instruction stands.
+    private func addrLoad(_ register: String, _ symbol: String) -> String {
+        guestMode ? "    lea \(register), [rip + \(symbol)]" : "    mov \(register), offset \(symbol)"
     }
 
     private mutating func freshLabel(_ base: String) -> String {
@@ -646,6 +725,7 @@ struct BareTranslator {
             if name == "length" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
+            if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
             return functions[name]?.giveKind ?? .number
         case .floor: return .number
         case .negate: return .number
@@ -700,12 +780,64 @@ struct BareTranslator {
         let mainCode = code
 
         var out: [String] = []
-        out.append("// Bare metal, from \(sourceName), by niflac --bare (Nifla Stone 11).")
-        out.append("// No operating system, no runtime: a multiboot header, a")
-        out.append("// 32-bit stub that builds page tables and switches the")
-        out.append("// processor into 64-bit long mode, then the program itself.")
+        if guestMode {
+            out.append("// A guest, from \(sourceName), by niflac --bare --guest (Nifla Stone 17).")
+            out.append("// No boot of its own: it is linked for the doorstep at")
+            out.append("// 2 MiB (0x200000), where a host copies its image, checks")
+            out.append("// its checksum, and calls its first byte with a desk in rdi.")
+        } else {
+            out.append("// Bare metal, from \(sourceName), by niflac --bare (Nifla Stone 11).")
+            out.append("// No operating system, no runtime: a multiboot header, a")
+            out.append("// 32-bit stub that builds page tables and switches the")
+            out.append("// processor into 64-bit long mode, then the program itself.")
+        }
         out.append("    .intel_syntax noprefix")
         out.append("")
+        if guestMode {
+            out.append("// The door (Stone 17): the host calls here with the")
+            out.append("// desk's address in rdi. The desk is eight numbers:")
+            out.append("// +0 the desk's version (1), +8 the host's gift (a")
+            out.append("// number, read with guestvalue()), +16 the guest's")
+            out.append("// parting number (set with guestgive()), +24 the end")
+            out.append("// of the guest region (the half megabyte from the")
+            out.append("// doorstep; its heap starts at its own image's end")
+            out.append("// inside that region), +32/+40 the screen")
+            out.append("// cursor's row and column, handed over and handed")
+            out.append("// back so host and guest share one page. The guest")
+            out.append("// does not clear the screen, does not touch the")
+            out.append("// interrupt table or the memory map — those are the")
+            out.append("// host's. When its program ends, it comes back")
+            out.append("// through the ret at the end of this door with its")
+            out.append("// parting number in rax.")
+            out.append("    .section .text")
+            out.append("    .code64")
+            out.append("    .globl __guest_entry")
+            out.append("__guest_entry:")
+            out.append("    mov [__desk], rdi")
+            out.append("    lea rax, [rip + __kernel_end]")
+            out.append("    add rax, 15")
+            out.append("    and rax, -16")
+            out.append("    mov [__heap_cursor], rax")
+            out.append("    mov rax, [rdi + 24]")
+            out.append("    mov [__heap_limit], rax")
+            out.append("    mov rax, [rdi + 32]")
+            out.append("    mov [__cursor_row], rax")
+            out.append("    mov rax, [rdi + 40]")
+            out.append("    mov [__cursor_col], rax")
+            out.append("    call __nifla_main")
+            out.append("    mov rax, [__desk]")
+            out.append("    mov rcx, [__cursor_row]")
+            out.append("    mov [rax + 32], rcx")
+            out.append("    mov rcx, [__cursor_col]")
+            out.append("    mov [rax + 40], rcx")
+            out.append("    mov rax, [rax + 16]")
+            out.append("    ret")
+            out.append("__halt_trap:")
+            out.append("    cli")
+            out.append("    hlt")
+            out.append("    jmp __halt_trap")
+            out.append("")
+        } else {
         out.append("// The multiboot header stands as the first bytes of")
         out.append("// the text section itself (Stone 16): a loader looks")
         out.append("// for it in the first 8192 bytes of the file, and a")
@@ -772,6 +904,7 @@ struct BareTranslator {
         out.append("    hlt")
         out.append("    jmp __halt_trap")
         out.append("")
+        }
         out.append("// Text comparison: rax/r8 hold the two texts (pointer in")
         out.append("// rax and rcx, count in rdx and r8). Answers 1 or 0 in rax.")
         out.append("__nifla_text_eq:")
@@ -828,7 +961,7 @@ struct BareTranslator {
         out.append("    mov rax, [rsi + 12]")
         out.append("    add [__mem_total], rax")
         out.append("    mov rax, [rsi + 4]")
-        out.append("    mov r8, offset __kernel_end")
+        out.append(addrLoad("r8", "__kernel_end"))
         out.append("    cmp r8, rax")
         out.append("    jb __mem_next")
         out.append("    add rax, [rsi + 12]")
@@ -841,7 +974,7 @@ struct BareTranslator {
         out.append("    add rsi, rax")
         out.append("    jmp __mem_walk")
         out.append("__mem_done:")
-        out.append("    mov rax, offset __kernel_end")
+        out.append(addrLoad("rax", "__kernel_end"))
         out.append("    add rax, 15")
         out.append("    and rax, -16")
         out.append("    mov [__heap_cursor], rax")
@@ -1151,7 +1284,7 @@ struct BareTranslator {
         out.append("    jnz __ds_drq")
         out.append("    jmp __ds_none")
         out.append("__ds_read:")
-        out.append("    mov rdi, offset __disk_id_buf")
+        out.append(addrLoad("rdi", "__disk_id_buf"))
         out.append("    mov rcx, 256")
         out.append("    mov edx, 0x1F0")
         out.append("    rep insw")
@@ -1171,7 +1304,7 @@ struct BareTranslator {
         out.append("// stub that simply returns — a door nobody uses yet.")
         out.append("__nifla_interrupts_init:")
         out.append("    lea rdi, [__idt]")
-        out.append("    mov rax, offset __irq_default")
+        out.append(addrLoad("rax", "__irq_default"))
         out.append("    mov rcx, 256")
         out.append("__idt_fill:")
         out.append("    call __idt_set")
@@ -1179,10 +1312,10 @@ struct BareTranslator {
         out.append("    dec rcx")
         out.append("    jne __idt_fill")
         out.append("    lea rdi, [__idt + 512]")
-        out.append("    mov rax, offset __irq_timer")
+        out.append(addrLoad("rax", "__irq_timer"))
         out.append("    call __idt_set")
         out.append("    lea rdi, [__idt + 528]")
-        out.append("    mov rax, offset __irq_keyboard")
+        out.append(addrLoad("rax", "__irq_keyboard"))
         out.append("    call __idt_set")
         out.append("    mov al, 0x11")
         out.append("    out 0x20, al")
@@ -1374,6 +1507,10 @@ struct BareTranslator {
         out.append("    .skip 8")
         out.append("__cursor_col:")
         out.append("    .skip 8")
+        out.append("__desk:")
+        out.append("    .skip 8")
+        out.append("__guest_desk:")
+        out.append("    .skip 64")
         out.append("__numtext_buf:")
         out.append("    .skip 32")
         out.append("__disk_id_buf:")
@@ -1624,7 +1761,7 @@ struct BareTranslator {
         case .text(let text, _):
             let label = "__text_\(literals.count)"
             literals.append((label: label, bytes: Array(text.utf8)))
-            emit("    mov rax, offset \(label)")
+            emit(addrLoad("rax", label))
             emit("    mov rdx, \(Array(text.utf8).count)")
 
         case .boolean(let flag, _):
@@ -1661,7 +1798,7 @@ struct BareTranslator {
                     numberIndex += 1
                 }
             }
-            emit("    mov r10, offset __floor_inputs")
+            emit(addrLoad("r10", "__floor_inputs"))
             emit("    mov r11, \(numberIndex)")
             if !hasText {
                 emit("    xor ebx, ebx")
@@ -1791,6 +1928,56 @@ struct BareTranslator {
             emit("    call __nifla_disk_sectors")
             return
         }
+        if name == "guestvalue" {
+            // Stone 17: the number the host sent, read off the
+            // desk (its address was left in __desk at the door).
+            emit("    mov rax, [__desk]")
+            emit("    mov rax, [rax + 8]")
+            return
+        }
+        if name == "guestgive" {
+            // Stone 17: the guest's parting number, written on
+            // the desk; the call hands the same number back in
+            // the program, and the door hands it to the host.
+            emitExpr(args[0])
+            emit("    mov rcx, [__desk]")
+            emit("    mov [rcx + 16], rax")
+            return
+        }
+        if name == "callguest" {
+            // Stone 17: the host opens the door. The desk is
+            // filled in — version, the gift, the end of the
+            // guest region (the half megabyte from the
+            // doorstep the guest was linked for), and the
+            // screen cursor, so the guest continues on the
+            // host's page — then the guest's first byte is
+            // called with the desk in rdi. The guest runs on
+            // this stack and this machine, and returns
+            // through its door with its parting number in
+            // rax; the cursor it leaves is taken back, so the
+            // host's next say continues where it stopped.
+            emitExpr(args[0])
+            emit("    push rax")
+            emitExpr(args[1])
+            emit("    mov [__guest_desk + 8], rax")
+            emit("    mov rax, 1")
+            emit("    mov [__guest_desk], rax")
+            emit("    mov qword ptr [__guest_desk + 16], 0")
+            emit("    mov rax, [__cursor_row]")
+            emit("    mov [__guest_desk + 32], rax")
+            emit("    mov rax, [__cursor_col]")
+            emit("    mov [__guest_desk + 40], rax")
+            emit("    pop rax")
+            emit("    lea rcx, [rax + 524288]")
+            emit("    mov [__guest_desk + 24], rcx")
+            emit(addrLoad("rdi", "__guest_desk"))
+            emit("    call rax")
+            emit("    mov rcx, [__guest_desk + 32]")
+            emit("    mov [__cursor_row], rcx")
+            emit("    mov rcx, [__guest_desk + 40]")
+            emit("    mov [__cursor_col], rcx")
+            return
+        }
         if name == "diskread" || name == "diskwrite" {
             // Stone 16: one whole 512-byte sector moves
             // between the disk and a block of bytes. A block
@@ -1899,8 +2086,8 @@ private func runTool(_ path: String, _ arguments: [String]) -> (status: Int32, w
 // GRUB reads either form). The assembly is kept beside the
 // binary, like the hosted path keeps its Swift and floor
 // assembly.
-func compileBare(inputPath: String, output: String?, program: [Stmt], fail: (String, Int32) -> Int32) -> Int32 {
-    let validator = BareValidator()
+func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode: Bool = false, fail: (String, Int32) -> Int32) -> Int32 {
+    let validator = BareValidator(guestMode: guestMode)
     do {
         try validator.validate(program)
     } catch let error as NiflaError {
@@ -1944,7 +2131,18 @@ func compileBare(inputPath: String, output: String?, program: [Stmt], fail: (Str
     }
     defer { try? FileManager.default.removeItem(at: scratch) }
 
-    let linkerScript = """
+    let linkerScript = guestMode ? """
+        ENTRY(__guest_entry)
+        SECTIONS {
+            . = 0x200000;
+            .text : { *(.text) }
+            .rodata : { *(.rodata) }
+            .data : { *(.data) }
+            .bss : { *(.bss) *(COMMON) }
+            . = ALIGN(4096);
+            __kernel_end = .;
+        }
+        """ : """
         ENTRY(_start32)
         SECTIONS {
             . = 0x100000;
@@ -1976,6 +2174,24 @@ func compileBare(inputPath: String, output: String?, program: [Stmt], fail: (Str
     }
     if linked.status != 0 {
         return fail("The bare program in '\(inputPath)' couldn't be linked. What the linker said:\n\(linked.words)", 1)
+    }
+    if guestMode {
+        // Stone 17: a guest is packaged as the flat bytes of
+        // its image — text, then rodata, then data, in the
+        // order they were linked — because a host loads those
+        // bytes whole and calls the first one. (Its scratch
+        // memory, the bss, takes no room in the file: the
+        // block a host loads it into starts out zeroed, which
+        // is all the bss asks.)
+        guard let packaged = runTool(objcopy, ["-O", "binary", linkedPath, outputPath]) else {
+            return fail("I couldn't start objcopy at '\(objcopy)'.", 2)
+        }
+        if packaged.status != 0 {
+            return fail("The guest in '\(inputPath)' couldn't be packaged. What objcopy said:\n\(packaged.words)", 1)
+        }
+        print("Made \(outputPath) — a guest program, compiled from \(inputPath), linked for the doorstep at 2 MiB. It does not boot: a host copies it to the doorstep, checks it, and calls it, and it returns to the host.")
+        print("The assembly it was made from is kept at \(asmPath), if you'd like to read it.")
+        return 0
     }
     guard let packaged = runTool(objcopy, ["-O", "elf32-i386", linkedPath, outputPath]) else {
         return fail("I couldn't start objcopy at '\(objcopy)'.", 2)

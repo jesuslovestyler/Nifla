@@ -341,12 +341,15 @@ func compileMain(arguments: [String]) -> Int32 {
     var input: String? = nil
     var output: String? = nil
     var bare = false
+    var guest = false
     var preludes: [String] = []
     var index = 1
     while index < arguments.count {
         let argument = arguments[index]
         if argument == "--bare" {
             bare = true
+        } else if argument == "--guest" {
+            guest = true
         } else if argument == "--prelude" {
             index += 1
             guard index < arguments.count else {
@@ -388,6 +391,12 @@ func compileMain(arguments: [String]) -> Int32 {
     if !preludes.isEmpty && !bare {
         return fail("Preludes (--prelude) are part of the bare-metal build for now — add '--bare' to use one, like: niflac --bare main.nifla --prelude barelib/screen.nifla -o main.elf", code: 2)
     }
+    // Stone 17: a guest is a kind of bare program — one that
+    // is loaded and called by a host instead of booted — so
+    // '--guest' only makes sense beside '--bare'.
+    if guest && !bare {
+        return fail("A guest is a bare-metal program that a host loads and calls instead of booting — add '--bare' to build one, like: niflac --bare --guest guest.nifla -o guest.bin", code: 2)
+    }
     var preludeStatements: [Stmt] = []
     for preludePath in preludes {
         let preludeSource: String
@@ -415,7 +424,7 @@ func compileMain(arguments: [String]) -> Int32 {
     do {
         let tokens = try Lexer(source).tokenize()
         program = preludeStatements + (try Parser(tokens).parseProgram())
-        try Checker(program: program, forBareMetal: bare).check(program)
+        try Checker(program: program, forBareMetal: bare, forGuest: guest).check(program)
     } catch let error as NiflaError {
         return fail(error.spoken, code: 1)
     } catch {
@@ -426,7 +435,7 @@ func compileMain(arguments: [String]) -> Int32 {
     // and build (BareCompiler.swift) — no Swift runtime, no
     // hosted runtime file, nothing underneath the program.
     if bare {
-        return compileBare(inputPath: inputPath, output: output, program: program, fail: fail)
+        return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, fail: fail)
     }
 
     guard let runtimePath = findRuntime() else {

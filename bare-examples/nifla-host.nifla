@@ -1,0 +1,99 @@
+// Nifla on bare metal, hosting (Stone 17): the host side
+// of the guest door. The proof script lays a guest on the
+// disk — its image at sector 40, and a small card at
+// sector 32 saying where the image starts, how long it
+// is, and what its FNV-1a checksum must be. This program
+// reads the card, loads the image into a block of bytes,
+// checks the checksum with its own hand (a floor block),
+// and only then calls the guest — handing it the number
+// 7 and the screen's cursor, so the guest's words
+// continue this page. The guest returns; its parting
+// number is reported. A guest whose bytes do not match
+// the card is refused, on screen, and never run.
+
+// Reads one eight-byte number out of a block, at a byte
+// offset — the card's fields are numbers laid side by side.
+make cardnum(card, offset) {
+    give floor(card, offset) {
+        mov rax, [r10]
+        mov rax, [rbx + rax]
+    }
+}
+
+// The FNV-1a checksum (the 64-bit form) of the first
+// 'count' bytes of a block: begin at the offset basis,
+// then for each byte — xor the byte in, multiply by the
+// FNV prime. The same reckoning the proof script makes
+// over the guest's file.
+make fnv1a(block, count) {
+    give floor(block, count) {
+        mov rax, 0xcbf29ce484222325
+        mov r8, [r10]
+        mov rcx, 0
+    fnv_loop:
+        cmp rcx, r8
+        jae fnv_done
+        movzx rdx, byte ptr [rbx + rcx]
+        xor rax, rdx
+        mov rdx, 0x100000001b3
+        imul rax, rdx
+        inc rcx
+        jmp fnv_loop
+    fnv_done:
+    }
+}
+
+// Lays the guest at the doorstep: the half megabyte at
+// 2097152 (2 MiB) that guests are linked for. The region
+// is wiped clean first (a guest's scratch memory must
+// start at zero, as a booted program's does), then the
+// image is copied to its first bytes.
+make placeguest(img, count) {
+    floor(img, count) {
+        mov rdi, 0x200000
+        mov rcx, 0x80000
+        xor eax, eax
+        rep stosb
+        mov rsi, rbx
+        mov rdi, 0x200000
+        mov rcx, [r10]
+        rep movsb
+    }
+}
+
+say "HOST: before the guest"
+
+let card = makebytes(512)
+let n = diskread(32, card)
+let startsec = cardnum(card, 0)
+let imglen = cardnum(card, 8)
+let want = cardnum(card, 16)
+
+// The guest's image, staged in a block while it is
+// checked; it is laid at the doorstep only once it has
+// proven whole.
+let img = makebytes(imglen)
+let sector = makebytes(512)
+let i = 0
+let loaded = 0
+while loaded < imglen {
+    let m = diskread(startsec + i, sector)
+    let j = 0
+    while j < 512 {
+        if loaded + j < imglen {
+            img[loaded + j] = sector[j]
+        }
+        j = j + 1
+    }
+    loaded = loaded + 512
+    i = i + 1
+}
+
+let got = fnv1a(img, imglen)
+if got == want {
+    placeguest(img, imglen)
+    let back = callguest(2097152, 7)
+    say "HOST: back again - the guest gave " + back
+} else {
+    say "HOST: the guest on disk is not whole - I will not run it"
+}

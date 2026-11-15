@@ -185,9 +185,13 @@ final class Checker {
     // block gives back only a number. checkFloor follows the
     // target it is checking for; every other rule is the same.
     private let forBareMetal: Bool
+    // Stone 17: when the bare program is a guest, the guest
+    // door's rules apply (see checkBareToolCall).
+    private let forGuest: Bool
 
-    init(program: [Stmt], forBareMetal: Bool = false) {
+    init(program: [Stmt], forBareMetal: Bool = false, forGuest: Bool = false) {
         self.forBareMetal = forBareMetal
+        self.forGuest = forGuest
         collectFunctions(program)
     }
 
@@ -511,7 +515,29 @@ final class Checker {
     // and the ordinary rules apply: on hosted targets these
     // names are simply functions the checker doesn't know.
     private func checkBareToolCall(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>, forgiving: Bool) throws -> StaticKind? {
-        guard forBareMetal, let arity = bareOnlyTools[name] else { return nil }
+        guard forBareMetal else { return nil }
+        // Stone 17: the guest door. Each side has its own
+        // tools, and the machine's own tools stay with the
+        // host; crossing any of those lines is refused here,
+        // in plain words, before anything is built.
+        var arity: Int? = nil
+        if forGuest {
+            if bareOnlyTools[name] != nil {
+                throw NiflaError(line: line, message: "'\(name)' belongs to the host — a guest does not own the machine's timer, keyboard, memory map, or disk; the host keeps those. A guest's world is the screen, its own heap, and the desk the host hands it (guestvalue and guestgive). I caught this before the program ran, so nothing ran.")
+            }
+            if guestDoorTools[name] != nil {
+                throw NiflaError(line: line, message: "'\(name)' is the host's door — a guest cannot call a guest. Only the host program, the one that was booted, opens the door. I caught this before the program ran, so nothing ran.")
+            }
+            arity = guestDeskTools[name]
+        } else if guestDeskTools[name] != nil {
+            throw NiflaError(line: line, message: "'\(name)' is a guest's tool — it speaks through the desk a host hands a guest, and this program is not being built as a guest. Build it with 'niflac --bare --guest' to make it a guest, or take the call out. I caught this before the program ran, so nothing ran.")
+        } else if let doorArity = guestDoorTools[name] {
+            arity = doorArity
+        }
+        if arity == nil {
+            arity = bareOnlyTools[name]
+        }
+        guard let arity else { return nil }
         for arg in args {
             if forgiving {
                 _ = try checkExprForgiving(arg, env: &env, outerNames: outerNames)
@@ -521,7 +547,7 @@ final class Checker {
         }
         guard args.count == arity else {
             if arity == 0 {
-                throw NiflaError(line: line, message: "'\(name)' takes no values, but it was given \(args.count). It reads the machine itself — call it with nothing between the parentheses: \(name)(). I caught this before the program ran, so nothing ran.")
+                throw NiflaError(line: line, message: "'\(name)' takes no values, but it was given \(args.count). Call it with nothing between the parentheses: \(name)(). I caught this before the program ran, so nothing ran.")
             }
             throw NiflaError(line: line, message: "'\(name)' takes \(arity) values, but it was given \(args.count). I caught this before the program ran, so nothing ran.")
         }

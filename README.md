@@ -1314,6 +1314,126 @@ Honest limits of Stone 16:
   meaning of every sector number itself. The guest door
   (Stone 17) is the first tenant of that arrangement.
 
+## Stone 17 — guests
+
+Laid on **November 15, 2026**, last of the six. Bare metal
+had a machine that could see, hear, remember, speak, and
+keep things on a disk. This stone opens its door: a host
+program loads a second program — a **guest** — checks it
+is whole, calls it, and takes it back when it returns.
+The first form of the guest door; the .feather's manners,
+arriving early.
+
+**Building a guest.** A guest is an ordinary bare Nifla
+program built one flag further:
+
+```sh
+niflac --bare --guest guest.nifla -o guest.bin
+```
+
+The build packages the flat bytes of the image (text,
+then the read-only words, then data) and links it for
+**the doorstep: the half megabyte at 2097152 (2 MiB)**,
+the address every guest stands at. A guest does not
+boot: no multiboot header, no stub of its own — the host
+is already running the machine.
+
+**The door.** A host receives a guest like this, all of
+it plain Nifla and floor work:
+
+1. Read the guest's **card** from the disk — a sector
+   saying where the image starts, how long it is, and
+   what its checksum must be. (The proof's card is laid
+   by the proof script; a real host would keep its own.)
+2. Load the image into a block and reckon its **FNV-1a
+   checksum** (the 64-bit form: the offset basis, then
+   each byte xored in and multiplied by the FNV prime).
+   If the reckoning and the card disagree, the guest is
+   **refused** — the host says so on screen and never
+   runs it. A changed byte anywhere in the image changes
+   the sum; that is the whole of the check, and the
+   proof's second boot flips one byte to watch the
+   refusal happen.
+3. Lay the image at the doorstep (a floor block wipes
+   the region clean first, so the guest's scratch memory
+   starts at zero as a booted program's does, then
+   copies the image in).
+4. Call it: `callguest(2097152, gift)` — the address,
+   and one whole number for the guest.
+
+**The desk.** The call hands the guest a small card in
+memory — the desk — and the guest's world is defined by
+it:
+
+- the **screen**, shared: the desk carries the host's
+  cursor row and column in, and the guest's cursor back
+  out, so a guest's `say` continues the host's page and
+  the host's next `say` continues the guest's;
+- a **heap of its own**: from its image's end to the
+  guest region's end — `makebytes`, joins, and the rest
+  of the allocator's work draw on it;
+- one **number from the host**, read with `guestvalue()`;
+- and a way back: `guestgive(n)` leaves a parting
+  number, which becomes the value of the host's
+  `callguest` call. When the guest's program ends, it
+  **returns** — it does not stop the machine — and the
+  host goes on.
+
+A guest does **not** own the machine: the timer, the
+keyboard, the memory map, and the disk stay with the
+host, and a guest program that asks for `ticks()`,
+`readkey()`, `memorysize()`, or the disk tools is
+refused in plain words before it is built — as is a
+host program that reaches for `guestvalue()`, and a
+guest that tries to call a guest. The door has two
+sides, and the checker keeps each side's tools on it.
+
+**The proof** is `bare-examples/nifla-host.nifla` and
+`bare-examples/nifla-guest.nifla`, run by
+`./run-bare-guest.sh`. The script builds both, lays the
+guest on a scratch image with its card, and boots the
+host twice. Boot 1's screen must read, in order:
+"HOST: before the guest", "GUEST: I am running",
+"GUEST: the host sent 7", "GUEST: twice the gift is 14",
+"HOST: back again - the guest gave 42" — one shared
+page, in order, the parting number come home. Boot 2
+flips one byte of the guest on the image: the host must
+answer "HOST: the guest on disk is not whole - I will
+not run it", and no guest line may appear. It prints
+PASS — and it does.
+
+```sh
+./run-bare-guest.sh   # bare metal: PASS — a guest loaded, checksum-verified, called, and returned from; a tampered guest refused
+```
+
+Honest limits of Stone 17 — read these plainly:
+
+- **There is NO isolation or protection.** Host and
+  guest share one privilege level, one memory, one
+  machine. A guest can read or write anything the host
+  can — the screen, the disk (through raw floor work),
+  the host's own memory. The checksum proves the bytes
+  are the bytes that were laid on the disk; it does not
+  make them trustworthy, and it is not a signature —
+  anyone who can write the disk can write a matching
+  card. This is the guest door's **first form**: not
+  the feather format, and **not a security boundary**.
+- A guest that **faults** — a guard tripped, a bad
+  floor block — stops the whole machine, host and all.
+  There is no catching a guest's fall yet.
+- **One guest shape only**: linked for the doorstep at
+  2 MiB, in a region of half a megabyte, image and heap
+  together. A bigger guest does not fit; a host must
+  keep its own heap below the doorstep while it means
+  to receive guests (the allocator does not yet enforce
+  the reservation — the proof host uses well under half
+  the room), and one guest at a time is called, on the
+  host's own stack.
+- The guest's heap is **fresh each call** (the region
+  is wiped as it is laid), and nothing a guest makes
+  outlives its return except what it wrote to the
+  screen, the disk, or the desk's parting number.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

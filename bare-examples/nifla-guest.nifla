@@ -1,0 +1,25 @@
+// Nifla on bare metal, visiting (Stone 17): a guest. This
+// program is not booted — it is built with
+//     niflac --bare --guest
+// into a flat image, laid on a disk by the proof script,
+// and loaded, checked, and called by the host program
+// (nifla-host.nifla). A guest is linked for the doorstep —
+// the half megabyte at 2097152 (2 MiB) — and the host
+// copies its image there before calling it. The host
+// hands it a desk: the screen (shared, cursor and all, so
+// these words continue the host's page), a heap of its
+// own inside the guest region, and one number — read here
+// with guestvalue(). When the program ends it does not
+// stop the machine: it returns to the host, leaving a
+// parting number with guestgive().
+//
+// A guest does not own the machine: the timer, the
+// keyboard, the memory map, and the disk stay with the
+// host, and asking for them here is refused before the
+// program is even built.
+
+let gift = guestvalue()
+say "GUEST: I am running"
+say "GUEST: the host sent " + gift
+say "GUEST: twice the gift is " + (gift + gift)
+guestgive(42)

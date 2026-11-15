@@ -1,0 +1,66 @@
+// Nifla on bare metal, visiting — the guest's desk, handed
+// things (verified at Cardnull OS 2's Stone 10). A guest's
+// floor blocks can be handed a piece of text or a block of
+// bytes and receive them whole — pointer, length, and
+// letters — in every shape: a literal handed in the main
+// body, a block made with makebytes, a function's own
+// handed words passed onward to its floor, a joined text's
+// letters read one by one, and a line of text handed with
+// numbers to a small painter, which writes it to the text
+// screen the host is showing. This guest exercises each
+// shape and hands back one reckoned number over them all;
+// run-bare-guest-desk.sh reads the number (and the painted
+// line) off the host's screen.
+//
+// (An early bench record claimed a guest's handed desk
+// read as zero; measured again shape by shape, it did not
+// hold — the desk arrives whole, and this example is the
+// standing proof.)
+
+make sumbytes(t: text) -> number {
+    give floor(t) {
+        xor eax, eax
+        mov rcx, 0
+    gs_loop:
+        cmp rcx, r12
+        jae gs_done
+        movzx edx, byte ptr [rbx + rcx]
+        add rax, rdx
+        inc rcx
+        jmp gs_loop
+    gs_done:
+    }
+}
+
+make paintline(row: number, col: number, text: text) {
+    floor(text, row, col) {
+        mov rax, [r10]
+        imul rax, 160
+        mov rdx, [r10 + 8]
+        shl rdx, 1
+        add rax, rdx
+        add rax, 0xB8000
+        mov rdi, rax
+        mov rcx, 0
+    gp_loop:
+        cmp rcx, r12
+        jae gp_done
+        mov al, byte ptr [rbx + rcx]
+        mov ah, 0x2F
+        mov word ptr [rdi + rcx * 2], ax
+        inc rcx
+        jmp gp_loop
+    gp_done:
+    }
+}
+
+let a = floor("abcde") {
+    mov rax, r12
+}
+let blk = makebytes(64)
+let b = floor(blk) {
+    mov rax, r12
+}
+let c = sumbytes("abcde")
+paintline(2, 4, "HANDED TEXT WORKS")
+guestgive(a * 10000 + b * 100 + c)

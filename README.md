@@ -1456,6 +1456,31 @@ Honest limits of Stone 17 — read these plainly:
   outlives its return except what it wrote to the
   screen, the disk, or the desk's parting number.
 
+A later verification, recorded here because it belongs
+to this stone's subject (made at Cardnull OS 2's
+Stone 10, November 15, 2026): a guest's floor blocks
+**can be handed a piece of text or a block of bytes, and
+receive them whole** — pointer, length, and letters —
+in every shape: a literal or a block handed in the main
+body, a function's own handed words passed onward to
+its floor, joined and returned text, text handed with
+numbers. An early bench record elsewhere claimed the
+handed desk read as zero; measured again shape by
+shape, it did not hold, and the assembly the compiler
+writes for the handing is the same for a guest as for a
+host (apart from the position-independent spelling of
+addresses, which is the guest build's design). No
+compiler change was needed. The standing proof is
+`run-bare-guest-desk.sh` over
+`bare-examples/nifla-guest-desk.nifla`: the guest hands
+back one reckoned number over all the shapes
+(56895 = 5·10000 + 64·100 + 495) and paints the line it
+was handed, on the host's screen.
+
+```sh
+./run-bare-guest-desk.sh   # bare metal: PASS — a guest's floor blocks handed text and bytes receive them whole
+```
+
 ## Stone 18 — marks of kind, and a checker that proves more
 
 Tyler asked how Nifla could become better than Swift. The

@@ -27,6 +27,13 @@
 //     blocks as raw functions behind the desk. compileMain
 //     assembles and links it (see compileBare there).
 //
+// Stone 12 adds the machine's first doors: the emitted stub
+// now also builds an interrupt table, remaps the interrupt
+// controllers, sets the timer ticking a hundred times a
+// second, and switches interrupts on before the program
+// starts. Three bare-only tools read the machine: ticks(),
+// readkey(), and waittick() (see bareOnlyTools below).
+//
 // How values live on the machine: a number or a true/false is
 // one 64-bit word (booleans are 1 and 0). Text is two words —
 // a pointer to its characters and their count — because bare
@@ -37,6 +44,20 @@
 // stop the machine itself: there is no one to speak to.
 
 import Foundation
+
+// The bare-only tools: names that exist on bare metal and
+// nowhere else, with the number of values each takes. The
+// checker knows them when (and only when) it checks for the
+// bare target; the bare validator admits them; the bare
+// translator emits them as reads of the machine itself.
+// Stone 12 gave the first three: the timer's tick count, the
+// keyboard's next scancode, and a wait for the next tick.
+// Later bare stones add their own here.
+let bareOnlyTools: [String: Int] = [
+    "ticks": 0,
+    "readkey": 0,
+    "waittick": 0,
+]
 
 // The shape of a value, as far as bare metal needs to know it.
 // .unknown is a value whose shape the validator hasn't pinned
@@ -68,6 +89,9 @@ final class BareValidator {
         // only; a 'make' anywhere else is refused when met.
         for statement in program {
             if case .define(let name, let params, _, let line) = statement {
+                if bareOnlyTools[name] != nil {
+                    throw NiflaError(line: line, message: "There is already a bare-metal tool called '\(name)' — every bare program has it from the start. A function can't be made with that name; rename the function.")
+                }
                 functions[name] = (params: params, giveKind: .unknown)
                 defineLines[name] = line
                 definitionOrder.append(name)
@@ -258,9 +282,21 @@ final class BareValidator {
         }
     }
 
-    // Checks a call — a built-in tool or a made function — and
-    // gives back the kind it hands back.
+    // Checks a call — a bare-only tool, a built-in tool, or a
+    // made function — and gives back the kind it hands back.
     private func callKind(name: String, args: [Expr], line: Int) throws -> BareKind {
+        if let arity = bareOnlyTools[name] {
+            // The bare-only tools (Stone 12) read the machine
+            // itself and take no values; each hands back a
+            // number. (The checker has verified the count
+            // already; this is the same refusal in the
+            // validator's own voice, for safety.)
+            for arg in args { _ = try kindOf(arg) }
+            guard args.count == arity else {
+                throw NiflaError(line: line, message: "'\(name)' takes no values, but it was given \(args.count). It reads the machine itself — call it with nothing between the parentheses: \(name)().")
+            }
+            return .number
+        }
         if builtinTools[name] != nil {
             guard name == "length" else {
                 throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there is no screen, no files, and no one to give tools there. Bare metal keeps 'length', for measuring text.")
@@ -450,6 +486,7 @@ struct BareTranslator {
             return .number
         case .call(let name, _, _):
             if name == "length" { return .number }
+            if bareOnlyTools[name] != nil { return .number }
             return functions[name]?.giveKind ?? .number
         case .floor: return .number
         case .negate: return .number
@@ -557,6 +594,7 @@ struct BareTranslator {
         out.append("    mov fs, ax")
         out.append("    mov gs, ax")
         out.append("    mov ss, ax")
+        out.append("    call __nifla_interrupts_init")
         out.append("    call __nifla_main")
         out.append("__halt_trap:")
         out.append("    cli")
@@ -583,6 +621,142 @@ struct BareTranslator {
         out.append("__text_eq_no:")
         out.append("    xor eax, eax")
         out.append("    ret")
+        out.append("")
+        out.append("// Stone 12: the machine learns to listen. An interrupt")
+        out.append("// table is built and loaded; the two interrupt")
+        out.append("// controllers (the PIC pair) are remapped so the timer")
+        out.append("// arrives as interrupt 32 and the keyboard as 33; the")
+        out.append("// timer chip (the PIT) is set ticking a hundred times")
+        out.append("// a second; then interrupts are switched on. Every")
+        out.append("// door but the timer's and the keyboard's leads to a")
+        out.append("// stub that simply returns — a door nobody uses yet.")
+        out.append("__nifla_interrupts_init:")
+        out.append("    lea rdi, [__idt]")
+        out.append("    mov rax, offset __irq_default")
+        out.append("    mov rcx, 256")
+        out.append("__idt_fill:")
+        out.append("    call __idt_set")
+        out.append("    add rdi, 16")
+        out.append("    dec rcx")
+        out.append("    jne __idt_fill")
+        out.append("    lea rdi, [__idt + 512]")
+        out.append("    mov rax, offset __irq_timer")
+        out.append("    call __idt_set")
+        out.append("    lea rdi, [__idt + 528]")
+        out.append("    mov rax, offset __irq_keyboard")
+        out.append("    call __idt_set")
+        out.append("    mov al, 0x11")
+        out.append("    out 0x20, al")
+        out.append("    call __io_wait")
+        out.append("    out 0xA0, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x20")
+        out.append("    out 0x21, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x28")
+        out.append("    out 0xA1, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x04")
+        out.append("    out 0x21, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x02")
+        out.append("    out 0xA1, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x01")
+        out.append("    out 0x21, al")
+        out.append("    call __io_wait")
+        out.append("    out 0xA1, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0xF8")
+        out.append("    out 0x21, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0xFF")
+        out.append("    out 0xA1, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x36")
+        out.append("    out 0x43, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x9C")
+        out.append("    out 0x40, al")
+        out.append("    call __io_wait")
+        out.append("    mov al, 0x2E")
+        out.append("    out 0x40, al")
+        out.append("    call __io_wait")
+        out.append("    mov rcx, 16")
+        out.append("__kbd_drain:")
+        out.append("    in al, 0x64")
+        out.append("    test al, 1")
+        out.append("    jz __kbd_drained")
+        out.append("    in al, 0x60")
+        out.append("    dec rcx")
+        out.append("    jne __kbd_drain")
+        out.append("__kbd_drained:")
+        out.append("    lidt [__idt_ptr]")
+        out.append("    sti")
+        out.append("    ret")
+        out.append("")
+        out.append("// Writes one interrupt-gate entry: rax holds the")
+        out.append("// handler's address, rdi the entry's. Keeps both.")
+        out.append("__idt_set:")
+        out.append("    mov word ptr [rdi], ax")
+        out.append("    mov word ptr [rdi + 2], 0x08")
+        out.append("    mov byte ptr [rdi + 4], 0")
+        out.append("    mov byte ptr [rdi + 5], 0x8E")
+        out.append("    push rax")
+        out.append("    shr rax, 16")
+        out.append("    mov word ptr [rdi + 6], ax")
+        out.append("    shr rax, 16")
+        out.append("    mov dword ptr [rdi + 8], eax")
+        out.append("    pop rax")
+        out.append("    mov dword ptr [rdi + 12], 0")
+        out.append("    ret")
+        out.append("")
+        out.append("// A breath between writings to the old, slow chips:")
+        out.append("// a write to port 0x80, which nothing answers.")
+        out.append("__io_wait:")
+        out.append("    out 0x80, al")
+        out.append("    ret")
+        out.append("")
+        out.append("__irq_default:")
+        out.append("    iretq")
+        out.append("")
+        out.append("// The timer's knock, a hundred times a second: one")
+        out.append("// more tick counted, the controller told 'seen'.")
+        out.append("__irq_timer:")
+        out.append("    inc qword ptr [__ticks]")
+        out.append("    push rax")
+        out.append("    mov al, 0x20")
+        out.append("    out 0x20, al")
+        out.append("    pop rax")
+        out.append("    iretq")
+        out.append("")
+        out.append("// The keyboard's knock: the scancode waiting at port")
+        out.append("// 0x60 goes into the ring buffer (64 bytes; when the")
+        out.append("// ring is full the new byte is dropped — the oldest")
+        out.append("// news is kept), the controller is told 'seen', and")
+        out.append("// the program reads the ring with readkey().")
+        out.append("__irq_keyboard:")
+        out.append("    push rax")
+        out.append("    push rbx")
+        out.append("    push rcx")
+        out.append("    in al, 0x60")
+        out.append("    mov rbx, [__key_head]")
+        out.append("    mov rcx, rbx")
+        out.append("    sub rcx, [__key_tail]")
+        out.append("    cmp rcx, 64")
+        out.append("    jae __kbd_full")
+        out.append("    mov rcx, rbx")
+        out.append("    and rcx, 63")
+        out.append("    mov byte ptr [__key_buf + rcx], al")
+        out.append("    inc rbx")
+        out.append("    mov [__key_head], rbx")
+        out.append("__kbd_full:")
+        out.append("    mov al, 0x20")
+        out.append("    out 0x20, al")
+        out.append("    pop rcx")
+        out.append("    pop rbx")
+        out.append("    pop rax")
+        out.append("    iretq")
         out.append("")
         out += functionCode
         out += mainCode
@@ -614,6 +788,9 @@ struct BareTranslator {
         out.append("__gdt_ptr:")
         out.append("    .word __gdt_end - __gdt - 1")
         out.append("    .long __gdt")
+        out.append("__idt_ptr:")
+        out.append("    .word 4095")
+        out.append("    .quad __idt")
         for literal in literals {
             out.append("\(literal.label):")
             if literal.bytes.isEmpty {
@@ -631,6 +808,18 @@ struct BareTranslator {
         out.append("    .skip 4096")
         out.append("__pd:")
         out.append("    .skip 4096")
+        out.append("    .align 16")
+        out.append("__idt:")
+        out.append("    .skip 4096")
+        out.append("    .align 8")
+        out.append("__ticks:")
+        out.append("    .skip 8")
+        out.append("__key_head:")
+        out.append("    .skip 8")
+        out.append("__key_tail:")
+        out.append("    .skip 8")
+        out.append("__key_buf:")
+        out.append("    .skip 64")
         out.append("    .align 8")
         out.append("__guard_passes:")
         out.append("    .skip 8")
@@ -947,6 +1136,42 @@ struct BareTranslator {
         if name == "length" {
             emitExpr(args[0])
             emit("    mov rax, rdx")
+            return
+        }
+        // The bare-only tools (Stone 12): reads of the machine
+        // itself, emitted where the call stands.
+        if name == "ticks" {
+            emit("    mov rax, [__ticks]")
+            return
+        }
+        if name == "waittick" {
+            // Sleep until the next interrupt — the timer's, at
+            // the latest — then hand back the tick count.
+            emit("    hlt")
+            emit("    mov rax, [__ticks]")
+            return
+        }
+        if name == "readkey" {
+            // The keyboard buffer's next scancode, or 0 when
+            // no key is waiting. The buffer is filled by the
+            // keyboard interrupt and emptied here — one
+            // producer, one consumer; a keystroke landing in
+            // the middle of this read is picked up next time.
+            let emptyLabel = freshLabel("readkey_empty")
+            let doneLabel = freshLabel("readkey_done")
+            emit("    mov rax, [__key_tail]")
+            emit("    cmp rax, [__key_head]")
+            emit("    je \(emptyLabel)")
+            emit("    mov rcx, rax")
+            emit("    and ecx, 63")
+            emit("    movzx ecx, byte ptr [__key_buf + rcx]")
+            emit("    inc rax")
+            emit("    mov [__key_tail], rax")
+            emit("    mov rax, rcx")
+            emit("    jmp \(doneLabel)")
+            emit("\(emptyLabel):")
+            emit("    xor eax, eax")
+            emit("\(doneLabel):")
             return
         }
         let registers = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]

@@ -500,9 +500,40 @@ final class Checker {
         return rule.result
     }
 
+    // Stone 12: the bare-only tools (the timer and the keyboard
+    // doors, and what later bare stones add). They exist only
+    // when the program is being checked for bare metal; the
+    // table itself lives with the bare target (BareCompiler
+    // .swift). When the name is one of them, the handed values
+    // are checked and their number verified, and the kind the
+    // tool gives back — always a number — is returned. When it
+    // isn't (or this check isn't for bare metal), returns nil
+    // and the ordinary rules apply: on hosted targets these
+    // names are simply functions the checker doesn't know.
+    private func checkBareToolCall(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>, forgiving: Bool) throws -> StaticKind? {
+        guard forBareMetal, let arity = bareOnlyTools[name] else { return nil }
+        for arg in args {
+            if forgiving {
+                _ = try checkExprForgiving(arg, env: &env, outerNames: outerNames)
+            } else {
+                _ = try checkExpr(arg, env: &env, outerNames: outerNames)
+            }
+        }
+        guard args.count == arity else {
+            if arity == 0 {
+                throw NiflaError(line: line, message: "'\(name)' takes no values, but it was given \(args.count). It reads the machine itself — call it with nothing between the parentheses: \(name)(). I caught this before the program ran, so nothing ran.")
+            }
+            throw NiflaError(line: line, message: "'\(name)' takes \(arity) values, but it was given \(args.count). I caught this before the program ran, so nothing ran.")
+        }
+        return .number
+    }
+
     private func checkCall(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>) throws {
         if builtinTools[name] != nil {
             _ = try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false)
+            return
+        }
+        if try checkBareToolCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false) != nil {
             return
         }
         guard let params = functions[name] else {
@@ -524,6 +555,9 @@ final class Checker {
     private func checkCallForgiving(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>) throws {
         if builtinTools[name] != nil {
             _ = try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true)
+            return
+        }
+        if try checkBareToolCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true) != nil {
             return
         }
         guard let params = functions[name] else {
@@ -565,6 +599,9 @@ final class Checker {
         case .call(let name, let args, let line):
             if builtinTools[name] != nil {
                 return try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false)
+            }
+            if let kind = try checkBareToolCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false) {
+                return kind
             }
             try checkCall(name: name, args: args, line: line, env: &env, outerNames: outerNames)
             return .unknown
@@ -628,6 +665,9 @@ final class Checker {
         case .call(let name, let args, let line):
             if builtinTools[name] != nil {
                 return try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true)
+            }
+            if let kind = try checkBareToolCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true) {
+                return kind
             }
             try checkCallForgiving(name: name, args: args, line: line, env: &env, outerNames: outerNames)
             return .unknown

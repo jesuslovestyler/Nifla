@@ -850,6 +850,92 @@ Honest limits of Stone 11:
   edition Cardnull dreams of would need its own floor, its
   own boot, and its own stone.
 
+## Stone 12 — bare metal learns to listen
+
+Laid on **November 14, 2026**, the same evening, first of the
+next three. Stone 11's machine could speak — after a fashion,
+through a floor block and the screen's memory — but it could
+not hear, and it had no sense of time. This stone gives it
+both.
+
+**What the binary now carries**: before the program's first
+line runs, the stub builds an **interrupt table** (256 doors)
+and loads it, **remaps the two interrupt controllers** (the
+PIC pair) so hardware interrupts arrive at doors 32 and up
+instead of colliding with the processor's own exceptions,
+**sets the timer chip (the PIT) ticking a hundred times a
+second**, drains any byte the firmware left in the keyboard's
+buffer, and switches interrupts on. Every door but two leads
+to a stub that simply returns. The two that work:
+
+- **the timer** (door 32): each knock adds one to a counter
+  the program can read, and the controller is told "seen"
+- **the keyboard** (door 33): the scancode waiting at the
+  keyboard's port goes into a **ring buffer** of 64 bytes the
+  interrupt fills and the program empties
+
+**Three new tools**, bare-only — they exist on no other
+target, and the checker knows them only when it checks for
+bare metal (on hosted targets the names are simply unknown,
+as they were before):
+
+- `ticks()` — the number of timer knocks since the machine
+  started, a hundred a second
+- `readkey()` — the next scancode from the keyboard buffer,
+  or 0 when no key is waiting. Scancodes are the keyboard's
+  own numbers (set 1): a key pressed gives its make code,
+  released gives the same number plus 128. Turning codes
+  into letters is the program's own work, in Nifla
+- `waittick()` — sleeps the processor until the next
+  interrupt (the timer's, at the latest) and hands back the
+  tick count, so a waiting program rests instead of spinning
+
+**The proof** is `bare-examples/nifla-listen.nifla`, run by
+`./run-bare-input.sh`: the program writes "Ticks: " on the
+screen's third row and keeps the tick count written beside
+it (a floor block works the digits out), echoes every letter
+key it hears onto the first row, and sleeps between knocks.
+The script boots it headless, reads the count twice through
+the monitor and requires it to have grown, then types the
+word **nifla** with the monitor's `sendkey` and requires the
+first row to begin with "nifla". It prints PASS — and it
+does.
+
+```sh
+./run-bare-input.sh   # bare metal: PASS — the timer ticks and the keyboard is heard
+```
+
+Honest limits of Stone 12:
+
+- **Interrupts are truly interrupt-driven for input**: the
+  keyboard's knock fills the ring the moment a key is
+  pressed, whether the program is looking or not. What the
+  program does is poll the ring — the honest shape of a
+  first input path: nothing is lost while the program is
+  busy (up to the ring's 64 bytes; a byte arriving at a full
+  ring is dropped, the oldest news kept), and `waittick()`
+  means the polling costs the processor nothing.
+- **One keyboard, set-1 scancodes, letters only in the
+  proof.** The program's table covers the lowercase letters
+  and space. Key releases are seen (make code + 128) and the
+  proof program ignores them; there is no shift or caps-lock
+  state, no key repeat handling, and the extra byte that
+  extended keys (arrows, and friends) send first isn't
+  tracked — such a key's second byte could be mistaken for
+  a plain key's code. The mouse and every other device
+  remain unheard.
+- Doors other than the timer's and the keyboard's return
+  silently — including the processor's own exception doors,
+  where returning means trying the same instruction again.
+  A fault on bare metal is still silent, as Stone 11 said;
+  it now may spin instead of halting, which is no more
+  informative.
+- The timer is the PIT on purpose: it is the clock every PC
+  has and the simplest honest one. Its hundred-a-second is
+  1193182 ÷ 11932 ≈ 99.99 — near enough that the README
+  says "a hundred", and the count is a count of knocks, not
+  a clock on the wall.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

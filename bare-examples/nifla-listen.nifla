@@ -1,0 +1,131 @@
+// Nifla on bare metal, listening (Stone 12): the machine now
+// knocks, and the program answers. The timer ticks a hundred
+// times a second — ticks() reads the count — and every
+// keystroke lands in a small buffer the keyboard's own
+// interrupt fills; readkey() takes the next scancode out of
+// it, and the program turns scancodes into letters itself
+// and echoes them to the screen's first row. The tick count
+// is kept written on the third row, its digits worked out
+// and written by a floor block. Between knocks the program
+// sleeps with waittick() instead of spinning.
+//
+// Scancodes are the keyboard's own numbers (set 1): a letter
+// key pressed is its make code (all under 128); released, it
+// sends the same number plus 128 — those are ignored here,
+// as is any code this table doesn't know.
+
+make charFor(code) {
+    if code == 16 { give "q" }
+    if code == 17 { give "w" }
+    if code == 18 { give "e" }
+    if code == 19 { give "r" }
+    if code == 20 { give "t" }
+    if code == 21 { give "y" }
+    if code == 22 { give "u" }
+    if code == 23 { give "i" }
+    if code == 24 { give "o" }
+    if code == 25 { give "p" }
+    if code == 30 { give "a" }
+    if code == 31 { give "s" }
+    if code == 32 { give "d" }
+    if code == 33 { give "f" }
+    if code == 34 { give "g" }
+    if code == 35 { give "h" }
+    if code == 36 { give "j" }
+    if code == 37 { give "k" }
+    if code == 38 { give "l" }
+    if code == 44 { give "z" }
+    if code == 45 { give "x" }
+    if code == 46 { give "c" }
+    if code == 47 { give "v" }
+    if code == 48 { give "b" }
+    if code == 49 { give "n" }
+    if code == 50 { give "m" }
+    if code == 57 { give " " }
+    give ""
+}
+
+let label = "Ticks: "
+floor(label, 160) {
+    mov rax, [r10]
+    mov rdx, 0xB8000
+    shl rax, 1
+    add rdx, rax
+    mov rcx, 0
+tw1_loop:
+    cmp rcx, r12
+    jae tw1_done
+    mov al, [rbx + rcx]
+    mov [rdx + rcx * 2], al
+    mov byte ptr [rdx + rcx * 2 + 1], 0x0F
+    inc rcx
+    jmp tw1_loop
+tw1_done:
+}
+
+let cell = 0
+let last = 0 - 1
+while true {
+    let k = readkey()
+    if k != 0 {
+        if k < 128 {
+            let ch = charFor(k)
+            if length(ch) > 0 {
+                floor(ch, cell) {
+                    mov rax, [r10]
+                    mov rdx, 0xB8000
+                    shl rax, 1
+                    add rdx, rax
+                    mov rcx, 0
+                tw2_loop:
+                    cmp rcx, r12
+                    jae tw2_done
+                    mov al, [rbx + rcx]
+                    mov [rdx + rcx * 2], al
+                    mov byte ptr [rdx + rcx * 2 + 1], 0x0F
+                    inc rcx
+                    jmp tw2_loop
+                tw2_done:
+                }
+                cell = cell + 1
+            }
+        }
+    }
+    let t = ticks()
+    if t != last {
+        last = t
+        floor(t) {
+            mov rax, [r10]
+            mov rbx, 0xB8000
+            add rbx, 334
+            mov rcx, 0
+            mov r8, 10
+        tick_div:
+            xor rdx, rdx
+            div r8
+            add dl, 48
+            push rdx
+            inc rcx
+            test rax, rax
+            jne tick_div
+            mov r9, 0
+        tick_write:
+            cmp r9, rcx
+            jae tick_clear
+            pop rdx
+            mov byte ptr [rbx + r9 * 2], dl
+            mov byte ptr [rbx + r9 * 2 + 1], 0x0F
+            inc r9
+            jmp tick_write
+        tick_clear:
+            cmp r9, 12
+            jae tick_done
+            mov byte ptr [rbx + r9 * 2], 32
+            mov byte ptr [rbx + r9 * 2 + 1], 0x0F
+            inc r9
+            jmp tick_clear
+        tick_done:
+        }
+    }
+    waittick()
+}

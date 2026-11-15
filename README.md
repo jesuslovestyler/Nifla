@@ -1927,6 +1927,51 @@ words for the guest machinery (`callguest`, `guestvalue`,
 `guestgive`, `--guest`) are plumbing and did not change;
 feather is the format's name, not a renaming.
 
+## Stone 21 — the feather checker (November 15, 2026)
+
+A door checks a feather before letting it in; this stone
+gives that same check to anyone, as a small standalone
+tool. The repo's one program gains a third name (the
+build decides by the name it is called by, as with
+`nifla` and `niflac`):
+
+```
+feathercheck program.feather
+```
+
+It reads the `.feather`, reads its card as the compiler
+lays it — first line, `name:`, `needs:`, `bytes:`,
+`checksum:`, blank line, then the program — reckons the
+FNV-1a-64 checksum over the program bytes as they stand,
+and answers in plain words:
+
+```
+Feather: welcome-feather
+Needs: the guest door (desk version 1)
+The card says the program is 2656 bytes, with checksum 0b2452a707571de8.
+The program as it stands is 2656 bytes, with checksum 0b2452a707571de8.
+The card is true: the program is whole, and a door may let this feather in.
+```
+
+The exit code carries the verdict too: 0 when the card is
+true, 1 when it is not, 2 when the tool was called
+wrongly. A program whose bytes were tampered with gets
+the not-true verdict ("The card is not true: the program
+does not match its card, so a door must refuse this
+feather."); a damaged card — a wrong first line, a
+missing line, a checksum that is not sixteen hex letters,
+a card whose blank line never comes — is refused as not
+a whole feather, with the damage named in plain words.
+(The OS's door needs only the `bytes:` and `checksum:`
+lines to do its work and steps over the rest; the
+checker reads the whole card, as it was laid.)
+
+Standing proof: `run-feathercheck.sh` — a true feather
+passes with stated and reckoned checksums agreeing; one
+byte flipped in the program is declared not true; a
+checksum letter struck from the card is refused as
+damage. This is the doorman's test anyone can run.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

@@ -1,10 +1,11 @@
 #!/bin/sh
-# Build the Nifla programs into ./nifla and ./niflac
+# Build the Nifla programs into ./nifla, ./niflac and ./feathercheck
 #
-# One build makes both: they are the same program, and which one it
-# is is decided by the name it is called by (see src/main.swift).
-# ./nifla checks and runs programs; ./niflac checks and compiles
-# them into standalone native programs.
+# One build makes all three: they are the same program, and which
+# one it is is decided by the name it is called by (see
+# src/main.swift). ./nifla checks and runs programs; ./niflac checks
+# and compiles them into standalone native programs; ./feathercheck
+# reads a .feather and answers whether its card is true (Stone 21).
 #
 # Uses swiftc directly — no package manager needed. Set SWIFTC to
 # point at a specific swiftc if the automatic search doesn't find
@@ -32,4 +33,5 @@ fi
 
 "$SWIFTC" src/*.swift -o nifla
 cp nifla niflac
-echo "Built ./nifla and ./niflac"
+cp nifla feathercheck
+echo "Built ./nifla, ./niflac and ./feathercheck"

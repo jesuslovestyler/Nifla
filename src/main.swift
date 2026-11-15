@@ -15,6 +15,11 @@
 //                          card on it, making a .feather — the
 //                          form a host's door receives
 //                          (Stone 20; see BareCompiler.swift)
+//   feathercheck file.feather
+//                          read a .feather and answer in
+//                          plain words whether its card is
+//                          true (Stone 21; see
+//                          FeatherCheck.swift)
 //
 // Which program this is is decided by the name it was called by.
 // Either way, the checker (Stone 5) reads the program first, and a
@@ -34,6 +39,10 @@ let arguments = CommandLine.arguments
 
 if URL(fileURLWithPath: arguments[0]).lastPathComponent == "niflac" {
     exit(compileMain(arguments: arguments))
+}
+
+if URL(fileURLWithPath: arguments[0]).lastPathComponent == "feathercheck" {
+    exit(featherCheckMain(arguments: arguments))
 }
 
 var source: String

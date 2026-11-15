@@ -732,6 +732,16 @@ struct BareTranslator {
     // are, since it stands at the address it was linked for.
     private let guestMode: Bool
 
+    // The video request (Stone 9 of Cardnull OS 2's ladder,
+    // asked of the language as an opt-in): when the builder
+    // passes --video WIDTHxHEIGHTxDEPTH, the multiboot
+    // header asks the loader for a linear graphics mode of
+    // that shape, and the loader's answer stands in the
+    // boot information's framebuffer fields. When it is not
+    // passed, the header is emitted exactly as it always
+    // was — the request is an addition, never a change.
+    var videoRequest: (width: Int, height: Int, depth: Int)? = nil
+
     private var code: [String] = []
     private var literals: [(label: String, bytes: [UInt8])] = []
     private var floorBlocks: [String] = []
@@ -907,8 +917,35 @@ struct BareTranslator {
         out.append("    .section .text")
         out.append("    .align 4")
         out.append("    .long 0x1BADB002")
-        out.append("    .long 0x2")
-        out.append("    .long -(0x1BADB002 + 0x2)")
+        if let video = videoRequest {
+            // The video request: flag bit 2 says the words
+            // after the entry address are a mode the loader
+            // is asked to set — a linear mode (mode_type 0)
+            // of the width, height, and depth the builder
+            // named. The five words between the checksum and
+            // the mode are the header's address words, which
+            // an ELF kernel does not use; they stand as zeros
+            // so the mode words keep their own places (the
+            // mode stands at offset 32, then width, height,
+            // and depth in theirs). A loader that cannot give
+            // the mode still boots the program, with the boot
+            // information's framebuffer fields silent — the
+            // program reads them and decides for itself.
+            out.append("    .long 0x6")
+            out.append("    .long -(0x1BADB002 + 0x6)")
+            out.append("    .long 0")
+            out.append("    .long 0")
+            out.append("    .long 0")
+            out.append("    .long 0")
+            out.append("    .long 0")
+            out.append("    .long 0")
+            out.append("    .long \(video.width)")
+            out.append("    .long \(video.height)")
+            out.append("    .long \(video.depth)")
+        } else {
+            out.append("    .long 0x2")
+            out.append("    .long -(0x1BADB002 + 0x2)")
+        }
         out.append("    .code32")
         out.append("    .globl _start32")
         out.append("_start32:")
@@ -2147,7 +2184,7 @@ private func runTool(_ path: String, _ arguments: [String]) -> (status: Int32, w
 // GRUB reads either form). The assembly is kept beside the
 // binary, like the hosted path keeps its Swift and floor
 // assembly.
-func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode: Bool = false, fail: (String, Int32) -> Int32) -> Int32 {
+func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode: Bool = false, videoRequest: (width: Int, height: Int, depth: Int)? = nil, fail: (String, Int32) -> Int32) -> Int32 {
     let validator = BareValidator(guestMode: guestMode)
     do {
         try validator.validate(program)
@@ -2158,6 +2195,7 @@ func compileBare(inputPath: String, output: String?, program: [Stmt], guestMode:
     }
 
     var translator = BareTranslator(validator: validator)
+    translator.videoRequest = videoRequest
     let asm = translator.translate(program, sourceName: URL(fileURLWithPath: inputPath).lastPathComponent)
 
     let outputPath: String

@@ -356,6 +356,7 @@ func compileMain(arguments: [String]) -> Int32 {
     var output: String? = nil
     var bare = false
     var guest = false
+    var videoRequest: (width: Int, height: Int, depth: Int)? = nil
     var preludes: [String] = []
     var index = 1
     while index < arguments.count {
@@ -364,6 +365,18 @@ func compileMain(arguments: [String]) -> Int32 {
             bare = true
         } else if argument == "--guest" {
             guest = true
+        } else if argument == "--video" {
+            index += 1
+            guard index < arguments.count else {
+                return fail("The '--video' needs the mode it asks the loader for, written as WIDTHxHEIGHTxDEPTH, like: niflac --bare program.nifla --video 1024x768x32 -o program.elf", code: 2)
+            }
+            let parts = arguments[index].split(separator: "x")
+            guard parts.count == 3,
+                  let w = Int(parts[0]), let h = Int(parts[1]), let d = Int(parts[2]),
+                  w > 0, h > 0, [8, 15, 16, 24, 32].contains(d) else {
+                return fail("The '--video' mode '\(arguments[index])' isn't one I can ask for — write it as WIDTHxHEIGHTxDEPTH with a depth of 8, 15, 16, 24, or 32, like: --video 1024x768x32", code: 2)
+            }
+            videoRequest = (width: w, height: h, depth: d)
         } else if argument == "--prelude" {
             index += 1
             guard index < arguments.count else {
@@ -411,6 +424,14 @@ func compileMain(arguments: [String]) -> Int32 {
     if guest && !bare {
         return fail("A guest is a bare-metal program that a host loads and calls instead of booting — add '--bare' to build one, like: niflac --bare --guest guest.nifla -o guest.bin", code: 2)
     }
+    // The video request belongs to a booted bare program: it
+    // is the loader who is asked, and only a host is booted.
+    if videoRequest != nil && !bare {
+        return fail("The '--video' request asks the loader for a graphics mode when a bare-metal program boots — add '--bare' to use it, like: niflac --bare program.nifla --video 1024x768x32 -o program.elf", code: 2)
+    }
+    if videoRequest != nil && guest {
+        return fail("A guest is never booted by a loader, so there is no one to ask for a video mode — take '--video' out of the guest's build; the host owns the screen.", code: 2)
+    }
     var preludeStatements: [Stmt] = []
     for preludePath in preludes {
         let preludeSource: String
@@ -449,7 +470,7 @@ func compileMain(arguments: [String]) -> Int32 {
     // and build (BareCompiler.swift) — no Swift runtime, no
     // hosted runtime file, nothing underneath the program.
     if bare {
-        return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, fail: fail)
+        return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, videoRequest: videoRequest, fail: fail)
     }
 
     guard let runtimePath = findRuntime() else {

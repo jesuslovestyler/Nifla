@@ -1314,6 +1314,28 @@ Honest limits of Stone 16:
   meaning of every sector number itself. The guest door
   (Stone 17) is the first tenant of that arrangement.
 
+**An opt-in asked of the loader (added November 15, 2026,
+at Cardnull OS 2's Stone 9).** A bare build may now carry
+`--video WIDTHxHEIGHTxDEPTH` (like `--video 1024x768x32`):
+the multiboot header then sets its video flag (bit 2) and
+asks the loader for a linear graphics mode of that shape —
+mode_type 0 and the width, height, and depth standing in
+their own places in the header (offsets 32, 36, 40, 44),
+the header's unused address words zero between the
+checksum and the mode. The loader's answer, when it gives
+one, stands in the boot information's framebuffer fields
+(flags bit 12; address at 88, pitch at 96, width at 100,
+height at 104, bits per pixel at 108, type at 109, and the
+color fields' places at 112–117), for the program to read
+and decide on. The request is strictly opt-in: without
+`--video`, the header is emitted exactly as it always was
+— verified byte-for-byte against the previous build — and
+every existing bare proof stands unchanged. A loader that
+cannot give the mode still boots the program, with the
+framebuffer fields silent. `--video` without `--bare`, or
+on a guest (which no loader ever boots), is refused in
+plain words.
+
 ## Stone 17 — guests
 
 Laid on **November 15, 2026**, last of the six. Bare metal

@@ -20,8 +20,8 @@ struct Token {
         case number(Double)
         case text(String)
         case name(String)
-        case keyword(String)  // let, say, if, else, while, repeat, make, give, true, false
-        case symbol(String)   // +  -  *  /  (  )  {  }  ,  .  :  =  ==  !=  <  <=  >  >=
+        case keyword(String)  // let, say, if, else, while, repeat, for, in, make, give, true, false
+        case symbol(String)   // +  -  *  /  (  )  {  }  [  ]  ,  .  :  =  ==  !=  <  <=  >  >=
         case end
     }
     let kind: Kind
@@ -54,7 +54,7 @@ final class Lexer {
     private var pos = 0
     private var line = 1
 
-    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "make", "give", "true", "false"]
+    private static let keywords: Set<String> = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false"]
 
     init(_ source: String) {
         chars = Array(source)
@@ -120,14 +120,14 @@ final class Lexer {
                 return Token(kind: .symbol(pair), line: startLine)
             }
         }
-        if "+-*/(){}=<>.,:".contains(c) {
+        if "+-*/(){}[]=<>.,:".contains(c) {
             pos += 1
             return Token(kind: .symbol(String(c)), line: startLine)
         }
         if c == "!" {
             throw NiflaError(line: startLine, message: "I found a '!' on its own. To say 'not equal', write '!=' — an exclamation mark followed by an equals sign.")
         }
-        throw NiflaError(line: startLine, message: "I don't understand the character '\(c)'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } , . : = == != < <= > >=.")
+        throw NiflaError(line: startLine, message: "I don't understand the character '\(c)'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } [ ] , . : = == != < <= > >=.")
     }
 
     private func lexNumber(_ startLine: Int) throws -> Token {

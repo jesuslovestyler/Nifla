@@ -1,0 +1,18 @@
+// Lists (Stone 6): values in order, in square brackets. append
+// adds to the end, [0] reads or sets an item by its number, and a
+// 'for' loop walks the whole list. Saying a list prints its items,
+// with text items in quotes so they can't be mistaken for numbers.
+let list = ["milk", "eggs"]
+append(list, "bread")
+say list
+say length(list)
+list[0] = "oat milk"
+say list[0]
+say list
+let prices = [3, 5, 2]
+let total = 0
+for price in prices {
+    total = total + price
+}
+say total
+say prices

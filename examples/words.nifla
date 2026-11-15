@@ -1,0 +1,11 @@
+// The text tools (Stone 6): length measures text, part takes a
+// piece of it, find says where a piece lives (or -1 when it isn't
+// there), and [0] takes one character.
+let name = "Tyler"
+say length(name)
+say part(name, 0, 2)
+say part(name, 3, 2)
+say find(name, "y")
+say find(name, "q")
+say name[0]
+say name[4]

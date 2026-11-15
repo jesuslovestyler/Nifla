@@ -1,0 +1,10 @@
+// Files (Stone 6): writefile writes a whole piece of text to a
+// file and gives back how many characters it wrote; readfile
+// reads a whole file back as text. This program writes a note,
+// then reads it back and says what it says. (The test runs tidy
+// the note file away when they finish.)
+let written = writefile("stone6-note.txt", "Shalom, file!\nThis note was written by a Nifla program.")
+say written
+let note = readfile("stone6-note.txt")
+say note
+say length(note)

@@ -1,0 +1,5 @@
+// A checker example: the built-in tools take a set number of
+// values, like functions a program makes — 'split' takes two,
+// and this gives it one. The checker stops the program before
+// anything runs, in the run's own words.
+let pieces = split("a,b")

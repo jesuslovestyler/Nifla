@@ -1,0 +1,10 @@
+// arguments() gives the words the program was started with,
+// after its own name — as a list of text. The example runs start
+// it with no words, so the list is empty and the loop says
+// nothing; started with words, it would say each one.
+let given = arguments()
+say length(given)
+for arg in given {
+    say arg
+}
+say "done"

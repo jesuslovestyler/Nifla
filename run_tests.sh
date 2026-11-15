@@ -22,6 +22,10 @@ fi
 
 ./build.sh >/dev/null || { echo "BUILD FAILED"; exit 1; }
 
+# The notefile example (Stone 6) writes this note while it runs;
+# start and finish with it tidied away.
+rm -f stone6-note.txt
+
 pass=0
 fail=0
 for program in examples/*.nifla; do
@@ -61,6 +65,8 @@ for program in examples/*.nifla; do
     fi
     rm -f "$out" "$err"
 done
+
+rm -f stone6-note.txt
 
 echo "---"
 echo "$pass passed, $fail failed"

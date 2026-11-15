@@ -1,0 +1,8 @@
+// A 'for' loop can walk some text, too — one character at a
+// time, each character a small piece of text of its own.
+let word = "abc"
+for letter in word {
+    say letter
+}
+say word[1]
+say length(word)

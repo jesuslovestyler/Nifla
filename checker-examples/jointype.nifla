@@ -1,0 +1,4 @@
+// A checker example: 'join' joins a list, and this hands it
+// some text instead — plain to see. The checker stops the
+// program before anything runs.
+say join("abc", "-")

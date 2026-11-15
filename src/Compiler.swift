@@ -73,13 +73,23 @@ struct SwiftTranslator {
         case .assign(let name, let valueExpr, let line):
             emit(indent, "try __m.assign(\(swiftText(name)), \(genExpr(valueExpr, scope: scope)), in: \(scope), line: \(line))")
 
-        case .assignField(let target, let valueExpr, let line):
-            guard case .field(let baseExpr, let fieldName, _) = target else { return }
-            let base = fresh("b")
-            let object = fresh("o")
-            emit(indent, "let \(base) = \(genExpr(baseExpr, scope: scope))")
-            emit(indent, "let \(object) = try __m.fieldTarget(\(base), \(swiftText(fieldName)), line: \(line))")
-            emit(indent, "\(object).set(\(swiftText(fieldName)), \(genExpr(valueExpr, scope: scope)))")
+        case .assignTarget(let target, let valueExpr, let line):
+            switch target {
+            case .field(let baseExpr, let fieldName, _):
+                let base = fresh("b")
+                let object = fresh("o")
+                emit(indent, "let \(base) = \(genExpr(baseExpr, scope: scope))")
+                emit(indent, "let \(object) = try __m.fieldTarget(\(base), \(swiftText(fieldName)), line: \(line))")
+                emit(indent, "\(object).set(\(swiftText(fieldName)), \(genExpr(valueExpr, scope: scope)))")
+            case .index(let baseExpr, let indexExpr, let indexLine):
+                let base = fresh("b")
+                let slot = fresh("t")
+                emit(indent, "let \(base) = \(genExpr(baseExpr, scope: scope))")
+                emit(indent, "let \(slot) = try __m.indexTarget(\(base), \(genExpr(indexExpr, scope: scope)), line: \(indexLine))")
+                emit(indent, "\(slot).set(\(genExpr(valueExpr, scope: scope)))")
+            default:
+                break
+            }
 
         case .say(let valueExpr, _):
             emit(indent, "print(\(genExpr(valueExpr, scope: scope)).spoken)")
@@ -113,6 +123,19 @@ struct SwiftTranslator {
             let bodyScope = childScope(of: scope, indent: indent + "    ")
             translateBlock(body, scope: bodyScope, inFunction: inFunction, indent: indent + "    ")
             emit(indent + "    ", "\(done) += 1")
+            emit(indent, "}")
+
+        case .forEach(let name, let overExpr, let body, let line):
+            let items = fresh("xs")
+            let pos = fresh("i")
+            emit(indent, "let \(items) = try __m.forItems(\(genExpr(overExpr, scope: scope)), line: \(line))")
+            emit(indent, "var \(pos) = 0")
+            emit(indent, "while \(pos) < \(items).count {")
+            emit(indent + "    ", "try __m.tickLoop(line: \(line))")
+            let bodyScope = childScope(of: scope, indent: indent + "    ")
+            emit(indent + "    ", "\(bodyScope).declare(\(swiftText(name)), \(items)[\(pos)])")
+            translateBlock(body, scope: bodyScope, inFunction: inFunction, indent: indent + "    ")
+            emit(indent + "    ", "\(pos) += 1")
             emit(indent, "}")
 
         case .define(let name, let params, let body, let line):
@@ -156,8 +179,13 @@ struct SwiftTranslator {
         case .object(let fields, _):
             let parts = fields.map { "(\(swiftText($0.name)), \(genExpr($0.value, scope: scope)))" }
             return "__m.makeObject([\(parts.joined(separator: ", "))])"
+        case .list(let items, _):
+            let parts = items.map { genExpr($0, scope: scope) }
+            return "__m.makeList([\(parts.joined(separator: ", "))])"
         case .field(let base, let name, let line):
             return "try __m.readField(\(genExpr(base, scope: scope)), \(swiftText(name)), line: \(line))"
+        case .index(let base, let index, let line):
+            return "try __m.readIndex(\(genExpr(base, scope: scope)), \(genExpr(index, scope: scope)), line: \(line))"
         case .negate(let inner, let line):
             return "try __m.negate(\(genExpr(inner, scope: scope)), line: \(line))"
         case .binary(let left, let op, let right, let line):

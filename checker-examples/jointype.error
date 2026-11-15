@@ -1,0 +1,1 @@
+Line 4: 'join' needs a list to join, but it was given some text. I caught this before the program ran, so nothing ran.

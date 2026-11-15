@@ -278,6 +278,93 @@ Honest limits, stated plainly:
   Swift, not in Nifla. Those are later stones, in the settled
   order: the compiler first, then the Floor.
 
+## Stone 6 — words and lists
+
+Laid on **November 14, 2026**, later the same evening. Nifla gains
+its words and its lists — and, quietly, the tools the
+self-hosting stone will be built from.
+
+**Lists** are values in order, written in square brackets:
+
+```nifla
+let prices = [3, 5, 2]
+say prices[0]          // 3 — items are numbered from 0
+prices[1] = 6          // set an item by its number
+append(prices, 9)      // add an item at the end
+say length(prices)     // 4
+for price in prices {  // walk the list, one item at a time
+    say price
+}
+```
+
+A list can hold anything — numbers, text, objects, other lists —
+and lists are shared the way objects are: hand a list to a
+function and the function works on the same list, not a copy. A
+`for` loop walks the items as they stood when the loop began, so
+adding items inside the loop doesn't stretch it. The loop's name
+is fresh on every pass and stays inside the loop. Saying a list
+prints its items in brackets, with text items in quotes so they
+can't be mistaken for numbers.
+
+**Text** can be worked with, not just joined: `text[0]` takes one
+character (a small piece of text of its own), and a `for` loop can
+walk a piece of text character by character. Text itself never
+changes once it is made — trying to change one character says so
+in plain words; to change text, build the new text and set the
+variable to it.
+
+**Nine built-in tools** come with every program, with no `make`
+needed — and a function can't be made with a tool's name:
+
+| Tool | What it does |
+| --- | --- |
+| `length(value)` | How long: characters in text, items in a list, fields in an object |
+| `join(list, separator)` | A list's items as one piece of text, with the separator between them |
+| `split(text, separator)` | Text broken into a list of pieces, split at the separator |
+| `part(text, start, count)` | A piece of text: `count` characters starting at character `start` |
+| `find(text, piece)` | Where a piece first appears in text (a character number), or −1 when it isn't there |
+| `append(list, value)` | Adds a value to the end of a list, and gives the list back |
+| `readfile(path)` | The whole of a text file, as text |
+| `writefile(path, text)` | Writes text to a file (replacing what's there); gives back how many characters it wrote |
+| `arguments()` | The words the program was started with, after its own name, as a list of text |
+
+The **checker** knows the tools, too. It knows what kind each one
+gives back — so `length("abc") + true` is refused before the run,
+like any other bad adding — it refuses a call with the wrong
+number of values in the run's own words, and when a handed
+value's kind is plain to see and can never work for the tool —
+`length(29)`, or `join` handed text instead of a list — it stops
+the program before anything runs, in plain words. Three cases in
+`checker-examples/` show the tool refusals.
+
+The proofs grew with the stone: eight new examples (words,
+joinwords, shopping, letters, notefile, args, and two plain-words
+failures — a list asked for an item it doesn't have, and an
+attempt to change one character of text) pass under both tools:
+
+```sh
+./run_tests.sh      # the interpreter: 33 passed, 0 failed
+./run-compiled.sh   # the compiler and checker: 50 passed, 0 failed
+```
+
+Honest limits of Stone 6:
+
+- There is no way to take an item *out* of a list, put one in the
+  middle, or sort a list yet. `find` searches text, not lists.
+- Text operations count **characters**, the way a person counts —
+  not bytes.
+- `split` refuses to split by an empty piece of text.
+- Files are whole text files only: read all at once, written all
+  at once (there is no adding onto the end of a file), as UTF-8
+  text. No binary files, and no asking the person at the keyboard
+  for input yet.
+- Item numbers are whole numbers starting at 0. Two lists are
+  `==` only when they are the *same* list, the way objects
+  compare — there is no item-by-item comparing yet.
+
+Still not built yet, on purpose: the Floor, and Nifla written in
+Nifla. Those are the next rings, in the settled order.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

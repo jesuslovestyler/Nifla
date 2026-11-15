@@ -1,0 +1,11 @@
+// split breaks text into a list of pieces, join puts a list back
+// together as text, and a 'for' loop walks the pieces one by one.
+let sentence = "the quick brown fox"
+let words = split(sentence, " ")
+say length(words)
+say join(words, " ")
+say join(words, "-")
+for word in words {
+    say word
+}
+say words[3]

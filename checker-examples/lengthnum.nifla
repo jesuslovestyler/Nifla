@@ -1,0 +1,5 @@
+// A checker example: 'length' measures some text, a list, or an
+// object — and this hands it a number, plain to see from the
+// 'let' line. The checker stops the program before anything runs.
+let years = 29
+say length(years)

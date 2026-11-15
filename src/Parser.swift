@@ -5,11 +5,12 @@
 //
 //   statement  = "let" name "=" expression
 //              | name "=" expression
-//              | name ( "." name )+ "=" expression
+//              | name ( "." name | "[" expression "]" )+ "=" expression
 //              | "say" expression
 //              | "if" expression block [ "else" block ]
 //              | "while" expression block
 //              | "repeat" expression block
+//              | "for" name "in" expression block
 //              | "make" name "(" [ name ( "," name )* ] ")" block
 //              | "give" expression
 //              | name "(" [ expression ( "," expression )* ] ")"
@@ -19,11 +20,12 @@
 //   sum        = term ( ("+" | "-") term )*
 //   term       = factor ( ("*" | "/") factor )*
 //   factor     = "-" factor | postfix
-//   postfix    = atom ( "." name )*
+//   postfix    = atom ( "." name | "[" expression "]" )*
 //   atom       = number | text | "true" | "false" | name
 //              | name "(" [ expression ( "," expression )* ] ")"
 //              | "(" expression ")"
 //              | "{" [ name ":" expression ( "," name ":" expression )* ] "}"
+//              | "[" [ expression ( "," expression )* ] "]"
 
 indirect enum Expr {
     case number(Double, line: Int)
@@ -32,7 +34,9 @@ indirect enum Expr {
     case variable(String, line: Int)
     case call(name: String, args: [Expr], line: Int)
     case object(fields: [(name: String, value: Expr)], line: Int)
+    case list(items: [Expr], line: Int)
     case field(base: Expr, name: String, line: Int)
+    case index(base: Expr, index: Expr, line: Int)
     case negate(Expr, line: Int)
     case binary(Expr, String, Expr, line: Int)  // line of the operator
 }
@@ -40,11 +44,12 @@ indirect enum Expr {
 enum Stmt {
     case declare(name: String, value: Expr, line: Int)
     case assign(name: String, value: Expr, line: Int)
-    case assignField(target: Expr, value: Expr, line: Int)  // target is a .field chain
+    case assignTarget(target: Expr, value: Expr, line: Int)  // target ends in a .field or [index] step
     case say(Expr, line: Int)
     case ifElse(condition: Expr, then: [Stmt], otherwise: [Stmt]?, line: Int)
     case whileLoop(condition: Expr, body: [Stmt], line: Int)
     case repeatLoop(count: Expr, body: [Stmt], line: Int)
+    case forEach(name: String, over: Expr, body: [Stmt], line: Int)
     case define(name: String, params: [String], body: [Stmt], line: Int)
     case give(Expr, line: Int)
     case doCall(name: String, args: [Expr], line: Int)
@@ -170,6 +175,26 @@ final class Parser {
             return .repeatLoop(count: count, body: body, line: token.line)
         }
 
+        if checkKeyword("for") {
+            advance()
+            guard case .name(let name) = current.kind else {
+                throw NiflaError(line: current.line, message: "After 'for' I need a name for each item the loop walks through, like: for item in items { ... }. Instead I found \(current.spoken).")
+            }
+            advance()
+            guard checkKeyword("in") else {
+                throw NiflaError(line: current.line, message: "After 'for \(name)' I need 'in' and then the list or text to walk through, like: for \(name) in items { ... }. Instead I found \(current.spoken).")
+            }
+            advance()
+            let over = try parseExpression()
+            guard checkSymbol("{") else {
+                throw NiflaError(line: current.line, message: "After 'for \(name) in ...' I need a '{' to start the block that runs for each item. Instead I found \(current.spoken).")
+            }
+            let openLine = current.line
+            advance()
+            let body = try parseBlock(openLine: openLine)
+            return .forEach(name: name, over: over, body: body, line: token.line)
+        }
+
         if checkKeyword("make") {
             advance()
             guard case .name(let name) = current.kind else {
@@ -218,8 +243,8 @@ final class Parser {
         }
 
         // Setting an existing variable: a name followed by '='.
-        // Setting a field: a name followed by one or more '.field'
-        // steps and then '='.
+        // Setting a field or an item: a name followed by one or
+        // more '.field' or '[...]' steps and then '='.
         // Calling a function for what it does: a name followed by '('.
         if case .name(let name) = token.kind {
             let next = tokens[min(pos + 1, tokens.count - 1)]
@@ -229,34 +254,45 @@ final class Parser {
                 let value = try parseExpression()
                 return .assign(name: name, value: value, line: token.line)
             }
-            if case .symbol(let symbol) = next.kind, symbol == "." {
+            if case .symbol(let symbol) = next.kind, symbol == "." || symbol == "[" {
                 advance()  // the name
                 var target: Expr = .variable(name, line: token.line)
-                while checkSymbol(".") {
-                    let dotToken = current
-                    advance()  // the '.'
-                    guard case .name(let fieldName) = current.kind else {
-                        throw NiflaError(line: current.line, message: "After '.' I need the name of a field, like: \(name).years. Instead I found \(current.spoken).")
+                while checkSymbol(".") || checkSymbol("[") {
+                    if checkSymbol(".") {
+                        let dotToken = current
+                        advance()  // the '.'
+                        guard case .name(let fieldName) = current.kind else {
+                            throw NiflaError(line: current.line, message: "After '.' I need the name of a field, like: \(name).years. Instead I found \(current.spoken).")
+                        }
+                        advance()
+                        target = .field(base: target, name: fieldName, line: dotToken.line)
+                    } else {
+                        let bracketToken = current
+                        advance()  // the '['
+                        let indexExpr = try parseExpression()
+                        guard checkSymbol("]") else {
+                            throw NiflaError(line: current.line, message: "I expected a ']' to close the '[' from line \(bracketToken.line), but I found \(current.spoken).")
+                        }
+                        advance()  // the ']'
+                        target = .index(base: target, index: indexExpr, line: bracketToken.line)
                     }
-                    advance()
-                    target = .field(base: target, name: fieldName, line: dotToken.line)
                 }
                 guard checkSymbol("=") else {
-                    throw NiflaError(line: current.line, message: "A line that starts with a field like this needs to set it: write an '=' and the new value, like: \(name).years = 30. To show a field instead, write: say \(name).years.")
+                    throw NiflaError(line: current.line, message: "A line that starts with a field or an item like this needs to set it: write an '=' and the new value, like: \(name).years = 30 or \(name)[0] = 30. To show it instead, write it after 'say'.")
                 }
                 advance()  // the '='
                 let value = try parseExpression()
-                return .assignField(target: target, value: value, line: token.line)
+                return .assignTarget(target: target, value: value, line: token.line)
             }
             if case .symbol(let symbol) = next.kind, symbol == "(" {
                 advance()  // the name
                 let args = try parseCallArgs(name: name)
                 return .doCall(name: name, args: args, line: token.line)
             }
-            throw NiflaError(line: token.line, message: "I found the name '\(name)' at the start of a line, but a line needs to do something: make a variable with 'let \(name) = ...', set it with '\(name) = ...', set a field with '\(name).field = ...', show it with 'say \(name)', or call a function with '\(name)(...)'.")
+            throw NiflaError(line: token.line, message: "I found the name '\(name)' at the start of a line, but a line needs to do something: make a variable with 'let \(name) = ...', set it with '\(name) = ...', set a field with '\(name).field = ...', set an item with '\(name)[0] = ...', show it with 'say \(name)', or call a function with '\(name)(...)'.")
         }
 
-        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'make', 'give', or the name of a variable to set — but I found \(token.spoken).")
+        throw NiflaError(line: token.line, message: "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'for', 'make', 'give', or the name of a variable to set — but I found \(token.spoken).")
     }
 
     // The "( value, value )" part of a call, shared by call statements
@@ -339,21 +375,55 @@ final class Parser {
         return try parsePostfix()
     }
 
-    // An atom followed by any number of '.field' steps: person.name,
-    // person.home.town, and so on. Each step reads one field of the
-    // object the steps before it reached.
+    // An atom followed by any number of steps: '.field' reads one
+    // field of an object (person.name, person.home.town), and
+    // '[...]' reads one item of a list or one character of some
+    // text (items[0], items[0].name, word[2]).
     private func parsePostfix() throws -> Expr {
         var expr = try parseAtom()
-        while checkSymbol(".") {
-            let dotToken = current
-            advance()  // the '.'
-            guard case .name(let fieldName) = current.kind else {
-                throw NiflaError(line: current.line, message: "After '.' I need the name of a field, like: person.name. Instead I found \(current.spoken).")
+        while checkSymbol(".") || checkSymbol("[") {
+            if checkSymbol(".") {
+                let dotToken = current
+                advance()  // the '.'
+                guard case .name(let fieldName) = current.kind else {
+                    throw NiflaError(line: current.line, message: "After '.' I need the name of a field, like: person.name. Instead I found \(current.spoken).")
+                }
+                advance()
+                expr = .field(base: expr, name: fieldName, line: dotToken.line)
+            } else {
+                let bracketToken = current
+                advance()  // the '['
+                let indexExpr = try parseExpression()
+                guard checkSymbol("]") else {
+                    throw NiflaError(line: current.line, message: "I expected a ']' to close the '[' from line \(bracketToken.line), but I found \(current.spoken).")
+                }
+                advance()  // the ']'
+                expr = .index(base: expr, index: indexExpr, line: bracketToken.line)
             }
-            advance()
-            expr = .field(base: expr, name: fieldName, line: dotToken.line)
         }
         return expr
+    }
+
+    // A list literal: '[' then values separated by commas, then
+    // ']'. A list with nothing in it is '[]'.
+    private func parseListLiteral(openToken: Token) throws -> Expr {
+        advance()  // the '['
+        var items: [Expr] = []
+        if !checkSymbol("]") {
+            while true {
+                items.append(try parseExpression())
+                if checkSymbol(",") {
+                    advance()
+                    continue
+                }
+                break
+            }
+        }
+        guard checkSymbol("]") else {
+            throw NiflaError(line: current.line, message: "I expected a ']' to close the list that started on line \(openToken.line), but I found \(current.spoken).")
+        }
+        advance()  // the ']'
+        return .list(items: items, line: openToken.line)
     }
 
     // An object literal: '{' then name ':' value pairs separated by
@@ -424,8 +494,10 @@ final class Parser {
             return inner
         case .symbol("{"):
             return try parseObjectLiteral(openToken: token)
+        case .symbol("["):
+            return try parseListLiteral(openToken: token)
         default:
-            throw NiflaError(line: token.line, message: "I expected a number, a piece of text, true, false, a variable name, or an object like { name: \"Tyler\" } here, but I found \(token.spoken).")
+            throw NiflaError(line: token.line, message: "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, or a list like [1, 2, 3] here, but I found \(token.spoken).")
         }
     }
 }

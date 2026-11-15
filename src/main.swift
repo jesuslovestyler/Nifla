@@ -45,7 +45,13 @@ do {
     let tokens = try Lexer(source).tokenize()
     let program = try Parser(tokens).parseProgram()
     try Checker(program: program).check(program)
-    try Interpreter().run(program)
+    let interpreter = Interpreter()
+    // The program's own arguments (Stone 6): the words after the
+    // program's file name, which arguments() hands to the program.
+    if arguments.count > 1 {
+        interpreter.programArguments = Array(arguments.dropFirst(2))
+    }
+    try interpreter.run(program)
 } catch let error as NiflaError {
     reportAndExit(error.spoken, code: 1)
 }

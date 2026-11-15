@@ -1,2 +1,5 @@
 /nifla
 /niflac
+
+# The note file the Stone 6 notefile example writes while it runs.
+/stone6-note.txt

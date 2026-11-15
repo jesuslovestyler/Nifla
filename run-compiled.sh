@@ -36,8 +36,12 @@ fi
 
 ./build.sh >/dev/null || { echo "BUILD FAILED"; exit 1; }
 
+# The notefile example (Stone 6) writes this note while it runs;
+# start and finish with it tidied away.
+rm -f stone6-note.txt
+
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+trap 'rm -rf "$WORK"; rm -f stone6-note.txt' EXIT
 
 pass=0
 fail=0

@@ -4,6 +4,8 @@
 // scopes (one per block), and the running of statements. All problems
 // are reported as plain-words NiflaErrors with a line number.
 
+import Foundation
+
 // An object (Stone 4): named fields, kept in the order they were
 // first written. It is a class on purpose — objects are shared by
 // reference, the way JavaScript's are. Two variables that hold the
@@ -24,11 +26,23 @@ final class NiflaObject {
     }
 }
 
+// A list (Stone 6): values in order, held in a class on purpose —
+// lists are shared by reference, the way objects are. Two variables
+// that hold the same list see each other's appends and item changes.
+final class NiflaList {
+    var items: [Value] = []
+
+    init(items: [Value] = []) {
+        self.items = items
+    }
+}
+
 enum Value {
     case number(Double)
     case text(String)
     case boolean(Bool)
     case object(NiflaObject)
+    case list(NiflaList)
 
     // How the value is shown by `say`.
     var spoken: String {
@@ -57,6 +71,14 @@ enum Value {
                 "\(name): \(object.value(for: name)!.render(seen: inner, quoted: true))"
             }
             return "{ " + parts.joined(separator: ", ") + " }"
+        case .list(let list):
+            let id = ObjectIdentifier(list)
+            if seen.contains(id) { return "..." }
+            if list.items.isEmpty { return "[]" }
+            var inner = seen
+            inner.insert(id)
+            let parts = list.items.map { $0.render(seen: inner, quoted: true) }
+            return "[" + parts.joined(separator: ", ") + "]"
         }
     }
 
@@ -69,6 +91,12 @@ enum Value {
         case .object(let object):
             if object.fieldNames.isEmpty { return "an object with no fields yet" }
             return "an object with the fields \(object.fieldNames.joined(separator: ", "))"
+        case .list(let list):
+            switch list.items.count {
+            case 0: return "an empty list"
+            case 1: return "a list of 1 item"
+            default: return "a list of \(list.items.count) items"
+            }
         }
     }
 }
@@ -154,6 +182,42 @@ private struct ReturnSignal: Error {
     let value: Value
 }
 
+// A built-in tool (Stone 6): a function every Nifla program has
+// from the start, without making it. `params` names the values it
+// takes, for plain-words messages; `example` shows a call to it.
+struct BuiltinDef {
+    let params: [String]
+    let example: String
+}
+
+// The built-in tools, in one place so the interpreter, the
+// compiled programs' runtime, and the checker all agree on their
+// names and how many values they take.
+let builtinTools: [String: BuiltinDef] = [
+    "length": BuiltinDef(params: ["value"], example: "length(\"Tyler\")"),
+    "join": BuiltinDef(params: ["list", "separator"], example: "join(words, \" \")"),
+    "split": BuiltinDef(params: ["text", "separator"], example: "split(\"a,b\", \",\")"),
+    "part": BuiltinDef(params: ["text", "start", "count"], example: "part(\"Tyler\", 0, 2)"),
+    "find": BuiltinDef(params: ["text", "piece"], example: "find(\"Tyler\", \"y\")"),
+    "append": BuiltinDef(params: ["list", "value"], example: "append(items, 4)"),
+    "readfile": BuiltinDef(params: ["path"], example: "readfile(\"notes.txt\")"),
+    "writefile": BuiltinDef(params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")"),
+    "arguments": BuiltinDef(params: [], example: "arguments()"),
+]
+
+// The plain-words message for a call to a built-in tool with the
+// wrong number of values — the same shape as the one for functions
+// a program makes itself.
+func builtinCountMessage(name: String, def: BuiltinDef, given: Int) -> String {
+    let takes: String
+    switch def.params.count {
+    case 0: takes = "no values"
+    case 1: takes = "1 value (\(def.params[0]))"
+    default: takes = "\(def.params.count) values (\(def.params.joined(separator: ", ")))"
+    }
+    return "The tool '\(name)' takes \(takes), but it was given \(given). Call it like: \(def.example)."
+}
+
 final class Interpreter {
     // The runaway guard (Stone 2): a kindness limit on the total number
     // of loop passes in one run, across every loop in the program. A
@@ -161,6 +225,10 @@ final class Interpreter {
     // instead of hanging.
     private var loopPasses = 0
     private let loopPassLimit = 1_000_000
+
+    // The words handed to the program when it was started, after
+    // the program's own file name — what arguments() gives (Stone 6).
+    var programArguments: [String] = []
 
     // The functions this run has made, by name (Stone 3).
     private var functions: [String: FunctionDef] = [:]
@@ -200,19 +268,12 @@ final class Interpreter {
                 throw NiflaError(line: line, message: "I can't set '\(name)', because no variable called '\(name)' has been made yet. Make one first with: let \(name) = ...")
             }
 
-        case .assignField(let target, let valueExpr, let line):
-            // The target is a chain of field steps; every step but
-            // the last is read, to reach the object whose field is
-            // being set, and the last step names that field. Setting
-            // a field that isn't there yet adds it.
-            guard case .field(let baseExpr, let fieldName, _) = target else {
-                throw NiflaError(line: line, message: "I can only set a field on an object, like: person.years = 30.")
-            }
-            let base = try evaluate(baseExpr, in: scope)
-            guard case .object(let object) = base else {
-                throw NiflaError(line: line, message: "I can't set the field '\(fieldName)' on \(base.described), because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.\(fieldName) = ... works.")
-            }
-            object.set(fieldName, try evaluate(valueExpr, in: scope))
+        case .assignTarget(let target, let valueExpr, let line):
+            // The target is a chain of steps; every step but the
+            // last is read, to reach the object or list whose field
+            // or item is being set, and the last step names it.
+            // Setting a field that isn't there yet adds it.
+            try assignTo(target, valueExpr: valueExpr, line: line, in: scope)
 
         case .say(let valueExpr, _):
             let value = try evaluate(valueExpr, in: scope)
@@ -271,10 +332,37 @@ final class Interpreter {
                 done += 1
             }
 
+        case .forEach(let name, let overExpr, let body, let line):
+            // The list (or text) is read once, as it stands when the
+            // loop begins, and the block runs once for each item in
+            // it, with the item under the loop's name. Each pass runs
+            // in a fresh block scope, the same way the other loops do.
+            let over = try evaluate(overExpr, in: scope)
+            let items: [Value]
+            switch over {
+            case .list(let list):
+                items = list.items
+            case .text(let text):
+                items = Array(text).map { Value.text(String($0)) }
+            default:
+                throw NiflaError(line: line, message: "'for' needs a list or some text to walk through, but here it was given \(over.described). Write it like: for item in items { ... }")
+            }
+            for item in items {
+                try tickLoop(line: line)
+                let child = Scope(parent: scope)
+                child.declare(name, item)
+                for inner in body {
+                    try execute(inner, in: child)
+                }
+            }
+
         case .define(let name, let params, let body, let line):
             // Making a function is a line like any other: it runs when
             // the program reaches it, so a function is ready to call
             // from that line on.
+            if builtinTools[name] != nil {
+                throw NiflaError(line: line, message: "There is already a built-in tool called '\(name)' — every Nifla program has it from the start. A function can't be made with that name; rename the function.")
+            }
             if functions[name] != nil {
                 throw NiflaError(line: line, message: "There is already a function called '\(name)'. Each function needs its own name — rename this one, or take out the earlier 'make \(name)'.")
             }
@@ -293,12 +381,99 @@ final class Interpreter {
         }
     }
 
-    // Runs one call: checks the function exists and was given the
-    // right number of values, then runs its body in a fresh scope
-    // inside its home, with the parameters declared there. Returns
-    // the value the function gave back, or nil when it finished
-    // without a 'give'.
+    // Sets the field or item a target chain names. The chain's
+    // base is read (which reads every step before the last), the
+    // holder the last step names is checked, and only then is the
+    // new value worked out — the order the interpreter has always
+    // used for field-setting lines.
+    private func assignTo(_ target: Expr, valueExpr: Expr, line: Int, in scope: Scope) throws {
+        switch target {
+        case .field(let baseExpr, let fieldName, _):
+            let base = try evaluate(baseExpr, in: scope)
+            guard case .object(let object) = base else {
+                throw NiflaError(line: line, message: "I can't set the field '\(fieldName)' on \(base.described), because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.\(fieldName) = ... works.")
+            }
+            object.set(fieldName, try evaluate(valueExpr, in: scope))
+
+        case .index(let baseExpr, let indexExpr, let indexLine):
+            let base = try evaluate(baseExpr, in: scope)
+            switch base {
+            case .list(let list):
+                let index = try itemNumber(try evaluate(indexExpr, in: scope), line: indexLine)
+                if list.items.isEmpty {
+                    throw NiflaError(line: indexLine, message: "This list has no items yet, so there is no item \(index) to set. To add an item at the end, use append — like: append(items, ...).")
+                }
+                guard index >= 0 && index < list.items.count else {
+                    throw NiflaError(line: indexLine, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), so there is no item \(index) to set. To add an item at the end, use append — like: append(items, ...).")
+                }
+                list.items[index] = try evaluate(valueExpr, in: scope)
+            case .text:
+                throw NiflaError(line: indexLine, message: "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
+            default:
+                throw NiflaError(line: indexLine, message: "I can only set an item in a list, like: items[0] = 30 — but this is \(base.described), which has no items to set.")
+            }
+
+        default:
+            throw NiflaError(line: line, message: "I can only set a field on an object or an item in a list, like: person.years = 30 or items[0] = 30.")
+        }
+    }
+
+    // Checks that a value can pick an item: a whole number. The
+    // range check belongs to the reading or setting, which knows
+    // how many items there are.
+    private func itemNumber(_ value: Value, line: Int) throws -> Int {
+        guard case .number(let number) = value else {
+            throw NiflaError(line: line, message: "I can't use \(value.described) to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on.")
+        }
+        guard number == number.rounded() && abs(number) < 1e15 else {
+            throw NiflaError(line: line, message: "An item number must be a whole number, but I was given \(formatNumber(number)). Use a whole number, like 0, 1, or 2.")
+        }
+        return Int(number)
+    }
+
+    // Reads one item of a list, or one character of some text.
+    private func readIndex(_ base: Value, _ indexValue: Value, line: Int) throws -> Value {
+        switch base {
+        case .list(let list):
+            let index = try itemNumber(indexValue, line: line)
+            if list.items.isEmpty {
+                throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(index) to take from it. Items can be added with append — like: append(items, ...).")
+            }
+            guard index >= 0 && index < list.items.count else {
+                throw NiflaError(line: line, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), but I was asked for item \(index).")
+            }
+            return list.items[index]
+
+        case .text(let text):
+            let index = try itemNumber(indexValue, line: line)
+            let chars = Array(text)
+            if chars.isEmpty {
+                throw NiflaError(line: line, message: "This text has no characters yet, so there is no character \(index) to take from it.")
+            }
+            guard index >= 0 && index < chars.count else {
+                throw NiflaError(line: line, message: "This text has \(chars.count) characters, numbered 0 to \(chars.count - 1), but I was asked for character \(index).")
+            }
+            return .text(String(chars[index]))
+
+        default:
+            throw NiflaError(line: line, message: "I can't take an item from \(base.described). Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character.")
+        }
+    }
+
+    // Runs one call: a built-in tool first (every program has
+    // them), then a function the program made — checking it exists
+    // and was given the right number of values, then running its
+    // body in a fresh scope inside its home, with the parameters
+    // declared there. Returns the value the call gave back, or nil
+    // when a made function finished without a 'give'.
     private func callFunction(name: String, argExprs: [Expr], line: Int, in scope: Scope) throws -> Value? {
+        if let builtin = builtinTools[name] {
+            let args = try argExprs.map { try evaluate($0, in: scope) }
+            guard args.count == builtin.params.count else {
+                throw NiflaError(line: line, message: builtinCountMessage(name: name, def: builtin, given: args.count))
+            }
+            return try runBuiltin(name, args: args, line: line)
+        }
         guard let def = functions[name] else {
             var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
             if let suggestion = closestFunctionName(to: name) {
@@ -341,13 +516,149 @@ final class Interpreter {
 
     private func closestFunctionName(to name: String) -> String? {
         var best: (name: String, distance: Int)? = nil
-        for candidate in functions.keys where candidate != name {
+        for candidate in Array(functions.keys) + Array(builtinTools.keys) where candidate != name {
             let distance = editDistance(name, candidate)
             if distance <= 2 && (best == nil || distance < best!.distance) {
                 best = (candidate, distance)
             }
         }
         return best?.name
+    }
+
+    // Runs a built-in tool (Stone 6) on values already worked out,
+    // checking each value's kind in plain words. Every tool gives a
+    // value back.
+    private func runBuiltin(_ name: String, args: [Value], line: Int) throws -> Value {
+        switch name {
+        case "length":
+            switch args[0] {
+            case .text(let text): return .number(Double(text.count))
+            case .list(let list): return .number(Double(list.items.count))
+            case .object(let object): return .number(Double(object.fieldNames.count))
+            default:
+                throw NiflaError(line: line, message: "'length' measures some text, a list, or an object, but it was given \(args[0].described).")
+            }
+
+        case "join":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'join' joins the items of a list into one piece of text, but it was given \(args[0].described) to join. Give it a list first, like: join(words, \" \").")
+            }
+            guard case .text(let separator) = args[1] else {
+                throw NiflaError(line: line, message: "'join' needs some text to join the items with, like \" \" or \", \", but it was given \(args[1].described).")
+            }
+            return .text(list.items.map { $0.spoken }.joined(separator: separator))
+
+        case "split":
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'split' splits some text into a list of pieces, but it was given \(args[0].described) to split.")
+            }
+            guard case .text(let separator) = args[1] else {
+                throw NiflaError(line: line, message: "'split' needs some text to split by, like \",\", but it was given \(args[1].described).")
+            }
+            guard !separator.isEmpty else {
+                throw NiflaError(line: line, message: "'split' can't split by an empty piece of text — there would be nothing to split on. Give it the text to split by, like: split(\"a,b\", \",\").")
+            }
+            let pieces = text.components(separatedBy: separator)
+            return .list(NiflaList(items: pieces.map { Value.text($0) }))
+
+        case "part":
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'part' takes a part of some text, but it was given \(args[0].described).")
+            }
+            guard case .number = args[1] else {
+                throw NiflaError(line: line, message: "'part' needs a number saying which character to start at — 0 is the first — but it was given \(args[1].described).")
+            }
+            guard case .number = args[2] else {
+                throw NiflaError(line: line, message: "'part' needs a number saying how many characters to take, but it was given \(args[2].described).")
+            }
+            let start = try wholeCount(args[1], what: "The character to start at", line: line)
+            let count = try wholeCount(args[2], what: "The number of characters to take", line: line)
+            let chars = Array(text)
+            if start < 0 {
+                throw NiflaError(line: line, message: "'part' was told to start at character \(start), but the first character is number 0 — a start can't be less than 0.")
+            }
+            if count < 0 {
+                throw NiflaError(line: line, message: "'part' was told to take \(count) characters, but a count can't be less than 0.")
+            }
+            if start > chars.count {
+                if chars.isEmpty {
+                    throw NiflaError(line: line, message: "'part' was told to start at character \(start), but the text has no characters yet.")
+                }
+                throw NiflaError(line: line, message: "'part' was told to start at character \(start), but the text has only \(chars.count) characters, numbered 0 to \(chars.count - 1).")
+            }
+            if start + count > chars.count {
+                throw NiflaError(line: line, message: "'part' was told to take \(count) characters starting at character \(start), but the text has only \(chars.count) characters, numbered 0 to \(chars.count - 1) — that runs past the end.")
+            }
+            return .text(String(chars[start..<(start + count)]))
+
+        case "find":
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'find' looks for a piece of text inside some text, but it was given \(args[0].described) to look in.")
+            }
+            guard case .text(let piece) = args[1] else {
+                throw NiflaError(line: line, message: "'find' looks for a piece of text inside some text, but it was given \(args[1].described) to look for.")
+            }
+            let chars = Array(text)
+            let wanted = Array(piece)
+            if wanted.isEmpty { return .number(0) }
+            guard wanted.count <= chars.count else { return .number(-1) }
+            for start in 0...(chars.count - wanted.count) {
+                if Array(chars[start..<(start + wanted.count)]) == wanted {
+                    return .number(Double(start))
+                }
+            }
+            return .number(-1)
+
+        case "append":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'append' adds a value to the end of a list, but it was given \(args[0].described) to add to.")
+            }
+            list.items.append(args[1])
+            return .list(list)
+
+        case "readfile":
+            guard case .text(let path) = args[0] else {
+                throw NiflaError(line: line, message: "'readfile' needs the name of a file, as text, but it was given \(args[0].described).")
+            }
+            do {
+                return .text(try String(contentsOfFile: path, encoding: .utf8))
+            } catch {
+                throw NiflaError(line: line, message: "I couldn't read the file '\(path)'. Check the name and the folder, and try again.")
+            }
+
+        case "writefile":
+            guard case .text(let path) = args[0] else {
+                throw NiflaError(line: line, message: "'writefile' needs the name of a file, as text, but it was given \(args[0].described).")
+            }
+            guard case .text(let text) = args[1] else {
+                throw NiflaError(line: line, message: "'writefile' writes some text to a file, but it was given \(args[1].described) to write.")
+            }
+            do {
+                try text.write(toFile: path, atomically: true, encoding: .utf8)
+            } catch {
+                throw NiflaError(line: line, message: "I couldn't write the file '\(path)'. Check that the folder is there and the name is right, and try again.")
+            }
+            return .number(Double(text.count))
+
+        case "arguments":
+            return .list(NiflaList(items: programArguments.map { Value.text($0) }))
+
+        default:
+            throw NiflaError(line: line, message: "I don't know a tool called '\(name)'.")
+        }
+    }
+
+    // A whole-number check for the counting tools ('part'): the
+    // value is already known to be a number; this checks it is a
+    // whole one and hands it back as an Int.
+    private func wholeCount(_ value: Value, what: String, line: Int) throws -> Int {
+        guard case .number(let number) = value else {
+            throw NiflaError(line: line, message: "\(what) must be a number, but I was given \(value.described).")
+        }
+        guard number == number.rounded() && abs(number) < 1e15 else {
+            throw NiflaError(line: line, message: "\(what) must be a whole number, but I was given \(formatNumber(number)).")
+        }
+        return Int(number)
     }
 
     private func evaluate(_ expr: Expr, in scope: Scope) throws -> Value {
@@ -381,6 +692,18 @@ final class Interpreter {
                 object.set(field.name, try evaluate(field.value, in: scope))
             }
             return .object(object)
+
+        case .list(let itemExprs, _):
+            let list = NiflaList()
+            for itemExpr in itemExprs {
+                list.items.append(try evaluate(itemExpr, in: scope))
+            }
+            return .list(list)
+
+        case .index(let baseExpr, let indexExpr, let line):
+            let base = try evaluate(baseExpr, in: scope)
+            let indexValue = try evaluate(indexExpr, in: scope)
+            return try readIndex(base, indexValue, line: line)
 
         case .field(let baseExpr, let name, let line):
             let base = try evaluate(baseExpr, in: scope)
@@ -478,6 +801,7 @@ final class Interpreter {
             case (.text(let a), .text(let b)): equal = a == b
             case (.boolean(let a), .boolean(let b)): equal = a == b
             case (.object(let a), .object(let b)): equal = a === b  // the very same object, not just alike
+            case (.list(let a), .list(let b)): equal = a === b  // the very same list, not just alike
             default: equal = false  // different kinds are never equal
             }
             return .boolean(op == "==" ? equal : !equal)

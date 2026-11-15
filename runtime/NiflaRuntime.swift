@@ -47,11 +47,22 @@ final class NiflaObject {
     }
 }
 
+// A list (Stone 6): values in order, in a class on purpose —
+// lists are shared by reference, the way objects are.
+final class NiflaList {
+    var items: [Value] = []
+
+    init(items: [Value] = []) {
+        self.items = items
+    }
+}
+
 enum Value {
     case number(Double)
     case text(String)
     case boolean(Bool)
     case object(NiflaObject)
+    case list(NiflaList)
 
     // How the value is shown by `say`.
     var spoken: String {
@@ -73,6 +84,14 @@ enum Value {
                 "\(name): \(object.value(for: name)!.render(seen: inner, quoted: true))"
             }
             return "{ " + parts.joined(separator: ", ") + " }"
+        case .list(let list):
+            let id = ObjectIdentifier(list)
+            if seen.contains(id) { return "..." }
+            if list.items.isEmpty { return "[]" }
+            var inner = seen
+            inner.insert(id)
+            let parts = list.items.map { $0.render(seen: inner, quoted: true) }
+            return "[" + parts.joined(separator: ", ") + "]"
         }
     }
 
@@ -85,6 +104,12 @@ enum Value {
         case .object(let object):
             if object.fieldNames.isEmpty { return "an object with no fields yet" }
             return "an object with the fields \(object.fieldNames.joined(separator: ", "))"
+        case .list(let list):
+            switch list.items.count {
+            case 0: return "an empty list"
+            case 1: return "a list of 1 item"
+            default: return "a list of \(list.items.count) items"
+            }
         }
     }
 }
@@ -151,6 +176,51 @@ struct NiflaReturn: Error {
     let value: Value
 }
 
+// A built-in tool (Stone 6): a function every Nifla program has
+// from the start, without making it. `params` names the values it
+// takes, for plain-words messages; `example` shows a call to it.
+// This table is the runtime's own copy of the interpreter's, and
+// the two must agree.
+struct BuiltinDef {
+    let params: [String]
+    let example: String
+}
+
+let builtinTools: [String: BuiltinDef] = [
+    "length": BuiltinDef(params: ["value"], example: "length(\"Tyler\")"),
+    "join": BuiltinDef(params: ["list", "separator"], example: "join(words, \" \")"),
+    "split": BuiltinDef(params: ["text", "separator"], example: "split(\"a,b\", \",\")"),
+    "part": BuiltinDef(params: ["text", "start", "count"], example: "part(\"Tyler\", 0, 2)"),
+    "find": BuiltinDef(params: ["text", "piece"], example: "find(\"Tyler\", \"y\")"),
+    "append": BuiltinDef(params: ["list", "value"], example: "append(items, 4)"),
+    "readfile": BuiltinDef(params: ["path"], example: "readfile(\"notes.txt\")"),
+    "writefile": BuiltinDef(params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")"),
+    "arguments": BuiltinDef(params: [], example: "arguments()"),
+]
+
+// The plain-words message for a call to a built-in tool with the
+// wrong number of values.
+func builtinCountMessage(name: String, def: BuiltinDef, given: Int) -> String {
+    let takes: String
+    switch def.params.count {
+    case 0: takes = "no values"
+    case 1: takes = "1 value (\(def.params[0]))"
+    default: takes = "\(def.params.count) values (\(def.params.joined(separator: ", ")))"
+    }
+    return "The tool '\(name)' takes \(takes), but it was given \(given). Call it like: \(def.example)."
+}
+
+// The place an item-setting line will write to: a list and the
+// item's number in it, checked and ready.
+struct ListSlot {
+    let list: NiflaList
+    let index: Int
+
+    func set(_ value: Value) {
+        list.items[index] = value
+    }
+}
+
 // A function made with 'make': the names it takes, the scope it was
 // made in (its home), and its body as compiled Swift code.
 struct FunctionDef {
@@ -170,6 +240,10 @@ final class Machine {
 
     private var callDepth = 0
     private let callDepthLimit = 500
+
+    // The words handed to this program when it was started, after
+    // the program's own name — what arguments() gives (Stone 6).
+    let programArguments: [String] = Array(CommandLine.arguments.dropFirst())
 
     func tickLoop(line: Int) throws {
         loopPasses += 1
@@ -236,6 +310,86 @@ final class Machine {
         return object
     }
 
+    // --- lists (Stone 6) -------------------------------------------
+
+    func makeList(_ items: [Value]) -> Value {
+        .list(NiflaList(items: items))
+    }
+
+    // Checks that a value can pick an item: a whole number.
+    func itemNumber(_ value: Value, line: Int) throws -> Int {
+        guard case .number(let number) = value else {
+            throw NiflaError(line: line, message: "I can't use \(value.described) to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on.")
+        }
+        guard number == number.rounded() && abs(number) < 1e15 else {
+            throw NiflaError(line: line, message: "An item number must be a whole number, but I was given \(formatNumber(number)). Use a whole number, like 0, 1, or 2.")
+        }
+        return Int(number)
+    }
+
+    // Reads one item of a list, or one character of some text.
+    func readIndex(_ base: Value, _ indexValue: Value, line: Int) throws -> Value {
+        switch base {
+        case .list(let list):
+            let index = try itemNumber(indexValue, line: line)
+            if list.items.isEmpty {
+                throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(index) to take from it. Items can be added with append — like: append(items, ...).")
+            }
+            guard index >= 0 && index < list.items.count else {
+                throw NiflaError(line: line, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), but I was asked for item \(index).")
+            }
+            return list.items[index]
+
+        case .text(let text):
+            let index = try itemNumber(indexValue, line: line)
+            let chars = Array(text)
+            if chars.isEmpty {
+                throw NiflaError(line: line, message: "This text has no characters yet, so there is no character \(index) to take from it.")
+            }
+            guard index >= 0 && index < chars.count else {
+                throw NiflaError(line: line, message: "This text has \(chars.count) characters, numbered 0 to \(chars.count - 1), but I was asked for character \(index).")
+            }
+            return .text(String(chars[index]))
+
+        default:
+            throw NiflaError(line: line, message: "I can't take an item from \(base.described). Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character.")
+        }
+    }
+
+    // For an item-setting line: the list and number the line will
+    // write to, checked before the new value is worked out, as the
+    // interpreter checks them.
+    func indexTarget(_ base: Value, _ indexValue: Value, line: Int) throws -> ListSlot {
+        switch base {
+        case .list(let list):
+            let index = try itemNumber(indexValue, line: line)
+            if list.items.isEmpty {
+                throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(index) to set. To add an item at the end, use append — like: append(items, ...).")
+            }
+            guard index >= 0 && index < list.items.count else {
+                throw NiflaError(line: line, message: "This list has \(list.items.count) items, numbered 0 to \(list.items.count - 1), so there is no item \(index) to set. To add an item at the end, use append — like: append(items, ...).")
+            }
+            return ListSlot(list: list, index: index)
+        case .text:
+            throw NiflaError(line: line, message: "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
+        default:
+            throw NiflaError(line: line, message: "I can only set an item in a list, like: items[0] = 30 — but this is \(base.described), which has no items to set.")
+        }
+    }
+
+    // The items a 'for' loop walks: a list's items as they stand
+    // when the loop begins, or a text's characters, one by one.
+    func forItems(_ value: Value, line: Int) throws -> [Value] {
+        switch value {
+        case .list(let list):
+            return list.items
+        case .text(let text):
+            return Array(text).map { Value.text(String($0)) }
+        default:
+            throw NiflaError(line: line, message: "'for' needs a list or some text to walk through, but here it was given \(value.described). Write it like: for item in items { ... }")
+        }
+    }
+
     private func missingFieldError(object: NiflaObject, field name: String, line: Int) -> NiflaError {
         if object.fieldNames.isEmpty {
             return NiflaError(line: line, message: "This object has no fields yet, so it has no field called '\(name)'. You can add one by setting it, like: person.\(name) = ...")
@@ -292,6 +446,7 @@ final class Machine {
             case (.text(let a), .text(let b)): equal = a == b
             case (.boolean(let a), .boolean(let b)): equal = a == b
             case (.object(let a), .object(let b)): equal = a === b
+            case (.list(let a), .list(let b)): equal = a === b
             default: equal = false
             }
             return .boolean(op == "==" ? equal : !equal)
@@ -344,6 +499,9 @@ final class Machine {
     // --- functions ---------------------------------------------------
 
     func define(_ name: String, params: [String], home: Scope, line: Int, body: @escaping (Machine, Scope) throws -> Void) throws {
+        if builtinTools[name] != nil {
+            throw NiflaError(line: line, message: "There is already a built-in tool called '\(name)' — every Nifla program has it from the start. A function can't be made with that name; rename the function.")
+        }
         if functions[name] != nil {
             throw NiflaError(line: line, message: "There is already a function called '\(name)'. Each function needs its own name — rename this one, or take out the earlier 'make \(name)'.")
         }
@@ -369,11 +527,19 @@ final class Machine {
         _ = try callFunction(name: name, argExprs: args, line: line)
     }
 
-    // Runs one call, in the interpreter's own order: the function
-    // must exist, then the handed values are worked out, then their
-    // number is checked, then the depth guard, then the body runs
-    // in a fresh scope inside the function's home.
+    // Runs one call, in the interpreter's own order: a built-in
+    // tool first (every program has them); for a made function, the
+    // function must exist, then the handed values are worked out,
+    // then their number is checked, then the depth guard, then the
+    // body runs in a fresh scope inside the function's home.
     private func callFunction(name: String, argExprs: [() throws -> Value], line: Int) throws -> Value? {
+        if let builtin = builtinTools[name] {
+            let args = try argExprs.map { try $0() }
+            guard args.count == builtin.params.count else {
+                throw NiflaError(line: line, message: builtinCountMessage(name: name, def: builtin, given: args.count))
+            }
+            return try runBuiltin(name, args: args, line: line)
+        }
         guard let def = functions[name] else {
             var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
             if let suggestion = closestFunctionName(to: name) {
@@ -412,13 +578,147 @@ final class Machine {
 
     private func closestFunctionName(to name: String) -> String? {
         var best: (name: String, distance: Int)? = nil
-        for candidate in functions.keys where candidate != name {
+        for candidate in Array(functions.keys) + Array(builtinTools.keys) where candidate != name {
             let distance = editDistance(name, candidate)
             if distance <= 2 && (best == nil || distance < best!.distance) {
                 best = (candidate, distance)
             }
         }
         return best?.name
+    }
+
+    // Runs a built-in tool (Stone 6) on values already worked out —
+    // the runtime's mirror of the interpreter's own tool-running,
+    // with the same plain words.
+    private func runBuiltin(_ name: String, args: [Value], line: Int) throws -> Value {
+        switch name {
+        case "length":
+            switch args[0] {
+            case .text(let text): return .number(Double(text.count))
+            case .list(let list): return .number(Double(list.items.count))
+            case .object(let object): return .number(Double(object.fieldNames.count))
+            default:
+                throw NiflaError(line: line, message: "'length' measures some text, a list, or an object, but it was given \(args[0].described).")
+            }
+
+        case "join":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'join' joins the items of a list into one piece of text, but it was given \(args[0].described) to join. Give it a list first, like: join(words, \" \").")
+            }
+            guard case .text(let separator) = args[1] else {
+                throw NiflaError(line: line, message: "'join' needs some text to join the items with, like \" \" or \", \", but it was given \(args[1].described).")
+            }
+            return .text(list.items.map { $0.spoken }.joined(separator: separator))
+
+        case "split":
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'split' splits some text into a list of pieces, but it was given \(args[0].described) to split.")
+            }
+            guard case .text(let separator) = args[1] else {
+                throw NiflaError(line: line, message: "'split' needs some text to split by, like \",\", but it was given \(args[1].described).")
+            }
+            guard !separator.isEmpty else {
+                throw NiflaError(line: line, message: "'split' can't split by an empty piece of text — there would be nothing to split on. Give it the text to split by, like: split(\"a,b\", \",\").")
+            }
+            let pieces = text.components(separatedBy: separator)
+            return .list(NiflaList(items: pieces.map { Value.text($0) }))
+
+        case "part":
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'part' takes a part of some text, but it was given \(args[0].described).")
+            }
+            guard case .number = args[1] else {
+                throw NiflaError(line: line, message: "'part' needs a number saying which character to start at — 0 is the first — but it was given \(args[1].described).")
+            }
+            guard case .number = args[2] else {
+                throw NiflaError(line: line, message: "'part' needs a number saying how many characters to take, but it was given \(args[2].described).")
+            }
+            let start = try wholeCount(args[1], what: "The character to start at", line: line)
+            let count = try wholeCount(args[2], what: "The number of characters to take", line: line)
+            let chars = Array(text)
+            if start < 0 {
+                throw NiflaError(line: line, message: "'part' was told to start at character \(start), but the first character is number 0 — a start can't be less than 0.")
+            }
+            if count < 0 {
+                throw NiflaError(line: line, message: "'part' was told to take \(count) characters, but a count can't be less than 0.")
+            }
+            if start > chars.count {
+                if chars.isEmpty {
+                    throw NiflaError(line: line, message: "'part' was told to start at character \(start), but the text has no characters yet.")
+                }
+                throw NiflaError(line: line, message: "'part' was told to start at character \(start), but the text has only \(chars.count) characters, numbered 0 to \(chars.count - 1).")
+            }
+            if start + count > chars.count {
+                throw NiflaError(line: line, message: "'part' was told to take \(count) characters starting at character \(start), but the text has only \(chars.count) characters, numbered 0 to \(chars.count - 1) — that runs past the end.")
+            }
+            return .text(String(chars[start..<(start + count)]))
+
+        case "find":
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'find' looks for a piece of text inside some text, but it was given \(args[0].described) to look in.")
+            }
+            guard case .text(let piece) = args[1] else {
+                throw NiflaError(line: line, message: "'find' looks for a piece of text inside some text, but it was given \(args[1].described) to look for.")
+            }
+            let chars = Array(text)
+            let wanted = Array(piece)
+            if wanted.isEmpty { return .number(0) }
+            guard wanted.count <= chars.count else { return .number(-1) }
+            for start in 0...(chars.count - wanted.count) {
+                if Array(chars[start..<(start + wanted.count)]) == wanted {
+                    return .number(Double(start))
+                }
+            }
+            return .number(-1)
+
+        case "append":
+            guard case .list(let list) = args[0] else {
+                throw NiflaError(line: line, message: "'append' adds a value to the end of a list, but it was given \(args[0].described) to add to.")
+            }
+            list.items.append(args[1])
+            return .list(list)
+
+        case "readfile":
+            guard case .text(let path) = args[0] else {
+                throw NiflaError(line: line, message: "'readfile' needs the name of a file, as text, but it was given \(args[0].described).")
+            }
+            do {
+                return .text(try String(contentsOfFile: path, encoding: .utf8))
+            } catch {
+                throw NiflaError(line: line, message: "I couldn't read the file '\(path)'. Check the name and the folder, and try again.")
+            }
+
+        case "writefile":
+            guard case .text(let path) = args[0] else {
+                throw NiflaError(line: line, message: "'writefile' needs the name of a file, as text, but it was given \(args[0].described).")
+            }
+            guard case .text(let text) = args[1] else {
+                throw NiflaError(line: line, message: "'writefile' writes some text to a file, but it was given \(args[1].described) to write.")
+            }
+            do {
+                try text.write(toFile: path, atomically: true, encoding: .utf8)
+            } catch {
+                throw NiflaError(line: line, message: "I couldn't write the file '\(path)'. Check that the folder is there and the name is right, and try again.")
+            }
+            return .number(Double(text.count))
+
+        case "arguments":
+            return .list(NiflaList(items: programArguments.map { Value.text($0) }))
+
+        default:
+            throw NiflaError(line: line, message: "I don't know a tool called '\(name)'.")
+        }
+    }
+
+    // A whole-number check for the counting tools ('part').
+    private func wholeCount(_ value: Value, what: String, line: Int) throws -> Int {
+        guard case .number(let number) = value else {
+            throw NiflaError(line: line, message: "\(what) must be a number, but I was given \(value.described).")
+        }
+        guard number == number.rounded() && abs(number) < 1e15 else {
+            throw NiflaError(line: line, message: "\(what) must be a whole number, but I was given \(formatNumber(number)).")
+        }
+        return Int(number)
     }
 
     private func closestFieldName(to name: String, in object: NiflaObject) -> String? {

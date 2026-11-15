@@ -32,6 +32,7 @@ enum StaticKind {
     case text
     case boolean
     case object
+    case list
     case unknown
 
     // How the kind is named in a plain-words message.
@@ -41,10 +42,35 @@ enum StaticKind {
         case .text: return "some text"
         case .boolean: return "a true/false value"
         case .object: return "an object"
+        case .list: return "a list"
         case .unknown: return "a value"
         }
     }
 }
+
+// The checker's rules for the built-in tools (Stone 6): the kind
+// a call to the tool provably gives back, and — for each value the
+// tool takes — the kinds that value may have and how the need is
+// phrased when a known kind can never work. A nil kind set means
+// any kind will do. The checker speaks about a tool only when a
+// handed value's kind is proven and can never work; the tools'
+// other rules (ranges, files, and the like) belong to the run.
+private struct BuiltinRule {
+    let result: StaticKind
+    let needs: [(kinds: Set<StaticKind>?, need: String)]
+}
+
+private let builtinRules: [String: BuiltinRule] = [
+    "length": BuiltinRule(result: .number, needs: [([.text, .list, .object], "some text, a list, or an object to measure")]),
+    "join": BuiltinRule(result: .text, needs: [([.list], "a list to join"), ([.text], "some text to join the items with")]),
+    "split": BuiltinRule(result: .list, needs: [([.text], "some text to split"), ([.text], "some text to split by")]),
+    "part": BuiltinRule(result: .text, needs: [([.text], "some text to take a part of"), ([.number], "a number saying which character to start at"), ([.number], "a number saying how many characters to take")]),
+    "find": BuiltinRule(result: .number, needs: [([.text], "some text to look in"), ([.text], "some text to look for")]),
+    "append": BuiltinRule(result: .list, needs: [([.list], "a list to add to"), (nil, "")]),
+    "readfile": BuiltinRule(result: .text, needs: [([.text], "the name of a file, as text")]),
+    "writefile": BuiltinRule(result: .number, needs: [([.text], "the name of a file, as text"), ([.text], "some text to write")]),
+    "arguments": BuiltinRule(result: .list, needs: []),
+]
 
 // The checker's picture of the scopes: a stack of blocks, each
 // holding the names made in it and the kind proven for each. It is a
@@ -161,7 +187,7 @@ final class Checker {
             case .ifElse(_, let thenBlock, let elseBlock, _):
                 collectFunctions(thenBlock)
                 if let elseBlock { collectFunctions(elseBlock) }
-            case .whileLoop(_, let body, _), .repeatLoop(_, let body, _):
+            case .whileLoop(_, let body, _), .repeatLoop(_, let body, _), .forEach(_, _, let body, _):
                 collectFunctions(body)
             default:
                 break
@@ -221,7 +247,7 @@ final class Checker {
             }
             _ = env.assign(name, kind)
 
-        case .assignField(let target, let valueExpr, _):
+        case .assignTarget(let target, let valueExpr, _):
             _ = try checkExpr(target, env: &env, outerNames: outerNames)
             _ = try checkExpr(valueExpr, env: &env, outerNames: outerNames)
 
@@ -246,6 +272,15 @@ final class Checker {
         case .repeatLoop(let count, let body, _):
             _ = try checkExpr(count, env: &env, outerNames: outerNames)
             try checkChildBlock(body, env: &env, outerNames: outerNames, mergeWithBefore: true)
+
+        case .forEach(let name, let over, let body, _):
+            _ = try checkExpr(over, env: &env, outerNames: outerNames)
+            let before = env
+            env.pushScope()
+            env.declare(name, .unknown)
+            try checkBlock(body, env: &env, outerNames: outerNames)
+            env.popScope()
+            env = StaticEnv.merged(before, env)
 
         case .define(let name, let params, let body, _):
             try checkDefine(name: name, params: params, body: body, env: env, outerNames: outerNames)
@@ -313,7 +348,7 @@ final class Checker {
             }
             _ = env.assign(name, kind)
 
-        case .assignField(let target, let valueExpr, _):
+        case .assignTarget(let target, let valueExpr, _):
             _ = try checkExprForgiving(target, env: &env, outerNames: outerNames)
             _ = try checkExprForgiving(valueExpr, env: &env, outerNames: outerNames)
 
@@ -343,6 +378,18 @@ final class Checker {
             try checkChildBlockInFunction(body, env: &env, outerNames: outerNames)
             env = StaticEnv.merged(before, env)
 
+        case .forEach(let name, let over, let body, _):
+            _ = try checkExprForgiving(over, env: &env, outerNames: outerNames)
+            let before = env
+            env.pushScope()
+            env.declare(name, .unknown)
+            let outer = outerNames.union(declaredNames(in: body))
+            for inner in body {
+                try checkStatementInFunction(inner, env: &env, outerNames: outer)
+            }
+            env.popScope()
+            env = StaticEnv.merged(before, env)
+
         case .define(let name, let params, let body, _):
             try checkDefine(name: name, params: params, body: body, env: env, outerNames: outerNames)
 
@@ -363,7 +410,39 @@ final class Checker {
         env.popScope()
     }
 
+    // Checks a call to a built-in tool: the number of values
+    // (refused in the run's own words, as with made functions), and
+    // each handed value whose kind is proven and can never work
+    // for the tool. Returns the kind the tool gives back.
+    @discardableResult
+    private func checkBuiltinCall(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>, forgiving: Bool) throws -> StaticKind {
+        let def = builtinTools[name]!
+        let rule = builtinRules[name]!
+        var kinds: [StaticKind] = []
+        for arg in args {
+            if forgiving {
+                kinds.append(try checkExprForgiving(arg, env: &env, outerNames: outerNames))
+            } else {
+                kinds.append(try checkExpr(arg, env: &env, outerNames: outerNames))
+            }
+        }
+        guard args.count == def.params.count else {
+            throw NiflaError(line: line, message: builtinCountMessage(name: name, def: def, given: args.count))
+        }
+        for (index, kind) in kinds.enumerated() where kind != .unknown {
+            let need = rule.needs[index]
+            if let allowed = need.kinds, !allowed.contains(kind) {
+                throw NiflaError(line: line, message: "'\(name)' needs \(need.need), but it was given \(kind.phrase). I caught this before the program ran, so nothing ran.")
+            }
+        }
+        return rule.result
+    }
+
     private func checkCall(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>) throws {
+        if builtinTools[name] != nil {
+            _ = try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false)
+            return
+        }
         guard let params = functions[name] else {
             var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
             if let suggestion = closestFunctionName(to: name) {
@@ -381,6 +460,10 @@ final class Checker {
     }
 
     private func checkCallForgiving(name: String, args: [Expr], line: Int, env: inout StaticEnv, outerNames: Set<String>) throws {
+        if builtinTools[name] != nil {
+            _ = try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true)
+            return
+        }
         guard let params = functions[name] else {
             var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
             if let suggestion = closestFunctionName(to: name) {
@@ -418,6 +501,9 @@ final class Checker {
             throw NiflaError(line: line, message: message)
 
         case .call(let name, let args, let line):
+            if builtinTools[name] != nil {
+                return try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false)
+            }
             try checkCall(name: name, args: args, line: line, env: &env, outerNames: outerNames)
             return .unknown
 
@@ -427,9 +513,22 @@ final class Checker {
             }
             return .object
 
+        case .list(let items, _):
+            for item in items {
+                _ = try checkExpr(item, env: &env, outerNames: outerNames)
+            }
+            return .list
+
         case .field(let base, _, _):
             _ = try checkExpr(base, env: &env, outerNames: outerNames)
             return .unknown  // what comes out of an object can't be proven
+
+        case .index(let base, let index, _):
+            let baseKind = try checkExpr(base, env: &env, outerNames: outerNames)
+            _ = try checkExpr(index, env: &env, outerNames: outerNames)
+            // A character taken from text is provably text; an item
+            // taken from a list could be anything.
+            return baseKind == .text ? .text : .unknown
 
         case .negate(let inner, _):
             let kind = try checkExpr(inner, env: &env, outerNames: outerNames)
@@ -461,6 +560,9 @@ final class Checker {
             throw NiflaError(line: line, message: message)
 
         case .call(let name, let args, let line):
+            if builtinTools[name] != nil {
+                return try checkBuiltinCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true)
+            }
             try checkCallForgiving(name: name, args: args, line: line, env: &env, outerNames: outerNames)
             return .unknown
 
@@ -470,9 +572,20 @@ final class Checker {
             }
             return .object
 
+        case .list(let items, _):
+            for item in items {
+                _ = try checkExprForgiving(item, env: &env, outerNames: outerNames)
+            }
+            return .list
+
         case .field(let base, _, _):
             _ = try checkExprForgiving(base, env: &env, outerNames: outerNames)
             return .unknown
+
+        case .index(let base, let index, _):
+            let baseKind = try checkExprForgiving(base, env: &env, outerNames: outerNames)
+            _ = try checkExprForgiving(index, env: &env, outerNames: outerNames)
+            return baseKind == .text ? .text : .unknown
 
         case .negate(let inner, _):
             let kind = try checkExprForgiving(inner, env: &env, outerNames: outerNames)

@@ -1,0 +1,4 @@
+// Trying to change one character of some text. Text doesn't
+// change once it is made, and Nifla says so in plain words.
+let word = "abc"
+word[0] = "x"

@@ -1,4 +1,0 @@
-// Asking a list for an item it doesn't have. Nifla says how
-// many items there are and how they are numbered.
-let items = [1, 2, 3]
-say items[5]

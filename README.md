@@ -456,6 +456,83 @@ Honest limits of Stone 7, stated plainly:
 Still not built yet, on purpose: Nifla written in Nifla. That is
 the next — and last — ring of this road.
 
+## Stone 8 — self-hosting: the interpreter, in Nifla
+
+The last ring of this road: an interpreter for the whole Nifla
+language, written in Nifla itself — `selfhost/nifla-in-nifla.nifla`,
+about 2,500 lines. It reads a program with `readfile`, takes it
+apart character by character, builds the program's shape out of
+objects and lists, and runs it — every value the interpreted
+program holds is itself a Nifla object (`{ kind: "number", num: … }`),
+every scope a pair of lists searched by name, because Nifla field
+names can't be built from text while a program runs. It speaks the
+Swift interpreter's own words throughout: the same plain-words
+errors, the same "Did you mean" kindness (the same edit-distance
+rule, re-implemented), the same loop and call guards counted the
+same way, the same refusal of floor code before anything runs.
+
+Compiled with `niflac`, it becomes a standalone program that runs
+Nifla programs with **no Swift interpreter involved at run time at
+all**. The proof is `./run-selfhost.sh`: it compiles the self-host
+once, then runs the example suite through the compiled binary and
+compares every program's output against the Swift interpreter's
+expected output, byte for byte.
+
+**What it verifiably runs: 31 of the 33 examples** — every success
+example, and eight of the ten error examples, with the error words
+matching byte for byte (`badcall`, `badindex`, `badrepeat`,
+`broken`, `missing`, `nofield`, `notobject`, `textchange`). In
+other words, the full current language: words and text, lists,
+objects, functions and recursion, all the loops, all nine built-in
+tools, files, program arguments, and floor refusal.
+
+**What it does not run — the two guard examples, honestly:**
+
+- `endless` (a function calling itself forever). Each call the
+  interpreted program makes costs several calls inside the
+  self-host, so the *host's* limits give out first: under the
+  Swift interpreter the host's own five-hundred-call guard stops
+  it, naming a line inside `nifla-in-nifla.nifla`; compiled, the
+  real processor stack overflows and the program crashes before
+  either guard can speak. The interpreted program's own guard
+  message is never reached.
+- `forever` (a loop that never ends). Each pass of the
+  interpreted loop also spends passes of the host's own loops,
+  so the host's million-pass guard speaks first — again naming
+  a line inside the self-host, not the program's line 3.
+
+**Honest limits:**
+
+- There is **no static checker inside the self-host** — it checks
+  as it runs, the way the interpreter does. That is enough for
+  every example's error words to match, because the Swift tools'
+  runtime words and checker words agree wherever both can speak;
+  but a program the checker would refuse *before* running (say,
+  adding a number to a true/false value it can prove) is refused
+  by the self-host only when the run reaches it.
+- An interpreted program's error is **said aloud to stdout**, and
+  the self-host finishes normally; the Swift tools print errors
+  to stderr and exit with a failure. The words match byte for
+  byte; the channel differs, because a Nifla program has no way
+  to write to stderr or to choose its exit code.
+- A file that can't be read or written *inside* an interpreted
+  program surfaces as the self-host's own host error (with a
+  line inside `nifla-in-nifla.nifla`), because Nifla has no way
+  to catch an error and carry on. The words a missing file gets
+  are the host's, not a mirrored message.
+- Names in the self-host's reader are ASCII letters, digits, and
+  `_`; the Swift reader also accepts other letters (é, say).
+  Numbers are read exactly for the digits the suite uses; a
+  number with hundreds of digits is read approximately, where
+  the Swift reader reads it in full.
+- The self-host is slower — it is an interpreter interpreting.
+  The suite runs in about a second compiled; a million-pass
+  interpreted loop takes the better part of a minute.
+
+That is the road's end, as far as it was drawn: the interpreter,
+the checker, the compiler, words and lists, the Floor — and the
+language running itself.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

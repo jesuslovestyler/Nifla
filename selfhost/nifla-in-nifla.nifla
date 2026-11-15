@@ -1,0 +1,2543 @@
+// Nifla in Nifla — an interpreter for the Nifla language, written
+// in Nifla itself (Stone 8, the self-hosting stone).
+//
+// Run it the way the Swift interpreter runs a program:
+//
+//     nifla-in-nifla program.nifla [words for the program...]
+//
+// It reads the program with readfile, takes it apart with its own
+// lexer and parser, and runs it with its own interpreter — the
+// same plain-words errors, the same guards, the same output as
+// the Swift interpreter gives, on every program it covers. (The
+// README's Stone 8 section names exactly what it covers, and the
+// two differences it can't help: an interpreted program's error
+// is said out loud here instead of going to standard error with a
+// failing exit, because Nifla has no way to write to standard
+// error or to choose an exit code; and a readfile or writefile
+// that fails inside the program it runs escapes as this
+// interpreter's own error, because Nifla has no way to catch one.)
+//
+// How values are held: Nifla can't build field names out of text
+// at run time, so everything structured is a tagged object whose
+// fields were named when this program was written, and anything
+// with names made at run time — an interpreted object's fields, a
+// scope's variables — is two lists walking side by side: a list
+// of names and a list of values, in the same order.
+//
+// An interpreted value is one of:
+//   { kind: "number", num: the number }
+//   { kind: "text", text: the text }
+//   { kind: "boolean", flag: true or false }
+//   { kind: "object", names: [field names], values: [field values] }
+//   { kind: "list", items: [the values] }
+//   { kind: "nothing" } — what a function that never 'give's
+//   hands back; only this interpreter ever sees it.
+//
+// Every lexer, parser, and interpreter function hands back a
+// result instead of failing — Nifla has no errors to throw:
+//   { ok: true, value: ... }        — it worked
+//   { ok: false, message: "..." }   — the plain-words error,
+//                                     already wearing its "Line N:"
+// A statement's result also carries "gave": true when a 'give'
+// line ended the function it was running in.
+
+// ---------- small shared helpers ----------
+
+// The one "nothing" value, made once and shared.
+let NOTHING = { kind: "nothing" }
+
+make errAt(line, message) {
+    give { ok: false, message: "Line " + line + ": " + message }
+}
+
+make okVal(value) {
+    give { ok: true, value: value }
+}
+
+// A copy of a list, so a walk that adds to the copy leaves the
+// original as it was.
+make copyList(list) {
+    let out = []
+    for item in list {
+        append(out, item)
+    }
+    give out
+}
+
+// Is this character a digit, a letter, or the start of a name?
+make isDigitCh(c) {
+    give find("0123456789", c) >= 0
+}
+
+make digitVal(c) {
+    give find("0123456789", c)
+}
+
+make isLetterCh(c) {
+    give find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", c) >= 0
+}
+
+make isNameCh(c) {
+    if isLetterCh(c) {
+        give true
+    }
+    if isDigitCh(c) {
+        give true
+    }
+    give c == "_"
+}
+
+// A number written the way Nifla writes numbers for people — the
+// host's own rendering, reached by joining the number onto text.
+make numText(n) {
+    give "" + n
+}
+
+// Is this number a whole number? Told from how it writes out:
+// whole numbers under 1e15 write with no point and no exponent.
+make isWholeNum(n) {
+    let s = numText(n)
+    if find(s, ".") >= 0 {
+        give false
+    }
+    if find(s, "e") >= 0 {
+        give false
+    }
+    if find(s, "E") >= 0 {
+        give false
+    }
+    give true
+}
+
+// A number built out of digit text, the lexer's way: fold the
+// digits in, ten at a time; a point splits whole from fraction.
+make textToNumber(t) {
+    let dot = find(t, ".")
+    if dot < 0 {
+        let v = 0
+        for c in t {
+            v = v * 10 + digitVal(c)
+        }
+        give v
+    }
+    let whole = 0
+    let wholeText = part(t, 0, dot)
+    for c in wholeText {
+        whole = whole * 10 + digitVal(c)
+    }
+    let frac = 0
+    let fracText = part(t, dot + 1, length(t) - dot - 1)
+    for c in fracText {
+        frac = frac * 10 + digitVal(c)
+    }
+    let scale = 1
+    repeat length(fracText) {
+        scale = scale * 10
+    }
+    give whole + frac / scale
+}
+
+// The whole number at or below n, and the one at or above — for
+// the 'repeat' fraction message, which names both neighbours.
+make floorNum(n) {
+    if isWholeNum(n) {
+        give n
+    }
+    let s = numText(n)
+    if s[0] == "-" {
+        give 0 - (textToNumber(part(s, 1, find(s, ".") - 1)) + 1)
+    }
+    give textToNumber(part(s, 0, find(s, ".")))
+}
+
+make ceilNum(n) {
+    if isWholeNum(n) {
+        give n
+    }
+    let s = numText(n)
+    if s[0] == "-" {
+        give 0 - textToNumber(part(s, 1, find(s, ".") - 1))
+    }
+    give textToNumber(part(s, 0, find(s, "."))) + 1
+}
+
+// Edit distance between two words, for "Did you mean" kindness —
+// the same measure the Swift interpreter uses.
+make editDistance(a, b) {
+    let ac = []
+    for c in a {
+        append(ac, c)
+    }
+    let bc = []
+    for c in b {
+        append(bc, c)
+    }
+    if length(ac) == 0 {
+        give length(bc)
+    }
+    if length(bc) == 0 {
+        give length(ac)
+    }
+    let prev = []
+    let i0 = 0
+    while i0 <= length(bc) {
+        append(prev, i0)
+        i0 = i0 + 1
+    }
+    let i = 1
+    while i <= length(ac) {
+        let cur = [i]
+        let j = 1
+        while j <= length(bc) {
+            let cost = 1
+            if ac[i - 1] == bc[j - 1] {
+                cost = 0
+            }
+            let best = prev[j] + 1
+            if cur[j - 1] + 1 < best {
+                best = cur[j - 1] + 1
+            }
+            if prev[j - 1] + cost < best {
+                best = prev[j - 1] + cost
+            }
+            append(cur, best)
+            j = j + 1
+        }
+        prev = cur
+        i = i + 1
+    }
+    give prev[length(bc)]
+}
+
+// The closest name to `name` among `candidates`, when one is
+// within edit distance 2 — as { found: true, name: ... }.
+make closestOf(name, candidates) {
+    let bestName = ""
+    let bestDist = 3
+    for candidate in candidates {
+        if candidate != name {
+            let d = editDistance(name, candidate)
+            if d < bestDist {
+                bestDist = d
+                bestName = candidate
+            }
+        }
+    }
+    if bestDist <= 2 {
+        give { found: true, name: bestName }
+    }
+    give { found: false, name: "" }
+}
+
+// ---------- interpreted values ----------
+
+make vNumber(n) {
+    give { kind: "number", num: n }
+}
+
+make vText(t) {
+    give { kind: "text", text: t }
+}
+
+make vBool(b) {
+    give { kind: "boolean", flag: b }
+}
+
+make vObject() {
+    give { kind: "object", names: [], values: [] }
+}
+
+make vList(items) {
+    give { kind: "list", items: items }
+}
+
+// Where a name lives in a names list, or -1 when it isn't there.
+make nameIndex(names, name) {
+    let i = 0
+    while i < length(names) {
+        if names[i] == name {
+            give i
+        }
+        i = i + 1
+    }
+    give -1
+}
+
+// An object's field read: { found, value }.
+make objGet(obj, name) {
+    let i = nameIndex(obj.names, name)
+    if i < 0 {
+        give { found: false, value: NOTHING }
+    }
+    give { found: true, value: obj.values[i] }
+}
+
+// An object's field set: an existing field keeps its place; a
+// new one is added at the end. The object itself is shared, so
+// the change is seen by everyone holding it.
+make objSet(obj, name, value) {
+    let i = nameIndex(obj.names, name)
+    if i < 0 {
+        append(obj.names, name)
+        append(obj.values, value)
+    } else {
+        obj.values[i] = value
+    }
+}
+
+// How a value is shown by 'say' — the renderer. `seen` holds the
+// containers already being listed on the way here, so one that
+// contains itself stops at "..." instead of listing forever.
+// Inside a listing, text wears quotes.
+make renderValue(v, seen, quoted) {
+    if v.kind == "number" {
+        give numText(v.num)
+    }
+    if v.kind == "text" {
+        if quoted {
+            give "\"" + v.text + "\""
+        }
+        give v.text
+    }
+    if v.kind == "boolean" {
+        if v.flag {
+            give "true"
+        }
+        give "false"
+    }
+    if v.kind == "object" {
+        for s in seen {
+            if s == v {
+                give "..."
+            }
+        }
+        if length(v.names) == 0 {
+            give "{ }"
+        }
+        let inner = copyList(seen)
+        append(inner, v)
+        let parts = []
+        let i = 0
+        while i < length(v.names) {
+            append(parts, v.names[i] + ": " + renderValue(v.values[i], inner, true))
+            i = i + 1
+        }
+        give "{ " + join(parts, ", ") + " }"
+    }
+    if v.kind == "list" {
+        for s in seen {
+            if s == v {
+                give "..."
+            }
+        }
+        if length(v.items) == 0 {
+            give "[]"
+        }
+        let inner = copyList(seen)
+        append(inner, v)
+        let parts = []
+        for item in v.items {
+            append(parts, renderValue(item, inner, true))
+        }
+        give "[" + join(parts, ", ") + "]"
+    }
+    give ""
+}
+
+// How a value is described inside an error message.
+make described(v) {
+    if v.kind == "number" {
+        give "the number " + numText(v.num)
+    }
+    if v.kind == "text" {
+        give "the text \"" + v.text + "\""
+    }
+    if v.kind == "boolean" {
+        if v.flag {
+            give "true"
+        }
+        give "false"
+    }
+    if v.kind == "object" {
+        if length(v.names) == 0 {
+            give "an object with no fields yet"
+        }
+        give "an object with the fields " + join(v.names, ", ")
+    }
+    if v.kind == "list" {
+        if length(v.items) == 0 {
+            give "an empty list"
+        }
+        if length(v.items) == 1 {
+            give "a list of 1 item"
+        }
+        give "a list of " + length(v.items) + " items"
+    }
+    give ""
+}
+
+// What 'say' shows for a value, at the top level.
+make spokenOf(v) {
+    give renderValue(v, [], false)
+}
+
+// ---------- scopes ----------
+// A scope: { names: [...], values: [...], parent: a scope or
+// NOTHING }. Names made inside a block stay inside it; setting a
+// variable reaches the scope that made it.
+
+make makeScope(parent) {
+    give { kind: "scope", names: [], values: [], parent: parent }
+}
+
+make scopeLookup(scope, name) {
+    let here = scope
+    while here.kind != "nothing" {
+        let i = nameIndex(here.names, name)
+        if i >= 0 {
+            give { found: true, value: here.values[i] }
+        }
+        here = here.parent
+    }
+    give { found: false, value: NOTHING }
+}
+
+make scopeDeclaredHere(scope, name) {
+    give nameIndex(scope.names, name) >= 0
+}
+
+make scopeDeclare(scope, name, value) {
+    append(scope.names, name)
+    append(scope.values, value)
+}
+
+// Sets the variable in whichever scope made it; gives back
+// whether any scope knew the name.
+make scopeAssign(scope, name, value) {
+    let here = scope
+    while here.kind != "nothing" {
+        let i = nameIndex(here.names, name)
+        if i >= 0 {
+            here.values[i] = value
+            give true
+        }
+        here = here.parent
+    }
+    give false
+}
+
+// Every name visible from here, for "Did you mean" suggestions.
+make scopeAllNames(scope) {
+    let out = []
+    let here = scope
+    while here.kind != "nothing" {
+        for n in here.names {
+            append(out, n)
+        }
+        here = here.parent
+    }
+    give out
+}
+
+// ---------- the lexer ----------
+// Turns the program's text into tokens, remembering the line
+// each came from. The state walks the text as a list of
+// one-character texts.
+
+let gChars = []
+let gPos = 0
+let gLine = 1
+
+make lexPeek() {
+    if gPos < length(gChars) {
+        give gChars[gPos]
+    }
+    give ""
+}
+
+make lexPeek2() {
+    if gPos + 1 < length(gChars) {
+        give gChars[gPos + 1]
+    }
+    give ""
+}
+
+// The carriage-return character, held in a text of its own. It
+// is written here as the character itself, between the quotes,
+// because Nifla text has no escape for it.
+let CRCHAR = ""
+
+make isSpaceCh(c) {
+    if c == " " {
+        give true
+    }
+    if c == "\t" {
+        give true
+    }
+    if c == CRCHAR {
+        give true
+    }
+    give false
+}
+
+// Text with spaces and tabs trimmed off both ends — for telling
+// a floor block's closing line from an instruction.
+make trimSpaceLine(t) {
+    let lo = 0
+    let scanning = true
+    while scanning {
+        if lo >= length(t) {
+            scanning = false
+        }
+        if scanning {
+            if isSpaceCh(t[lo]) {
+                lo = lo + 1
+            } else {
+                scanning = false
+            }
+        }
+    }
+    let hi = length(t)
+    scanning = true
+    while scanning {
+        if hi <= lo {
+            scanning = false
+        }
+        if scanning {
+            if isSpaceCh(t[hi - 1]) {
+                hi = hi - 1
+            } else {
+                scanning = false
+            }
+        }
+    }
+    give part(t, lo, hi - lo)
+}
+
+make isKeywordWord(w) {
+    let words = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor"]
+    for word in words {
+        if word == w {
+            give true
+        }
+    }
+    give false
+}
+
+// Takes the whole program's text apart into tokens:
+// { ok: true, value: [tokens] }, or the lexer's plain-words error.
+make lexAll(source) {
+    gChars = []
+    for c in source {
+        append(gChars, c)
+    }
+    gPos = 0
+    gLine = 1
+    let tokens = []
+    let done = false
+    while done == false {
+        let r = lexOne()
+        if r.ok == false {
+            give r
+        }
+        append(tokens, r.value)
+        if r.value.kind == "end" {
+            done = true
+        }
+    }
+    give okVal(tokens)
+}
+
+// One token, from wherever the lexer stands.
+make lexOne() {
+    // Skip spaces and blank lines; remember line numbers.
+    let skipping = true
+    while skipping {
+        let c = lexPeek()
+        if c == "\n" {
+            gLine = gLine + 1
+            gPos = gPos + 1
+        } else {
+            if isSpaceCh(c) {
+                gPos = gPos + 1
+            } else {
+                skipping = false
+            }
+        }
+    }
+    let startLine = gLine
+    let c = lexPeek()
+    if c == "" {
+        give okVal({ kind: "end", line: startLine })
+    }
+    // A // comment runs to the end of the line.
+    if c == "/" {
+        if lexPeek2() == "/" {
+            let eating = true
+            while eating {
+                let ch = lexPeek()
+                if ch == "\n" {
+                    eating = false
+                }
+                if ch == "" {
+                    eating = false
+                }
+                if eating {
+                    gPos = gPos + 1
+                }
+            }
+            give lexOne()
+        }
+    }
+    if isDigitCh(c) {
+        give lexNumberTok(startLine)
+    }
+    if c == "\"" {
+        give lexTextTok(startLine)
+    }
+    if isNameCh(c) {
+        if isDigitCh(c) == false {
+            give lexWordTok(startLine)
+        }
+    }
+    // Two-character symbols first, so "=" and "==" stay distinct.
+    let pair = c + lexPeek2()
+    if pair == "==" {
+        gPos = gPos + 2
+        give okVal({ kind: "symbol", symbol: pair, line: startLine })
+    }
+    if pair == "!=" {
+        gPos = gPos + 2
+        give okVal({ kind: "symbol", symbol: pair, line: startLine })
+    }
+    if pair == "<=" {
+        gPos = gPos + 2
+        give okVal({ kind: "symbol", symbol: pair, line: startLine })
+    }
+    if pair == ">=" {
+        gPos = gPos + 2
+        give okVal({ kind: "symbol", symbol: pair, line: startLine })
+    }
+    if find("+-*/(){}[]=<>.,:", c) >= 0 {
+        gPos = gPos + 1
+        give okVal({ kind: "symbol", symbol: c, line: startLine })
+    }
+    if c == "!" {
+        give errAt(startLine, "I found a '!' on its own. To say 'not equal', write '!=' — an exclamation mark followed by an equals sign.")
+    }
+    give errAt(startLine, "I don't understand the character '" + c + "'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } [ ] , . : = == != < <= > >=.")
+}
+
+make lexNumberTok(startLine) {
+    let text = ""
+    let eating = true
+    while eating {
+        let c = lexPeek()
+        if isDigitCh(c) {
+            text = text + c
+            gPos = gPos + 1
+        } else {
+            eating = false
+        }
+    }
+    // A decimal point counts only when a digit follows it.
+    if lexPeek() == "." {
+        if isDigitCh(lexPeek2()) {
+            text = text + "."
+            gPos = gPos + 1
+            eating = true
+            while eating {
+                let c = lexPeek()
+                if isDigitCh(c) {
+                    text = text + c
+                    gPos = gPos + 1
+                } else {
+                    eating = false
+                }
+            }
+        }
+    }
+    give okVal({ kind: "number", num: textToNumber(text), line: startLine })
+}
+
+make lexTextTok(startLine) {
+    gPos = gPos + 1  // the opening quote
+    let value = ""
+    let eating = true
+    while eating {
+        let c = lexPeek()
+        if c == "" {
+            eating = false
+            give errAt(startLine, "This text never ends. Add a closing \" to finish it.")
+        }
+        if c == "\"" {
+            gPos = gPos + 1
+            eating = false
+            give okVal({ kind: "text", text: value, line: startLine })
+        }
+        if c == "\n" {
+            eating = false
+            give errAt(startLine, "This text never ends — it runs into the end of the line. Add a closing \" to finish it.")
+        }
+        if c == "\\" {
+            gPos = gPos + 1
+            let esc = lexPeek()
+            if esc == "" {
+                eating = false
+                give errAt(startLine, "This text never ends. Add a closing \" to finish it.")
+            }
+            if esc == "n" {
+                value = value + "\n"
+            } else {
+                if esc == "t" {
+                    value = value + "\t"
+                } else {
+                    if esc == "\"" {
+                        value = value + "\""
+                    } else {
+                        if esc == "\\" {
+                            value = value + "\\"
+                        } else {
+                            eating = false
+                            give errAt(startLine, "I don't know the escape '\\" + esc + "' inside text. The ones I know are \\n (new line), \\t (tab), \\\" (a quote), and \\\\ (a backslash).")
+                        }
+                    }
+                }
+            }
+            gPos = gPos + 1
+        } else {
+            value = value + c
+            gPos = gPos + 1
+        }
+    }
+    give errAt(startLine, "This text never ends. Add a closing \" to finish it.")
+}
+
+make lexWordTok(startLine) {
+    let word = ""
+    let eating = true
+    while eating {
+        let c = lexPeek()
+        if isNameCh(c) {
+            word = word + c
+            gPos = gPos + 1
+        } else {
+            eating = false
+        }
+    }
+    if word == "floor" {
+        // A floor block: 'floor' followed on the same line by '{'
+        // opens a stretch of raw lines — processor instructions,
+        // taken exactly as written — until a line holding only
+        // '}'. Those lines are never lexed as Nifla.
+        let savedPos = gPos
+        let skipping = true
+        while skipping {
+            let c = lexPeek()
+            if c == " " {
+                gPos = gPos + 1
+            } else {
+                if c == "\t" {
+                    gPos = gPos + 1
+                } else {
+                    skipping = false
+                }
+            }
+        }
+        if lexPeek() == "{" {
+            gPos = gPos + 1  // the '{'
+            skipping = true
+            while skipping {
+                let c = lexPeek()
+                if c == " " {
+                    gPos = gPos + 1
+                } else {
+                    if c == "\t" {
+                        gPos = gPos + 1
+                    } else {
+                        skipping = false
+                    }
+                }
+            }
+            if lexPeek() == "/" {
+                if lexPeek2() == "/" {
+                    let eatingComment = true
+                    while eatingComment {
+                        let ch = lexPeek()
+                        if ch == "\n" {
+                            eatingComment = false
+                        }
+                        if ch == "" {
+                            eatingComment = false
+                        }
+                        if eatingComment {
+                            gPos = gPos + 1
+                        }
+                    }
+                }
+            }
+            if lexPeek() == "\n" {
+                gPos = gPos + 1
+                gLine = gLine + 1
+            } else {
+                if lexPeek() != "" {
+                    give errAt(startLine, "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
+                }
+            }
+            let asmLines = []
+            let capturing = true
+            while capturing {
+                if lexPeek() == "" {
+                    give errAt(startLine, "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
+                }
+                let lineText = ""
+                let eatingLine = true
+                while eatingLine {
+                    let ch = lexPeek()
+                    if ch == "\n" {
+                        eatingLine = false
+                    }
+                    if ch == "" {
+                        eatingLine = false
+                    }
+                    if eatingLine {
+                        lineText = lineText + ch
+                        gPos = gPos + 1
+                    }
+                }
+                if lexPeek() == "\n" {
+                    gPos = gPos + 1
+                    gLine = gLine + 1
+                }
+                if trimSpaceLine(lineText) == "}" {
+                    capturing = false
+                } else {
+                    append(asmLines, lineText)
+                }
+            }
+            give okVal({ kind: "floor", asm: join(asmLines, "\n"), line: startLine })
+        }
+        gPos = savedPos
+    }
+    if isKeywordWord(word) {
+        give okVal({ kind: "keyword", word: word, line: startLine })
+    }
+    give okVal({ kind: "name", name: word, line: startLine })
+}
+
+// ---------- the parser ----------
+// Reads the tokens and builds a tree of statements and
+// expressions, as tagged objects:
+//   statements: { type: "declare", name, value, line }
+//               { type: "assign", name, value, line }
+//               { type: "assignTarget", target, value, line }
+//               { type: "say", value, line }
+//               { type: "if", condition, thenStmts, elseStmts, hasElse, line }
+//               { type: "while", condition, body, line }
+//               { type: "repeat", count, body, line }
+//               { type: "for", name, over, body, line }
+//               { type: "define", name, params, body, line }
+//               { type: "give", value, line }
+//               { type: "doCall", name, args, line }
+//               { type: "doExpr", expr, line }
+//   expressions: { type: "number", value, line }
+//               { type: "text", value, line }
+//               { type: "boolean", flag, line }
+//               { type: "variable", name, line }
+//               { type: "call", name, args, line }
+//               { type: "object", names, values, line }
+//               { type: "list", items, line }
+//               { type: "field", base, name, line }
+//               { type: "index", base, index, line }
+//               { type: "floor", asm, line }
+//               { type: "negate", inner, line }
+//               { type: "binary", op, left, right, line }
+
+let gToks = []
+let gP = 0
+
+make pCur() {
+    give gToks[gP]
+}
+
+make pNext() {
+    if gP + 1 < length(gToks) {
+        give gToks[gP + 1]
+    }
+    give gToks[gP]
+}
+
+make pAdvance() {
+    if gP < length(gToks) - 1 {
+        gP = gP + 1
+    }
+}
+
+make pIsSym(s) {
+    let t = pCur()
+    if t.kind == "symbol" {
+        give t.symbol == s
+    }
+    give false
+}
+
+make pIsKw(w) {
+    let t = pCur()
+    if t.kind == "keyword" {
+        give t.word == w
+    }
+    give false
+}
+
+// How a token reads in an error message.
+make pSpoken(t) {
+    if t.kind == "number" {
+        give "the number " + numText(t.num)
+    }
+    if t.kind == "text" {
+        give "the text \"" + t.text + "\""
+    }
+    if t.kind == "name" {
+        give "the name '" + t.name + "'"
+    }
+    if t.kind == "keyword" {
+        give "'" + t.word + "'"
+    }
+    if t.kind == "symbol" {
+        give "'" + t.symbol + "'"
+    }
+    if t.kind == "floor" {
+        give "a 'floor' block"
+    }
+    give "the end of the program"
+}
+
+make parseProgramAll(tokens) {
+    gToks = tokens
+    gP = 0
+    let stmts = []
+    let going = true
+    while going {
+        if pCur().kind == "end" {
+            going = false
+        }
+        if going {
+            let r = parseStatement()
+            if r.ok == false {
+                give r
+            }
+            append(stmts, r.value)
+        }
+    }
+    give okVal(stmts)
+}
+
+make parseBlock(openLine) {
+    let stmts = []
+    let going = true
+    while going {
+        if pIsSym("}") {
+            going = false
+        }
+        if going {
+            if pCur().kind == "end" {
+                give errAt(openLine, "This '{' is never closed. Add a '}' to finish the block it starts.")
+            }
+            let r = parseStatement()
+            if r.ok == false {
+                give r
+            }
+            append(stmts, r.value)
+        }
+    }
+    pAdvance()  // the closing '}'
+    give okVal(stmts)
+}
+
+make parseStatement() {
+    let token = pCur()
+
+    // A floor block standing on its own.
+    if token.kind == "floor" {
+        pAdvance()
+        give okVal({ type: "doExpr", expr: { type: "floor", asm: token.asm, line: token.line }, line: token.line })
+    }
+
+    if pIsKw("let") {
+        pAdvance()
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After 'let' I need a name for the new variable, like: let years = 29. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let name = pCur().name
+        pAdvance()
+        if pIsSym("=") == false {
+            give errAt(pCur().line, "After 'let " + name + "' I need an '=' and then a value, like: let " + name + " = 29. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()
+        let v = parseExpression()
+        if v.ok == false {
+            give v
+        }
+        give okVal({ type: "declare", name: name, value: v.value, line: token.line })
+    }
+
+    if pIsKw("say") {
+        pAdvance()
+        let v = parseExpression()
+        if v.ok == false {
+            give v
+        }
+        give okVal({ type: "say", value: v.value, line: token.line })
+    }
+
+    if pIsKw("if") {
+        pAdvance()
+        let cond = parseExpression()
+        if cond.ok == false {
+            give cond
+        }
+        if pIsSym("{") == false {
+            if pIsSym("=") {
+                give errAt(pCur().line, "After the 'if' condition I expected '{' but found '='. To compare two things, use '==' — two equals signs. A single '=' sets a variable.")
+            }
+            give errAt(pCur().line, "After the 'if' condition I need a '{' to start the block that runs when it's true. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let thenR = parseBlock(openLine)
+        if thenR.ok == false {
+            give thenR
+        }
+        let elseStmts = []
+        let hasElse = false
+        if pIsKw("else") {
+            pAdvance()
+            if pIsSym("{") == false {
+                give errAt(pCur().line, "After 'else' I need a '{' to start the block that runs when the condition is false. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let elseOpen = pCur().line
+            pAdvance()
+            let elseR = parseBlock(elseOpen)
+            if elseR.ok == false {
+                give elseR
+            }
+            elseStmts = elseR.value
+            hasElse = true
+        }
+        give okVal({ type: "if", condition: cond.value, thenStmts: thenR.value, elseStmts: elseStmts, hasElse: hasElse, line: token.line })
+    }
+
+    if pIsKw("while") {
+        pAdvance()
+        let cond = parseExpression()
+        if cond.ok == false {
+            give cond
+        }
+        if pIsSym("{") == false {
+            if pIsSym("=") {
+                give errAt(pCur().line, "After the 'while' condition I expected '{' but found '='. To compare two things, use '==' — two equals signs. A single '=' sets a variable.")
+            }
+            give errAt(pCur().line, "After the 'while' condition I need a '{' to start the block that runs again and again while it's true. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "while", condition: cond.value, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("repeat") {
+        pAdvance()
+        let count = parseExpression()
+        if count.ok == false {
+            give count
+        }
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After the 'repeat' count I need a '{' to start the block that runs that many times, like: repeat 3 { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "repeat", count: count.value, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("for") {
+        pAdvance()
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After 'for' I need a name for each item the loop walks through, like: for item in items { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let name = pCur().name
+        pAdvance()
+        if pIsKw("in") == false {
+            give errAt(pCur().line, "After 'for " + name + "' I need 'in' and then the list or text to walk through, like: for " + name + " in items { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()
+        let over = parseExpression()
+        if over.ok == false {
+            give over
+        }
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'for " + name + " in ...' I need a '{' to start the block that runs for each item. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "for", name: name, over: over.value, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("make") {
+        pAdvance()
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After 'make' I need a name for the new function, like: make greet(name) { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let name = pCur().name
+        pAdvance()
+        if pIsSym("(") == false {
+            give errAt(pCur().line, "After the function's name I need '(' and the names of the values it takes, like: make " + name + "(name) { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()  // the '('
+        let params = []
+        if pIsSym(")") == false {
+            let collecting = true
+            while collecting {
+                if pCur().kind != "name" {
+                    give errAt(pCur().line, "Inside the parentheses of 'make " + name + "' I need names for the values, separated by commas, like: make " + name + "(a, b) { ... }. Instead I found " + pSpoken(pCur()) + ".")
+                }
+                let param = pCur().name
+                if nameIndex(params, param) >= 0 {
+                    give errAt(pCur().line, "The function '" + name + "' uses the name '" + param + "' twice in its list of values. Each value needs its own name.")
+                }
+                append(params, param)
+                pAdvance()
+                if pIsSym(",") {
+                    pAdvance()
+                } else {
+                    collecting = false
+                }
+            }
+        }
+        if pIsSym(")") == false {
+            give errAt(pCur().line, "I expected a ')' to close the list of values for '" + name + "', but I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()  // the ')'
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'make " + name + "(...)' I need a '{' to start the block that runs when the function is called. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "define", name: name, params: params, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("give") {
+        pAdvance()
+        let v = parseExpression()
+        if v.ok == false {
+            give v
+        }
+        give okVal({ type: "give", value: v.value, line: token.line })
+    }
+
+    // Lines that start with a name: setting a variable, setting a
+    // field or an item, or calling a function for what it does.
+    if token.kind == "name" {
+        let name = token.name
+        let next = pNext()
+        if next.kind == "symbol" {
+            if next.symbol == "=" {
+                pAdvance()  // the name
+                pAdvance()  // the '='
+                let v = parseExpression()
+                if v.ok == false {
+                    give v
+                }
+                give okVal({ type: "assign", name: name, value: v.value, line: token.line })
+            }
+            if next.symbol == "(" {
+                pAdvance()  // the name
+                let argsR = parseCallArgs(name)
+                if argsR.ok == false {
+                    give argsR
+                }
+                give okVal({ type: "doCall", name: name, args: argsR.value, line: token.line })
+            }
+            if next.symbol == "." {
+                let targetR = parseTargetChain(name, token.line)
+                if targetR.ok == false {
+                    give targetR
+                }
+                let v = parseExpression()
+                if v.ok == false {
+                    give v
+                }
+                give okVal({ type: "assignTarget", target: targetR.value, value: v.value, line: token.line })
+            }
+            if next.symbol == "[" {
+                let targetR = parseTargetChain(name, token.line)
+                if targetR.ok == false {
+                    give targetR
+                }
+                let v = parseExpression()
+                if v.ok == false {
+                    give v
+                }
+                give okVal({ type: "assignTarget", target: targetR.value, value: v.value, line: token.line })
+            }
+        }
+        give errAt(token.line, "I found the name '" + name + "' at the start of a line, but a line needs to do something: make a variable with 'let " + name + " = ...', set it with '" + name + " = ...', set a field with '" + name + ".field = ...', set an item with '" + name + "[0] = ...', show it with 'say " + name + "', or call a function with '" + name + "(...)'.")
+    }
+
+    give errAt(token.line, "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'for', 'make', 'give', or the name of a variable to set — but I found " + pSpoken(token) + ".")
+}
+
+// A target chain after a leading name — ".field" and "[...]"
+// steps — ending at the '=' of a setting line. The current token
+// is the name; the chain and the '=' are consumed here, so the
+// caller parses the value next.
+make parseTargetChain(name, line) {
+    pAdvance()  // the name
+    let target = { type: "variable", name: name, line: line }
+    let going = true
+    while going {
+        if pIsSym(".") {
+            let dotTok = pCur()
+            pAdvance()  // the '.'
+            if pCur().kind != "name" {
+                give errAt(pCur().line, "After '.' I need the name of a field, like: " + name + ".years. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let fieldName = pCur().name
+            pAdvance()
+            target = { type: "field", base: target, name: fieldName, line: dotTok.line }
+        } else {
+            if pIsSym("[") {
+                let bracketTok = pCur()
+                pAdvance()  // the '['
+                let idx = parseExpression()
+                if idx.ok == false {
+                    give idx
+                }
+                if pIsSym("]") == false {
+                    give errAt(pCur().line, "I expected a ']' to close the '[' from line " + bracketTok.line + ", but I found " + pSpoken(pCur()) + ".")
+                }
+                pAdvance()  // the ']'
+                target = { type: "index", base: target, index: idx.value, line: bracketTok.line }
+            } else {
+                going = false
+            }
+        }
+    }
+    if pIsSym("=") == false {
+        give errAt(pCur().line, "A line that starts with a field or an item like this needs to set it: write an '=' and the new value, like: " + name + ".years = 30 or " + name + "[0] = 30. To show it instead, write it after 'say'.")
+    }
+    pAdvance()  // the '='
+    give okVal(target)
+}
+
+// The "( value, value )" part of a call. The current token is
+// the '('.
+make parseCallArgs(name) {
+    pAdvance()  // the '('
+    let args = []
+    if pIsSym(")") == false {
+        let collecting = true
+        while collecting {
+            let a = parseExpression()
+            if a.ok == false {
+                give a
+            }
+            append(args, a.value)
+            if pIsSym(",") {
+                pAdvance()
+            } else {
+                collecting = false
+            }
+        }
+    }
+    if pIsSym(")") == false {
+        give errAt(pCur().line, "I expected a ')' to close the '(' in this call to '" + name + "', but I found " + pSpoken(pCur()) + ".")
+    }
+    pAdvance()  // the ')'
+    give okVal(args)
+}
+
+// ---------- expression parsing ----------
+
+make parseExpression() {
+    give parseEquality()
+}
+
+// One level of the precedence climb: parse a tighter level, then
+// fold in any of this level's signs, left to right.
+make parseBinaryLevel(tighter, ops) {
+    let leftR = giveTighter(tighter)
+    if leftR.ok == false {
+        give leftR
+    }
+    let left = leftR.value
+    let going = true
+    while going {
+        let t = pCur()
+        if t.kind == "symbol" {
+            if nameIndex(ops, t.symbol) >= 0 {
+                pAdvance()
+                let rightR = giveTighter(tighter)
+                if rightR.ok == false {
+                    give rightR
+                }
+                left = { type: "binary", op: t.symbol, left: left, right: rightR.value, line: t.line }
+            } else {
+                going = false
+            }
+        } else {
+            going = false
+        }
+    }
+    give okVal(left)
+}
+
+// Names the tighter level for parseBinaryLevel, so the four
+// levels can share one body of code.
+make giveTighter(which) {
+    if which == "comparison" {
+        give parseComparison()
+    }
+    if which == "sum" {
+        give parseSum()
+    }
+    if which == "term" {
+        give parseTerm()
+    }
+    give parseFactor()
+}
+
+make parseEquality() {
+    give parseBinaryLevel("comparison", ["==", "!="])
+}
+
+make parseComparison() {
+    give parseBinaryLevel("sum", ["<", "<=", ">", ">="])
+}
+
+make parseSum() {
+    give parseBinaryLevel("term", ["+", "-"])
+}
+
+make parseTerm() {
+    give parseBinaryLevel("factor", ["*", "/"])
+}
+
+make parseFactor() {
+    if pIsSym("-") {
+        let opTok = pCur()
+        pAdvance()
+        let inner = parseFactor()
+        if inner.ok == false {
+            give inner
+        }
+        give okVal({ type: "negate", inner: inner.value, line: opTok.line })
+    }
+    give parsePostfix()
+}
+
+// An atom followed by any number of steps: '.field' reads one
+// field of an object, and '[...]' reads one item of a list or
+// one character of some text.
+make parsePostfix() {
+    let exprR = parseAtom()
+    if exprR.ok == false {
+        give exprR
+    }
+    let expr = exprR.value
+    let going = true
+    while going {
+        if pIsSym(".") {
+            let dotTok = pCur()
+            pAdvance()  // the '.'
+            if pCur().kind != "name" {
+                give errAt(pCur().line, "After '.' I need the name of a field, like: person.name. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let fieldName = pCur().name
+            pAdvance()
+            expr = { type: "field", base: expr, name: fieldName, line: dotTok.line }
+        } else {
+            if pIsSym("[") {
+                let bracketTok = pCur()
+                pAdvance()  // the '['
+                let idx = parseExpression()
+                if idx.ok == false {
+                    give idx
+                }
+                if pIsSym("]") == false {
+                    give errAt(pCur().line, "I expected a ']' to close the '[' from line " + bracketTok.line + ", but I found " + pSpoken(pCur()) + ".")
+                }
+                pAdvance()  // the ']'
+                expr = { type: "index", base: expr, index: idx.value, line: bracketTok.line }
+            } else {
+                going = false
+            }
+        }
+    }
+    give okVal(expr)
+}
+
+make parseAtom() {
+    let token = pCur()
+    if token.kind == "number" {
+        pAdvance()
+        give okVal({ type: "number", value: token.num, line: token.line })
+    }
+    if token.kind == "text" {
+        pAdvance()
+        give okVal({ type: "text", value: token.text, line: token.line })
+    }
+    if token.kind == "keyword" {
+        if token.word == "true" {
+            pAdvance()
+            give okVal({ type: "boolean", flag: true, line: token.line })
+        }
+        if token.word == "false" {
+            pAdvance()
+            give okVal({ type: "boolean", flag: false, line: token.line })
+        }
+    }
+    if token.kind == "name" {
+        pAdvance()
+        if pIsSym("(") {
+            let argsR = parseCallArgs(token.name)
+            if argsR.ok == false {
+                give argsR
+            }
+            give okVal({ type: "call", name: token.name, args: argsR.value, line: token.line })
+        }
+        give okVal({ type: "variable", name: token.name, line: token.line })
+    }
+    if token.kind == "symbol" {
+        if token.symbol == "(" {
+            pAdvance()
+            let inner = parseExpression()
+            if inner.ok == false {
+                give inner
+            }
+            if pIsSym(")") == false {
+                give errAt(pCur().line, "I expected a ')' to close the '(' from line " + token.line + ", but I found " + pSpoken(pCur()) + ".")
+            }
+            pAdvance()
+            give okVal(inner.value)
+        }
+        if token.symbol == "{" {
+            give parseObjectLiteral(token)
+        }
+        if token.symbol == "[" {
+            give parseListLiteral(token)
+        }
+    }
+    if token.kind == "floor" {
+        pAdvance()
+        give okVal({ type: "floor", asm: token.asm, line: token.line })
+    }
+    give errAt(token.line, "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, a list like [1, 2, 3], or a floor block here, but I found " + pSpoken(token) + ".")
+}
+
+// A list literal: '[' then values separated by commas, then ']'.
+make parseListLiteral(openToken) {
+    pAdvance()  // the '['
+    let items = []
+    if pIsSym("]") == false {
+        let collecting = true
+        while collecting {
+            let item = parseExpression()
+            if item.ok == false {
+                give item
+            }
+            append(items, item.value)
+            if pIsSym(",") {
+                pAdvance()
+            } else {
+                collecting = false
+            }
+        }
+    }
+    if pIsSym("]") == false {
+        give errAt(pCur().line, "I expected a ']' to close the list that started on line " + openToken.line + ", but I found " + pSpoken(pCur()) + ".")
+    }
+    pAdvance()  // the ']'
+    give okVal({ type: "list", items: items, line: openToken.line })
+}
+
+// An object literal: '{' then name ':' value pairs separated by
+// commas, then '}'. A field named twice is refused here.
+make parseObjectLiteral(openToken) {
+    pAdvance()  // the '{'
+    let names = []
+    let values = []
+    if pIsSym("}") == false {
+        let collecting = true
+        while collecting {
+            if pCur().kind != "name" {
+                give errAt(pCur().line, "Inside an object I need field names with values, like: { name: \"Tyler\", years: 29 }. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let fieldName = pCur().name
+            let fieldLine = pCur().line
+            pAdvance()
+            if pIsSym(":") == false {
+                give errAt(pCur().line, "After the field name '" + fieldName + "' I need a ':' and then its value, like: { " + fieldName + ": 29 }. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            pAdvance()  // the ':'
+            if nameIndex(names, fieldName) >= 0 {
+                give errAt(fieldLine, "This object names the field '" + fieldName + "' twice. Each field needs its own name — take one of the two out.")
+            }
+            let v = parseExpression()
+            if v.ok == false {
+                give v
+            }
+            append(names, fieldName)
+            append(values, v.value)
+            if pIsSym(",") {
+                pAdvance()
+            } else {
+                collecting = false
+            }
+        }
+    }
+    if pIsSym("}") == false {
+        give errAt(pCur().line, "I expected a '}' to close the object that started on line " + openToken.line + ", but I found " + pSpoken(pCur()) + ".")
+    }
+    pAdvance()  // the '}'
+    give okVal({ type: "object", names: names, values: values, line: openToken.line })
+}
+
+// ---------- the interpreter ----------
+// Runs the tree the parser built. The run's state lives in these
+// globals, the way the Swift interpreter keeps them in itself.
+
+let gFnNames = []
+let gFnDefs = []
+let gLoopPasses = 0
+let gCallDepth = 0
+let gArgs = []
+
+make okDone() {
+    give { ok: true, gave: false, value: NOTHING }
+}
+
+// The runaway guard: a kindness limit on the total number of
+// loop passes in one run, across every loop in the program.
+make tickLoop(line) {
+    gLoopPasses = gLoopPasses + 1
+    if gLoopPasses > 1000000 {
+        give errAt(line, "This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.")
+    }
+    give okVal(NOTHING)
+}
+
+// Runs a block of statements in one scope, stopping at the first
+// error or 'give'.
+make execBlock(stmts, scope) {
+    for stmt in stmts {
+        let r = execStmt(stmt, scope)
+        if r.ok == false {
+            give r
+        }
+        if r.gave {
+            give r
+        }
+    }
+    give okDone()
+}
+
+make execStmt(s, scope) {
+    if s.type == "declare" {
+        if scopeDeclaredHere(scope, s.name) {
+            give errAt(s.line, "There is already a variable called '" + s.name + "' in this block. To change what it holds, write: " + s.name + " = ...")
+        }
+        let v = evalExpr(s.value, scope)
+        if v.ok == false {
+            give v
+        }
+        scopeDeclare(scope, s.name, v.value)
+        give okDone()
+    }
+    if s.type == "assign" {
+        let v = evalExpr(s.value, scope)
+        if v.ok == false {
+            give v
+        }
+        if scopeAssign(scope, s.name, v.value) == false {
+            give errAt(s.line, "I can't set '" + s.name + "', because no variable called '" + s.name + "' has been made yet. Make one first with: let " + s.name + " = ...")
+        }
+        give okDone()
+    }
+    if s.type == "assignTarget" {
+        give assignTo(s.target, s.value, s.line, scope)
+    }
+    if s.type == "say" {
+        let v = evalExpr(s.value, scope)
+        if v.ok == false {
+            give v
+        }
+        say spokenOf(v.value)
+        give okDone()
+    }
+    if s.type == "if" {
+        let v = evalExpr(s.condition, scope)
+        if v.ok == false {
+            give v
+        }
+        if v.value.kind != "boolean" {
+            give errAt(s.line, "'if' needs a true or false value to decide with, but here it was given " + described(v.value) + ". Try a comparison, like: if years > 12 { ... }")
+        }
+        let child = makeScope(scope)
+        if v.value.flag {
+            give execBlock(s.thenStmts, child)
+        }
+        if s.hasElse {
+            give execBlock(s.elseStmts, child)
+        }
+        give okDone()
+    }
+    if s.type == "while" {
+        let running = true
+        while running {
+            let v = evalExpr(s.condition, scope)
+            if v.ok == false {
+                give v
+            }
+            if v.value.kind != "boolean" {
+                give errAt(s.line, "'while' needs a true or false value to decide with, but here it was given " + described(v.value) + ". Try a comparison, like: while years < 40 { ... }")
+            }
+            if v.value.flag == false {
+                running = false
+            }
+            if running {
+                let t = tickLoop(s.line)
+                if t.ok == false {
+                    give t
+                }
+                let child = makeScope(scope)
+                let r = execBlock(s.body, child)
+                if r.ok == false {
+                    give r
+                }
+                if r.gave {
+                    give r
+                }
+            }
+        }
+        give okDone()
+    }
+    if s.type == "repeat" {
+        let v = evalExpr(s.count, scope)
+        if v.ok == false {
+            give v
+        }
+        if v.value.kind != "number" {
+            give errAt(s.line, "'repeat' needs a number saying how many times to run, but here it was given " + described(v.value) + ". Write it like: repeat 3 { ... }")
+        }
+        let n = v.value.num
+        if n < 0 {
+            give errAt(s.line, "'repeat' was told to run " + numText(n) + " times, but a count can't be negative — a loop can't run less than zero times. Use zero or more, like: repeat 3 { ... }")
+        }
+        if isWholeNum(n) == false {
+            give errAt(s.line, "'repeat' was told to run " + numText(n) + " times, but a loop can only run a whole number of times. Use a whole number instead, like " + numText(floorNum(n)) + " or " + numText(ceilNum(n)) + ".")
+        }
+        let done = 0
+        while done < n {
+            let t = tickLoop(s.line)
+            if t.ok == false {
+                give t
+            }
+            let child = makeScope(scope)
+            let r = execBlock(s.body, child)
+            if r.ok == false {
+                give r
+            }
+            if r.gave {
+                give r
+            }
+            done = done + 1
+        }
+        give okDone()
+    }
+    if s.type == "for" {
+        let v = evalExpr(s.over, scope)
+        if v.ok == false {
+            give v
+        }
+        let items = []
+        if v.value.kind == "list" {
+            items = copyList(v.value.items)
+        } else {
+            if v.value.kind == "text" {
+                for ch in v.value.text {
+                    append(items, vText(ch))
+                }
+            } else {
+                give errAt(s.line, "'for' needs a list or some text to walk through, but here it was given " + described(v.value) + ". Write it like: for item in items { ... }")
+            }
+        }
+        for item in items {
+            let t = tickLoop(s.line)
+            if t.ok == false {
+                give t
+            }
+            let child = makeScope(scope)
+            scopeDeclare(child, s.name, item)
+            let r = execBlock(s.body, child)
+            if r.ok == false {
+                give r
+            }
+            if r.gave {
+                give r
+            }
+        }
+        give okDone()
+    }
+    if s.type == "define" {
+        if isBuiltinName(s.name) {
+            give errAt(s.line, "There is already a built-in tool called '" + s.name + "' — every Nifla program has it from the start. A function can't be made with that name; rename the function.")
+        }
+        if nameIndex(gFnNames, s.name) >= 0 {
+            give errAt(s.line, "There is already a function called '" + s.name + "'. Each function needs its own name — rename this one, or take out the earlier 'make " + s.name + "'.")
+        }
+        append(gFnNames, s.name)
+        append(gFnDefs, { params: s.params, body: s.body, home: scope })
+        give okDone()
+    }
+    if s.type == "give" {
+        if gCallDepth == 0 {
+            give errAt(s.line, "'give' hands a value back from a function to whoever called it, but this line is not inside a function. To show a value here, use 'say' instead.")
+        }
+        let v = evalExpr(s.value, scope)
+        if v.ok == false {
+            give v
+        }
+        give { ok: true, gave: true, value: v.value }
+    }
+    if s.type == "doCall" {
+        let r = callFunction(s.name, s.args, s.line, scope)
+        if r.ok == false {
+            give r
+        }
+        give okDone()
+    }
+    if s.type == "doExpr" {
+        let r = evalExpr(s.expr, scope)
+        if r.ok == false {
+            give r
+        }
+        give okDone()
+    }
+    give okDone()
+}
+
+// Sets the field or item a target chain names, in the Swift
+// interpreter's order: the chain's base is read, the holder is
+// checked, and only then is the new value worked out.
+make assignTo(target, valueExpr, stmtLine, scope) {
+    if target.type == "field" {
+        let b = evalExpr(target.base, scope)
+        if b.ok == false {
+            give b
+        }
+        if b.value.kind != "object" {
+            give errAt(stmtLine, "I can't set the field '" + target.name + "' on " + described(b.value) + ", because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person." + target.name + " = ... works.")
+        }
+        let v = evalExpr(valueExpr, scope)
+        if v.ok == false {
+            give v
+        }
+        objSet(b.value, target.name, v.value)
+        give okDone()
+    }
+    if target.type == "index" {
+        let b = evalExpr(target.base, scope)
+        if b.ok == false {
+            give b
+        }
+        if b.value.kind == "list" {
+            let iv = evalExpr(target.index, scope)
+            if iv.ok == false {
+                give iv
+            }
+            let num = itemNumber(iv.value, target.line)
+            if num.ok == false {
+                give num
+            }
+            let idx = num.value
+            if length(b.value.items) == 0 {
+                give errAt(target.line, "This list has no items yet, so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...).")
+            }
+            if idx < 0 {
+                give errAt(target.line, "This list has " + length(b.value.items) + " items, numbered 0 to " + (length(b.value.items) - 1) + ", so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...).")
+            }
+            if idx >= length(b.value.items) {
+                give errAt(target.line, "This list has " + length(b.value.items) + " items, numbered 0 to " + (length(b.value.items) - 1) + ", so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...).")
+            }
+            let v = evalExpr(valueExpr, scope)
+            if v.ok == false {
+                give v
+            }
+            b.value.items[idx] = v.value
+            give okDone()
+        }
+        if b.value.kind == "text" {
+            give errAt(target.line, "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
+        }
+        give errAt(target.line, "I can only set an item in a list, like: items[0] = 30 — but this is " + described(b.value) + ", which has no items to set.")
+    }
+    give errAt(stmtLine, "I can only set a field on an object or an item in a list, like: person.years = 30 or items[0] = 30.")
+}
+
+// Checks that a value can pick an item: a whole number. Gives
+// back the number itself.
+make itemNumber(v, line) {
+    if v.kind != "number" {
+        give errAt(line, "I can't use " + described(v) + " to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on.")
+    }
+    let bad = false
+    if isWholeNum(v.num) == false {
+        bad = true
+    }
+    if v.num >= 1000000000000000 {
+        bad = true
+    }
+    if v.num <= 0 - 1000000000000000 {
+        bad = true
+    }
+    if bad {
+        give errAt(line, "An item number must be a whole number, but I was given " + numText(v.num) + ". Use a whole number, like 0, 1, or 2.")
+    }
+    give okVal(v.num)
+}
+
+// Reads one item of a list, or one character of some text.
+make readIndex(base, indexValue, line) {
+    if base.kind == "list" {
+        let num = itemNumber(indexValue, line)
+        if num.ok == false {
+            give num
+        }
+        let idx = num.value
+        if length(base.items) == 0 {
+            give errAt(line, "This list has no items yet, so there is no item " + idx + " to take from it. Items can be added with append — like: append(items, ...).")
+        }
+        if idx < 0 {
+            give errAt(line, "This list has " + length(base.items) + " items, numbered 0 to " + (length(base.items) - 1) + ", but I was asked for item " + idx + ".")
+        }
+        if idx >= length(base.items) {
+            give errAt(line, "This list has " + length(base.items) + " items, numbered 0 to " + (length(base.items) - 1) + ", but I was asked for item " + idx + ".")
+        }
+        give okVal(base.items[idx])
+    }
+    if base.kind == "text" {
+        let num = itemNumber(indexValue, line)
+        if num.ok == false {
+            give num
+        }
+        let idx = num.value
+        let chars = []
+        for ch in base.text {
+            append(chars, ch)
+        }
+        if length(chars) == 0 {
+            give errAt(line, "This text has no characters yet, so there is no character " + idx + " to take from it.")
+        }
+        if idx < 0 {
+            give errAt(line, "This text has " + length(chars) + " characters, numbered 0 to " + (length(chars) - 1) + ", but I was asked for character " + idx + ".")
+        }
+        if idx >= length(chars) {
+            give errAt(line, "This text has " + length(chars) + " characters, numbered 0 to " + (length(chars) - 1) + ", but I was asked for character " + idx + ".")
+        }
+        give okVal(vText(chars[idx]))
+    }
+    give errAt(line, "I can't take an item from " + described(base) + ". Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character.")
+}
+
+// Reading a field an object doesn't have.
+make missingField(obj, name, line) {
+    if length(obj.names) == 0 {
+        give errAt(line, "This object has no fields yet, so it has no field called '" + name + "'. You can add one by setting it, like: person." + name + " = ...")
+    }
+    let message = "This object has no field called '" + name + "'. Its fields are: " + join(obj.names, ", ") + "."
+    let close = closestOf(name, obj.names)
+    if close.found {
+        message = message + " Did you mean '" + close.name + "'?"
+    }
+    give errAt(line, message)
+}
+
+make evalExpr(e, scope) {
+    if e.type == "number" {
+        give okVal(vNumber(e.value))
+    }
+    if e.type == "text" {
+        give okVal(vText(e.value))
+    }
+    if e.type == "boolean" {
+        give okVal(vBool(e.flag))
+    }
+    if e.type == "variable" {
+        let r = scopeLookup(scope, e.name)
+        if r.found == false {
+            let message = "I don't know a variable called '" + e.name + "' yet. You can make one with: let " + e.name + " = ..."
+            let close = closestOf(e.name, scopeAllNames(scope))
+            if close.found {
+                message = message + " Did you mean '" + close.name + "'?"
+            }
+            give errAt(e.line, message)
+        }
+        give okVal(r.value)
+    }
+    if e.type == "call" {
+        let r = callFunction(e.name, e.args, e.line, scope)
+        if r.ok == false {
+            give r
+        }
+        if r.value.kind == "nothing" {
+            give errAt(e.line, "The function '" + e.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + e.name + "', or call it on its own line instead.")
+        }
+        give r
+    }
+    if e.type == "object" {
+        let obj = vObject()
+        let i = 0
+        while i < length(e.names) {
+            let v = evalExpr(e.values[i], scope)
+            if v.ok == false {
+                give v
+            }
+            objSet(obj, e.names[i], v.value)
+            i = i + 1
+        }
+        give okVal(obj)
+    }
+    if e.type == "list" {
+        let items = []
+        for itemExpr in e.items {
+            let v = evalExpr(itemExpr, scope)
+            if v.ok == false {
+                give v
+            }
+            append(items, v.value)
+        }
+        give okVal(vList(items))
+    }
+    if e.type == "field" {
+        let b = evalExpr(e.base, scope)
+        if b.ok == false {
+            give b
+        }
+        if b.value.kind != "object" {
+            give errAt(e.line, "I can't read the field '" + e.name + "' of " + described(b.value) + ", because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.name works.")
+        }
+        let g = objGet(b.value, e.name)
+        if g.found == false {
+            give missingField(b.value, e.name, e.line)
+        }
+        give okVal(g.value)
+    }
+    if e.type == "index" {
+        let b = evalExpr(e.base, scope)
+        if b.ok == false {
+            give b
+        }
+        let iv = evalExpr(e.index, scope)
+        if iv.ok == false {
+            give iv
+        }
+        give readIndex(b.value, iv.value, e.line)
+    }
+    if e.type == "floor" {
+        give errAt(e.line, "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.")
+    }
+    if e.type == "negate" {
+        let v = evalExpr(e.inner, scope)
+        if v.ok == false {
+            give v
+        }
+        if v.value.kind != "number" {
+            give errAt(e.line, "I can only put a minus sign in front of a number, but here it was in front of " + described(v.value) + ".")
+        }
+        give okVal(vNumber(0 - v.value.num))
+    }
+    if e.type == "binary" {
+        let l = evalExpr(e.left, scope)
+        if l.ok == false {
+            give l
+        }
+        let r = evalExpr(e.right, scope)
+        if r.ok == false {
+            give r
+        }
+        give applyOp(e.op, l.value, r.value, e.line)
+    }
+    give okVal(NOTHING)
+}
+
+// The operators, with the Swift interpreter's rules and words.
+make applyOp(op, l, r, line) {
+    if op == "+" {
+        if l.kind == "text" {
+            give okVal(vText(spokenOf(l) + spokenOf(r)))
+        }
+        if r.kind == "text" {
+            give okVal(vText(spokenOf(l) + spokenOf(r)))
+        }
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vNumber(l.num + r.num))
+            }
+        }
+        give errAt(line, "I can't add " + described(l) + " and " + described(r) + ". '+' adds two numbers, or joins text together.")
+    }
+    if op == "-" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vNumber(l.num - r.num))
+            }
+        }
+        give errAt(line, "I can't subtract " + described(l) + " and " + described(r) + ". '-' works on two numbers. (Only '+' joins text.)")
+    }
+    if op == "*" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vNumber(l.num * r.num))
+            }
+        }
+        give errAt(line, "I can't multiply " + described(l) + " and " + described(r) + ". '*' works on two numbers. (Only '+' joins text.)")
+    }
+    if op == "/" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                if r.num == 0 {
+                    give errAt(line, "I can't divide by zero. Dividing needs a second number that isn't zero.")
+                }
+                give okVal(vNumber(l.num / r.num))
+            }
+        }
+        give errAt(line, "I can't divide " + described(l) + " and " + described(r) + ". '/' works on two numbers. (Only '+' joins text.)")
+    }
+    if op == "==" {
+        give okVal(vBool(valuesEqual(l, r)))
+    }
+    if op == "!=" {
+        if valuesEqual(l, r) {
+            give okVal(vBool(false))
+        }
+        give okVal(vBool(true))
+    }
+    if op == "<" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vBool(l.num < r.num))
+            }
+        }
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '<'. '<' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+    }
+    if op == "<=" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vBool(l.num <= r.num))
+            }
+        }
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '<='. '<=' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+    }
+    if op == ">" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vBool(l.num > r.num))
+            }
+        }
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '>'. '>' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+    }
+    if op == ">=" {
+        if l.kind == "number" {
+            if r.kind == "number" {
+                give okVal(vBool(l.num >= r.num))
+            }
+        }
+        give errAt(line, "I can't compare " + described(l) + " and " + described(r) + " with '>='. '>=' compares two numbers. (Text and true/false values can be checked with == and !=.)")
+    }
+    give errAt(line, "I don't know the sign '" + op + "'.")
+}
+
+// Are two values equal? Numbers, text, and true/false by their
+// content; objects and lists only when they are the very same
+// one — which, for the tagged objects holding them, is what the
+// host's == already says.
+make valuesEqual(l, r) {
+    if l.kind != r.kind {
+        give false
+    }
+    if l.kind == "number" {
+        give l.num == r.num
+    }
+    if l.kind == "text" {
+        give l.text == r.text
+    }
+    if l.kind == "boolean" {
+        give l.flag == r.flag
+    }
+    if l.kind == "object" {
+        give l == r
+    }
+    if l.kind == "list" {
+        give l == r
+    }
+    give false
+}
+
+// "no values", "1 value (name)", "2 values (a, b)" — for the
+// wrong-number-of-values errors.
+make takesText(params) {
+    if length(params) == 0 {
+        give "no values"
+    }
+    if length(params) == 1 {
+        give "1 value (" + params[0] + ")"
+    }
+    give length(params) + " values (" + join(params, ", ") + ")"
+}
+
+// Works a call's handed values out, in order.
+make evalArgs(argExprs, scope) {
+    let values = []
+    for a in argExprs {
+        let v = evalExpr(a, scope)
+        if v.ok == false {
+            give v
+        }
+        append(values, v.value)
+    }
+    give okVal(values)
+}
+
+// Runs one call: a built-in tool first (every program has them),
+// then a function the program made — in the Swift interpreter's
+// order: the function must exist, then the handed values are
+// worked out, then their number is checked, then the depth
+// guard, then the body runs in a fresh scope inside its home.
+// Gives back the call's value, or NOTHING when a made function
+// finished without a 'give'.
+make callFunction(name, argExprs, line, scope) {
+    if isBuiltinName(name) {
+        let argsR = evalArgs(argExprs, scope)
+        if argsR.ok == false {
+            give argsR
+        }
+        let params = builtinParamsOf(name)
+        if length(argsR.value) != length(params) {
+            give errAt(line, builtinCountText(name, length(argsR.value)))
+        }
+        give runBuiltin(name, argsR.value, line)
+    }
+    let idx = nameIndex(gFnNames, name)
+    if idx < 0 {
+        let message = "I don't know a function called '" + name + "' yet. You can make one with: make " + name + "(...) { ... }"
+        let candidates = copyList(gFnNames)
+        for b in builtinNamesList() {
+            append(candidates, b)
+        }
+        let close = closestOf(name, candidates)
+        if close.found {
+            message = message + " Did you mean '" + close.name + "'?"
+        }
+        give errAt(line, message)
+    }
+    let def = gFnDefs[idx]
+    let argsR = evalArgs(argExprs, scope)
+    if argsR.ok == false {
+        give argsR
+    }
+    if length(argsR.value) != length(def.params) {
+        give errAt(line, "The function '" + name + "' takes " + takesText(def.params) + ", but it was given " + length(argsR.value) + ". Make the call match how the function was made: " + name + "(" + join(def.params, ", ") + ").")
+    }
+    if gCallDepth >= 500 {
+        give errAt(line, "This call is more than five hundred functions deep and was stopped — it may never finish. A function that calls itself needs a way to stop, like an 'if' that gives an answer for the smallest case instead of calling again.")
+    }
+    gCallDepth = gCallDepth + 1
+    let callScope = makeScope(def.home)
+    let i = 0
+    while i < length(def.params) {
+        scopeDeclare(callScope, def.params[i], argsR.value[i])
+        i = i + 1
+    }
+    let r = execBlock(def.body, callScope)
+    gCallDepth = gCallDepth - 1
+    if r.ok == false {
+        give r
+    }
+    if r.gave {
+        give okVal(r.value)
+    }
+    give okVal(NOTHING)
+}
+
+// ---------- the built-in tools ----------
+// The nine tools every Nifla program has from the start, in one
+// place: their names, the names of the values they take, and an
+// example call of each — for the plain-words messages.
+
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "writefile", "arguments"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path", "text"], []]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()"]
+
+make builtinNamesList() {
+    give gBuiltinNames
+}
+
+make isBuiltinName(name) {
+    give nameIndex(gBuiltinNames, name) >= 0
+}
+
+make builtinParamsOf(name) {
+    give gBuiltinParams[nameIndex(gBuiltinNames, name)]
+}
+
+// The message for a call to a tool with the wrong number of
+// values — the same shape as the one for made functions.
+make builtinCountText(name, given) {
+    let params = builtinParamsOf(name)
+    let example = gBuiltinExamples[nameIndex(gBuiltinNames, name)]
+    give "The tool '" + name + "' takes " + takesText(params) + ", but it was given " + given + ". Call it like: " + example + "."
+}
+
+// A whole-number check for the counting tools ('part'): the
+// value is already known to be a number; this checks it is a
+// whole one and hands the number back.
+make wholeCount(v, what, line) {
+    if v.kind != "number" {
+        give errAt(line, what + " must be a number, but I was given " + described(v) + ".")
+    }
+    let bad = false
+    if isWholeNum(v.num) == false {
+        bad = true
+    }
+    if v.num >= 1000000000000000 {
+        bad = true
+    }
+    if v.num <= 0 - 1000000000000000 {
+        bad = true
+    }
+    if bad {
+        give errAt(line, what + " must be a whole number, but I was given " + numText(v.num) + ".")
+    }
+    give okVal(v.num)
+}
+
+// Runs a built-in tool on values already worked out. Where a
+// tool's work is exactly a host tool's work — splitting, finding,
+// taking a part, reading and writing files — the host tool does
+// it, and this interpreter checks the values and wraps the
+// answer, in the Swift interpreter's own words.
+make runBuiltin(name, args, line) {
+    if name == "length" {
+        let v = args[0]
+        if v.kind == "text" {
+            give okVal(vNumber(length(v.text)))
+        }
+        if v.kind == "list" {
+            give okVal(vNumber(length(v.items)))
+        }
+        if v.kind == "object" {
+            give okVal(vNumber(length(v.names)))
+        }
+        give errAt(line, "'length' measures some text, a list, or an object, but it was given " + described(v) + ".")
+    }
+    if name == "join" {
+        if args[0].kind != "list" {
+            give errAt(line, "'join' joins the items of a list into one piece of text, but it was given " + described(args[0]) + " to join. Give it a list first, like: join(words, \" \").")
+        }
+        if args[1].kind != "text" {
+            give errAt(line, "'join' needs some text to join the items with, like \" \" or \", \", but it was given " + described(args[1]) + ".")
+        }
+        let parts = []
+        for item in args[0].items {
+            append(parts, spokenOf(item))
+        }
+        give okVal(vText(join(parts, args[1].text)))
+    }
+    if name == "split" {
+        if args[0].kind != "text" {
+            give errAt(line, "'split' splits some text into a list of pieces, but it was given " + described(args[0]) + " to split.")
+        }
+        if args[1].kind != "text" {
+            give errAt(line, "'split' needs some text to split by, like \",\", but it was given " + described(args[1]) + ".")
+        }
+        if length(args[1].text) == 0 {
+            give errAt(line, "'split' can't split by an empty piece of text — there would be nothing to split on. Give it the text to split by, like: split(\"a,b\", \",\").")
+        }
+        let out = []
+        for piece in split(args[0].text, args[1].text) {
+            append(out, vText(piece))
+        }
+        give okVal(vList(out))
+    }
+    if name == "part" {
+        if args[0].kind != "text" {
+            give errAt(line, "'part' takes a part of some text, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'part' needs a number saying which character to start at — 0 is the first — but it was given " + described(args[1]) + ".")
+        }
+        if args[2].kind != "number" {
+            give errAt(line, "'part' needs a number saying how many characters to take, but it was given " + described(args[2]) + ".")
+        }
+        let startR = wholeCount(args[1], "The character to start at", line)
+        if startR.ok == false {
+            give startR
+        }
+        let countR = wholeCount(args[2], "The number of characters to take", line)
+        if countR.ok == false {
+            give countR
+        }
+        let start = startR.value
+        let count = countR.value
+        let total = length(args[0].text)
+        if start < 0 {
+            give errAt(line, "'part' was told to start at character " + start + ", but the first character is number 0 — a start can't be less than 0.")
+        }
+        if count < 0 {
+            give errAt(line, "'part' was told to take " + count + " characters, but a count can't be less than 0.")
+        }
+        if start > total {
+            if total == 0 {
+                give errAt(line, "'part' was told to start at character " + start + ", but the text has no characters yet.")
+            }
+            give errAt(line, "'part' was told to start at character " + start + ", but the text has only " + total + " characters, numbered 0 to " + (total - 1) + ".")
+        }
+        if start + count > total {
+            give errAt(line, "'part' was told to take " + count + " characters starting at character " + start + ", but the text has only " + total + " characters, numbered 0 to " + (total - 1) + " — that runs past the end.")
+        }
+        give okVal(vText(part(args[0].text, start, count)))
+    }
+    if name == "find" {
+        if args[0].kind != "text" {
+            give errAt(line, "'find' looks for a piece of text inside some text, but it was given " + described(args[0]) + " to look in.")
+        }
+        if args[1].kind != "text" {
+            give errAt(line, "'find' looks for a piece of text inside some text, but it was given " + described(args[1]) + " to look for.")
+        }
+        give okVal(vNumber(find(args[0].text, args[1].text)))
+    }
+    if name == "append" {
+        if args[0].kind != "list" {
+            give errAt(line, "'append' adds a value to the end of a list, but it was given " + described(args[0]) + " to add to.")
+        }
+        append(args[0].items, args[1])
+        give okVal(args[0])
+    }
+    if name == "readfile" {
+        if args[0].kind != "text" {
+            give errAt(line, "'readfile' needs the name of a file, as text, but it was given " + described(args[0]) + ".")
+        }
+        give okVal(vText(readfile(args[0].text)))
+    }
+    if name == "writefile" {
+        if args[0].kind != "text" {
+            give errAt(line, "'writefile' needs the name of a file, as text, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "text" {
+            give errAt(line, "'writefile' writes some text to a file, but it was given " + described(args[1]) + " to write.")
+        }
+        give okVal(vNumber(writefile(args[0].text, args[1].text)))
+    }
+    if name == "arguments" {
+        let out = []
+        for a in gArgs {
+            append(out, vText(a))
+        }
+        give okVal(vList(out))
+    }
+    give errAt(line, "I don't know a tool called '" + name + "'.")
+}
+
+// ---------- the floor scan ----------
+// Finds the first floor block in a program, wherever it is
+// nested, so a program holding floor code is refused before
+// anything runs — the interpreter can't run it at all.
+
+make firstFloorInStmts(stmts) {
+    for s in stmts {
+        let r = firstFloorInStmt(s)
+        if r.found {
+            give r
+        }
+    }
+    give { found: false, line: 0 }
+}
+
+make firstFloorInStmt(s) {
+    if s.type == "declare" {
+        give firstFloorInExpr(s.value)
+    }
+    if s.type == "assign" {
+        give firstFloorInExpr(s.value)
+    }
+    if s.type == "assignTarget" {
+        let r = firstFloorInExpr(s.target)
+        if r.found {
+            give r
+        }
+        give firstFloorInExpr(s.value)
+    }
+    if s.type == "say" {
+        give firstFloorInExpr(s.value)
+    }
+    if s.type == "give" {
+        give firstFloorInExpr(s.value)
+    }
+    if s.type == "if" {
+        let r = firstFloorInExpr(s.condition)
+        if r.found {
+            give r
+        }
+        let r2 = firstFloorInStmts(s.thenStmts)
+        if r2.found {
+            give r2
+        }
+        give firstFloorInStmts(s.elseStmts)
+    }
+    if s.type == "while" {
+        let r = firstFloorInExpr(s.condition)
+        if r.found {
+            give r
+        }
+        give firstFloorInStmts(s.body)
+    }
+    if s.type == "repeat" {
+        let r = firstFloorInExpr(s.count)
+        if r.found {
+            give r
+        }
+        give firstFloorInStmts(s.body)
+    }
+    if s.type == "for" {
+        let r = firstFloorInExpr(s.over)
+        if r.found {
+            give r
+        }
+        give firstFloorInStmts(s.body)
+    }
+    if s.type == "define" {
+        give firstFloorInStmts(s.body)
+    }
+    if s.type == "doCall" {
+        for a in s.args {
+            let r = firstFloorInExpr(a)
+            if r.found {
+                give r
+            }
+        }
+        give { found: false, line: 0 }
+    }
+    if s.type == "doExpr" {
+        give firstFloorInExpr(s.expr)
+    }
+    give { found: false, line: 0 }
+}
+
+make firstFloorInExpr(e) {
+    if e.type == "floor" {
+        give { found: true, line: e.line }
+    }
+    if e.type == "call" {
+        for a in e.args {
+            let r = firstFloorInExpr(a)
+            if r.found {
+                give r
+            }
+        }
+        give { found: false, line: 0 }
+    }
+    if e.type == "object" {
+        for v in e.values {
+            let r = firstFloorInExpr(v)
+            if r.found {
+                give r
+            }
+        }
+        give { found: false, line: 0 }
+    }
+    if e.type == "list" {
+        for item in e.items {
+            let r = firstFloorInExpr(item)
+            if r.found {
+                give r
+            }
+        }
+        give { found: false, line: 0 }
+    }
+    if e.type == "field" {
+        give firstFloorInExpr(e.base)
+    }
+    if e.type == "negate" {
+        give firstFloorInExpr(e.inner)
+    }
+    if e.type == "index" {
+        let r = firstFloorInExpr(e.base)
+        if r.found {
+            give r
+        }
+        give firstFloorInExpr(e.index)
+    }
+    if e.type == "binary" {
+        let r = firstFloorInExpr(e.left)
+        if r.found {
+            give r
+        }
+        give firstFloorInExpr(e.right)
+    }
+    give { found: false, line: 0 }
+}
+
+// ---------- the program itself ----------
+// What running this interpreter does: take the program's path
+// from the first word it was started with, hand the rest of the
+// words to the program as its arguments, read the program, take
+// it apart, refuse it if it holds floor code, and run it. A
+// problem at any step is said in the same plain words the Swift
+// interpreter would print.
+
+let allArgs = arguments()
+if length(allArgs) == 0 {
+    say "Give me a Nifla program to run, like: nifla-in-nifla program.nifla"
+} else {
+    let path = allArgs[0]
+    let argi = 1
+    while argi < length(allArgs) {
+        append(gArgs, allArgs[argi])
+        argi = argi + 1
+    }
+    let source = readfile(path)
+    let lexed = lexAll(source)
+    if lexed.ok == false {
+        say lexed.message
+    } else {
+        let parsed = parseProgramAll(lexed.value)
+        if parsed.ok == false {
+            say parsed.message
+        } else {
+            let fl = firstFloorInStmts(parsed.value)
+            if fl.found {
+                say "Line " + fl.line + ": This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes."
+            } else {
+                let r = execBlock(parsed.value, makeScope(NOTHING))
+                if r.ok == false {
+                    say r.message
+                }
+            }
+        }
+    }
+}

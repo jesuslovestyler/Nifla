@@ -3,3 +3,8 @@
 
 # The note file the Stone 6 notefile example writes while it runs.
 /stone6-note.txt
+
+# The compiled self-hosted interpreter and the Swift it was
+# made from — build products of run-selfhost.sh.
+/selfhost/nifla-in-nifla
+/selfhost/nifla-in-nifla.swift

@@ -461,9 +461,6 @@ func compileMain(arguments: [String]) -> Int32 {
     if arm && feather {
         return fail("Feathers are not stood up on the ARM target yet: a feather is a guest together with its card, and guests belong to the x86 host's road in this ladder. Build the feather without '--arm'.", code: 2)
     }
-    if arm && videoRequest != nil {
-        return fail("The picture screen is not stood up on the ARM target yet — it is Stone 24's work, the next stone of this ladder. For now, build this program without '--arm' to ask for a video mode, or take '--video' out.", code: 2)
-    }
     var preludeStatements: [Stmt] = []
     for preludePath in preludes {
         let preludeSource: String
@@ -503,7 +500,7 @@ func compileMain(arguments: [String]) -> Int32 {
     // hosted runtime file, nothing underneath the program.
     if bare {
         if arm {
-            return compileBareARM(inputPath: inputPath, output: output, program: program, fail: fail)
+            return compileBareARM(inputPath: inputPath, output: output, program: program, videoRequest: videoRequest, fail: fail)
         }
         return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, videoRequest: videoRequest, feather: feather, fail: fail)
     }

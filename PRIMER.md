@@ -1058,6 +1058,31 @@ not ask boots exactly as it always did). And
 under a bare program, as if they stood at its top — the
 way Cardnull OS 2's kernel is built from its libraries.
 
+```text
+niflac --bare --arm program.nifla -o program.elf
+```
+
+builds the same bare subset for a second machine:
+aarch64, booting on QEMU's `virt` machine (Stones 23–24).
+The subset, the shapes, and the guards are the same; the
+machine underneath differs, and it shows in named places.
+There is no text screen, so `say` speaks over the serial
+line and `readkey()` takes bytes from it; `memorysize()`
+answers from the device tree the loader left behind; and
+the floor desk wears this target's letters — **x19** for
+the handed numbers' address, **x20** for their count,
+**x21** and **x22** for the handed text or bytes and its
+count, **x23** and **x24** for the results desk (0 for a
+bare host, as on x86), with the block's answer left in
+**x0**. With `--bare --arm --video 640x480x32` the kernel
+sets up the machine's ramfb picture screen before the
+program starts and leaves its address, width, height and
+stride in the globals `__video_fb`, `__video_width`,
+`__video_height` and `__video_stride`, where floor blocks
+read them to paint. Guests, feathers, and the disk tools
+belong to the x86 road for now, and an ARM build that
+asks for them is refused in plain words.
+
 ---
 
 ## Where to read more

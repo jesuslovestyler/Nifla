@@ -2107,6 +2107,88 @@ watching where the machine sat, and fixed.)
   on a bench without them it says so plainly and
   fails, rather than passing unproven.
 
+## Stone 24 — floor and face on ARM (November 15, 2026)
+
+The ARM door gains its two remaining rooms.
+
+**The floor.** Floor blocks now compile on the ARM
+target, holding aarch64 assembly under the same desk
+CONTRACT as everywhere else: the desk's meaning is
+target-independent — a row of handed numbers, at most
+one handed piece of text or bytes, a main answer, and
+a results desk a bare host does not have — and only
+the register letters are the target's own, documented
+here and in the Primer: **x19** points at the handed
+numbers (the first at `[x19]`, the second at
+`[x19 + 8]`, and so on) and **x20** says how many;
+**x21**/**x22** carry the handed text-or-bytes address
+and count; **x23**/**x24** are the results desk, 0 for
+a bare host as on x86; the block's give is what it
+leaves in **x0**. The wrapper keeps x21–x25 safe
+across the block, mirroring the x86 wrapper's keeping
+of its desk's memory side — the keeping that lets a
+floor call sit inside another floor call's arguments.
+
+**The face.** `--video` is honored on the ARM target
+via the framebuffer the virt machine honestly offers:
+**ramfb**, reached through the machine's fw_cfg —
+spiked first, as the ladder orders. The kernel walks
+the fw_cfg file directory for `etc/ramfb`, takes a
+framebuffer from the heap, and writes the ramfb
+config (XRGB8888, the asked width and height, stride
+width × 4) through fw_cfg's **DMA door** — the spike's
+honest finding was that plain data-register writes,
+byte-wide and word-wide alike, did not apply the
+config on this bench's QEMU 8.2.2, and the DMA door
+did, first try once its trigger words were laid in
+the right order. Depths other than 32 are refused in
+plain words: 32-bit color is the form stood up here.
+The framebuffer's address, width, height and stride
+stand in the globals `__video_fb`, `__video_width`,
+`__video_height`, `__video_stride`, where floor
+blocks read them to paint — the same shape as the x86
+road's screen library, whose floor blocks write the
+text screen's memory directly. If the machine has no
+ramfb, or no room for the picture, `__video_fb` stays
+0 and there is no picture; `say` stays on the serial
+line either way.
+
+Standing proof: `run-bare-arm.sh` parts 5 and 6 —
+`bare-examples/nifla-arm-floor.nifla` (two floor
+blocks doing real work over the desk: handed numbers
+added with a handed text's length, and a handed
+text's bytes walked and summed, both answers said
+over the serial line) and
+`bare-examples/nifla-arm-screen.nifla` (built with
+`--video 640x480x32`; a floor block paints red on the
+left half, blue on the right, and a white square in
+both, and a screendump's sampled pixels must show
+exactly that painting). The Primer's Part 5 names the
+ARM desk letters and the video globals beside the x86
+ones. The full regression stands on both targets,
+and the x86 bare road's output is unchanged.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- Floor blocks and the picture screen on ARM — the
+  two rooms Stone 23 named as this stone's work.
+
+**Remaining, named:**
+
+- **ramfb is the virt machine's screen, not every
+  ARM machine's** — a real board will offer its own
+  framebuffer, and the day the OS's ARM edition is
+  aimed at a chosen chip (the Raspian bar still gates
+  it), the video setup learns that board's way. The
+  language's shape — the asking, and the globals a
+  floor block paints by — does not change.
+- **The fw_cfg data door's writes** did not apply a
+  ramfb config on this bench's QEMU; the DMA door
+  did, and is the one the kernel uses. Recorded so
+  the next reader does not re-walk the dead end.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

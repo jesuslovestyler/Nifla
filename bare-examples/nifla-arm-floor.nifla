@@ -1,0 +1,34 @@
+// Nifla's floor on ARM (Stone 24): floor blocks holding
+// aarch64 assembly, under the same desk contract as the
+// x86 road — only the register letters differ. The handed
+// numbers stand in a row whose address is in x19, with
+// x20 saying how many; a handed piece of text or bytes
+// crosses in x21 (its address) and x22 (its count); the
+// results desk, x23 and x24, is 0, because a bare host
+// has none. The block's give is what it leaves in x0.
+//
+// Two blocks do real work here: the first adds the two
+// handed numbers and the handed text's length; the
+// second walks the handed text's bytes and adds them up.
+
+let reckoned = floor(30, 12, "abcd") {
+    ldr x0, [x19]
+    ldr x1, [x19, #8]
+    add x0, x0, x1
+    add x0, x0, x22
+}
+say "The floor reckons " + reckoned
+
+let lettersum = floor("abcd") {
+    mov x0, #0
+    mov x9, #0
+letters_loop:
+    cmp x9, x22
+    b.hs letters_done
+    ldrb w10, [x21, x9]
+    add x0, x0, x10
+    add x9, x9, #1
+    b letters_loop
+letters_done:
+}
+say "The letters add to " + lettersum

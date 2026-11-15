@@ -1,0 +1,58 @@
+// Nifla's face on ARM (Stone 24): built with
+//   niflac --bare --arm --video 640x480x32
+// the kernel sets up the virt machine's picture screen —
+// ramfb, reached through the machine's fw_cfg — before
+// the program starts, and leaves the framebuffer's
+// address, width, height and stride in the globals
+// __video_fb, __video_width, __video_height and
+// __video_stride. Painting is floor work, as it is on
+// the x86 road: the block below reads those globals and
+// writes the pixels itself — red on the left half, blue
+// on the right, and a white square standing in both.
+// If the machine has no ramfb, __video_fb is 0 and the
+// block paints nothing; the program says its line over
+// the serial line either way.
+
+make paint() {
+    floor() {
+        ldr x9, =__video_fb
+        ldr x9, [x9]
+        cbz x9, paint_done
+        ldr x10, =__video_width
+        ldr x10, [x10]
+        ldr x11, =__video_height
+        ldr x11, [x11]
+        mov x14, x9
+        mov x12, #0
+    paint_row:
+        mov x13, #0
+    paint_pixel:
+        mov w15, #0x0000FF
+        lsr x16, x10, #1
+        cmp x13, x16
+        b.hs paint_colored
+        mov w15, #0xFF0000
+    paint_colored:
+        cmp x13, #100
+        b.lo paint_store
+        cmp x13, #200
+        b.hs paint_store
+        cmp x12, #100
+        b.lo paint_store
+        cmp x12, #200
+        b.hs paint_store
+        mov w15, #0xFFFFFF
+    paint_store:
+        str w15, [x14], #4
+        add x13, x13, #1
+        cmp x13, x10
+        b.lo paint_pixel
+        add x12, x12, #1
+        cmp x12, x11
+        b.lo paint_row
+    paint_done:
+    }
+}
+
+paint()
+say "The screen is painted."

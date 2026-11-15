@@ -32,12 +32,35 @@
 //   - ticks() reads the machine's own free-running counter
 //     (CNTPCT), scaled to a hundred ticks a second by the
 //     counter's own frequency; no interrupts are involved.
-//   - Not stood up on this target yet, and refused in plain
-//     words below rather than silently mis-built: floor
-//     blocks (Stone 24's work), the disk tools (the virt
-//     machine has no ATA disk of the kind the x86 road
-//     speaks to), the guest tools and guests themselves,
-//     feathers, and the --video asking (Stone 24's work).
+//   - Floor blocks hold aarch64 assembly under the same
+//     desk CONTRACT as the x86 road (Stone 24): the
+//     desk's meaning is target-independent — a row of
+//     handed numbers, at most one handed piece of text or
+//     bytes, and a results desk a bare host does not
+//     have — and only the register letters differ:
+//     x19 = the handed numbers' address, x20 = how many,
+//     x21/x22 = the handed text-or-bytes address and
+//     count, x23/x24 = the results desk (0 here, as on
+//     the x86 bare road). The block's give is what it
+//     leaves in x0. The wrapper keeps x21–x25 safe
+//     across the block, as the x86 wrapper keeps its
+//     desk's memory side.
+//   - With '--video WxHx32' the kernel sets up the
+//     picture screen the virt machine honestly offers:
+//     ramfb, reached through the machine's fw_cfg
+//     (Stone 24). The framebuffer's address, width,
+//     height and stride stand in the globals __video_fb,
+//     __video_width, __video_height, __video_stride,
+//     where floor blocks read them to paint; without a
+//     ramfb on the machine (or room for the picture)
+//     __video_fb stays 0 and there is no picture. 'say'
+//     stays on the serial line either way. Only 32-bit
+//     color is stood up on this target.
+//   - Not stood up on this target yet, and refused in
+//     plain words below rather than silently mis-built:
+//     the disk tools (the virt machine has no ATA disk
+//     of the kind the x86 road speaks to) and the guest
+//     tools and guests themselves, and feathers.
 
 import Foundation
 
@@ -51,8 +74,11 @@ import Foundation
 private func armRefusal(in program: [Stmt]) -> String? {
     func scanExpr(_ expr: Expr) -> String? {
         switch expr {
-        case .floor:
-            return "Floor blocks are not stood up on the ARM target yet — they are Stone 24's work, the next stone of this ladder. For now, build this program for the x86 target (without '--arm'), or take the floor block out."
+        case .floor(_, let args, _):
+            for arg in args {
+                if let found = scanExpr(arg) { return found }
+            }
+            return nil
         case .call(let name, let args, _):
             if name == "disksectors" || name == "diskread" || name == "diskwrite" {
                 return "The disk tools are not stood up on the ARM target: the virt machine this target boots on has no ATA disk of the kind the x86 road speaks to, and '\(name)' has nothing honest to speak to yet. Build this program for the x86 target (without '--arm') to use it."
@@ -132,8 +158,13 @@ struct BareTranslatorARM {
     private let functions: [String: (params: [String], giveKind: BareKind)]
     private let paramKinds: [String: [BareKind]]
 
+    // The video request (Stone 24), when the build asked
+    // for one: the mode ramfb is set up with at boot.
+    var videoRequest: (width: Int, height: Int, depth: Int)? = nil
+
     private var code: [String] = []
     private var literals: [(label: String, bytes: [UInt8])] = []
+    private var floorBlocks: [String] = []
     private var labelCounter = 0
 
     private var scopes: [[String: (offset: Int, kind: BareKind)]] = []
@@ -172,7 +203,7 @@ struct BareTranslatorARM {
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
             return functions[name]?.giveKind ?? .number
-        case .floor: return .number  // refused for this target before translating
+        case .floor: return .number
         case .negate: return .number
         case .binary(let left, let op, let right, _):
             switch op {
@@ -272,6 +303,9 @@ struct BareTranslatorARM {
         out.append("    str xzr, [x9], #8")
         out.append("    b 1b")
         out.append("2:  bl __nifla_memory_init")
+        if videoRequest != nil {
+            out.append("    bl __nifla_video_init")
+        }
         out.append("    bl __nifla_main")
         out.append("__halt_trap:")
         out.append("    wfe")
@@ -279,6 +313,23 @@ struct BareTranslatorARM {
         out.append("")
         out += runtimeLines()
         out += code
+        // The floor blocks, each behind its desk — the
+        // wrapper keeps the desk's memory side (x21/x22),
+        // the results side (x23/x24), and one courtesy
+        // register (x25) safe across the block, as the x86
+        // wrapper keeps rbx/r12, r13/r14, and r15.
+        for (index, asm) in floorBlocks.enumerated() {
+            out.append("")
+            out.append("__floor_\(index):")
+            out.append("    stp x21, x22, [sp, #-16]!")
+            out.append("    stp x23, x24, [sp, #-16]!")
+            out.append("    str x25, [sp, #-16]!")
+            out.append(asm)
+            out.append("    ldr x25, [sp], #16")
+            out.append("    ldp x23, x24, [sp], #16")
+            out.append("    ldp x21, x22, [sp], #16")
+            out.append("    ret")
+        }
         if !literals.isEmpty {
             out.append("    .rodata")
             for literal in literals {
@@ -297,6 +348,16 @@ struct BareTranslatorARM {
         out.append("__tick_divisor: .skip 8")
         out.append("__guard_passes: .skip 8")
         out.append("__guard_depth:  .skip 8")
+        out.append("__floor_inputs: .skip 128")
+        out.append("__video_fb:     .skip 8")
+        out.append("__video_width:  .skip 8")
+        out.append("__video_height: .skip 8")
+        out.append("__video_stride: .skip 8")
+        out.append("__video_sel:    .skip 8")
+        out.append("__video_name:   .skip 56")
+        out.append("    .balign 8")
+        out.append("__video_cfg:    .skip 32")
+        out.append("__video_dma:    .skip 16")
         out.append("__numtext_buf:  .skip 32")
         out.append("__stack:        .skip 65536")
         out.append("__stack_top:")
@@ -700,6 +761,168 @@ struct BareTranslatorARM {
         out.append("    ldr x0, [x9]")
         out.append("    ret")
         out.append("")
+        if let video = videoRequest {
+            out += videoLines(video)
+        }
+        return out
+    }
+
+    // The picture screen (Stone 24): ramfb over the
+    // machine's fw_cfg. The kernel walks the fw_cfg file
+    // directory (its selector register takes a big-endian
+    // key at +8; the data register at +0 hands the file's
+    // bytes one by one) looking for 'etc/ramfb'; takes a
+    // framebuffer from the heap; and writes the ramfb
+    // config through the fw_cfg DMA door (the plain data
+    // writes did not apply the config on this bench's
+    // QEMU — the DMA door is the one that stands, proven
+    // by the Stone 24 spike). Any failure along the way —
+    // no ramfb file, no room, a DMA error — leaves
+    // __video_fb at 0: no picture, said plainly by the
+    // globals rather than by stopping the machine. The
+    // routine is written flat, with no calls, so the
+    // return address is never in danger.
+    private func videoLines(_ video: (width: Int, height: Int, depth: Int)) -> [String] {
+        let stride = video.width * 4
+        let size = stride * video.height
+        var out: [String] = []
+        out.append("__nifla_video_init:")
+        out.append("    ldr x21, =0x09020000")
+        out.append("    mov w9, #0x1900")
+        out.append("    strh w9, [x21, #8]")
+        out.append("    mov x24, #0")
+        out.append("    mov x25, #4")
+        out.append("__video_count:")
+        out.append("    ldrb w9, [x21]")
+        out.append("    lsl x24, x24, #8")
+        out.append("    orr x24, x24, x9")
+        out.append("    sub x25, x25, #1")
+        out.append("    cbnz x25, __video_count")
+        out.append("__video_entry:")
+        out.append("    cbz x24, __video_none")
+        out.append("    mov x25, #4")
+        out.append("__video_skip_size:")
+        out.append("    ldrb w9, [x21]")
+        out.append("    sub x25, x25, #1")
+        out.append("    cbnz x25, __video_skip_size")
+        out.append("    ldrb w9, [x21]")
+        out.append("    lsl x26, x9, #8")
+        out.append("    ldrb w9, [x21]")
+        out.append("    orr x26, x26, x9")
+        out.append("    mov x25, #2")
+        out.append("__video_skip_res:")
+        out.append("    ldrb w9, [x21]")
+        out.append("    sub x25, x25, #1")
+        out.append("    cbnz x25, __video_skip_res")
+        out.append("    ldr x27, =__video_name")
+        out.append("    mov x25, #0")
+        out.append("__video_name_in:")
+        out.append("    ldrb w9, [x21]")
+        out.append("    strb w9, [x27, x25]")
+        out.append("    add x25, x25, #1")
+        out.append("    cmp x25, #56")
+        out.append("    b.lo __video_name_in")
+        out.append("    ldr x28, =__ramfb_name")
+        out.append("    mov x25, #0")
+        out.append("__video_cmp:")
+        out.append("    ldrb w9, [x28, x25]")
+        out.append("    ldrb w10, [x27, x25]")
+        out.append("    cmp w9, w10")
+        out.append("    b.ne __video_next")
+        out.append("    cbz w9, __video_found")
+        out.append("    add x25, x25, #1")
+        out.append("    b __video_cmp")
+        out.append("__video_next:")
+        out.append("    sub x24, x24, #1")
+        out.append("    b __video_entry")
+        out.append("__video_found:")
+        out.append("    ldr x9, =__video_sel")
+        out.append("    str x26, [x9]")
+        // The framebuffer: the heap cursor, page-aligned,
+        // checked against the heap's end before it is
+        // committed — no room means no picture.
+        out.append("    ldr x9, =__heap_cursor")
+        out.append("    ldr x10, [x9]")
+        out.append("    add x10, x10, #4095")
+        out.append("    and x10, x10, #-4096")
+        out.append("    ldr x11, =\(size)")
+        out.append("    add x12, x10, x11")
+        out.append("    ldr x13, =__heap_limit")
+        out.append("    ldr x13, [x13]")
+        out.append("    cmp x12, x13")
+        out.append("    b.hi __video_none")
+        out.append("    str x12, [x9]")
+        out.append("    ldr x9, =__video_fb")
+        out.append("    str x10, [x9]")
+        out.append("    ldr x9, =__video_width")
+        out.append("    ldr x10, =\(video.width)")
+        out.append("    str x10, [x9]")
+        out.append("    ldr x9, =__video_height")
+        out.append("    ldr x10, =\(video.height)")
+        out.append("    str x10, [x9]")
+        out.append("    ldr x9, =__video_stride")
+        out.append("    ldr x10, =\(stride)")
+        out.append("    str x10, [x9]")
+        // The config, big-endian fields, in __video_cfg.
+        out.append("    ldr x27, =__video_cfg")
+        out.append("    ldr x9, =__video_fb")
+        out.append("    ldr x9, [x9]")
+        out.append("    rev x9, x9")
+        out.append("    str x9, [x27]")
+        out.append("    ldr w9, =0x34325258")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x27, #8]")
+        out.append("    str wzr, [x27, #12]")
+        out.append("    ldr w9, =\(video.width)")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x27, #16]")
+        out.append("    ldr w9, =\(video.height)")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x27, #20]")
+        out.append("    ldr w9, =\(stride)")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x27, #24]")
+        // The DMA access in __video_dma, and the trigger:
+        // the access's address as two big-endian words,
+        // high at +16 first, then low at +20.
+        out.append("    ldr x27, =__video_dma")
+        out.append("    ldr x9, =__video_sel")
+        out.append("    ldr x9, [x9]")
+        out.append("    lsl x9, x9, #16")
+        out.append("    orr x9, x9, #24")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x27]")
+        out.append("    mov w9, #28")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x27, #4]")
+        out.append("    ldr x9, =__video_cfg")
+        out.append("    rev x9, x9")
+        out.append("    str x9, [x27, #8]")
+        out.append("    mov x9, x27")
+        out.append("    lsr x10, x9, #32")
+        out.append("    rev w10, w10")
+        out.append("    str w10, [x21, #16]")
+        out.append("    rev w9, w9")
+        out.append("    str w9, [x21, #20]")
+        out.append("    ldr x11, =100000000")
+        out.append("__video_poll:")
+        out.append("    ldr w9, [x27]")
+        out.append("    rev w9, w9")
+        out.append("    cbz w9, __video_done")
+        out.append("    tst w9, #1")
+        out.append("    b.ne __video_fail")
+        out.append("    sub x11, x11, #1")
+        out.append("    cbnz x11, __video_poll")
+        out.append("__video_fail:")
+        out.append("    ldr x9, =__video_fb")
+        out.append("    str xzr, [x9]")
+        out.append("__video_done:")
+        out.append("__video_none:")
+        out.append("    ret")
+        out.append("    .rodata")
+        out.append("__ramfb_name: .asciz \"etc/ramfb\"")
+        out.append("    .text")
+        out.append("")
         return out
     }
 
@@ -960,8 +1183,41 @@ struct BareTranslatorARM {
         case .call(let name, let args, let line):
             emitCall(name: name, args: args, line: line)
 
-        case .floor:
-            emit("    b __halt_trap")  // refused for this target; never emitted
+        case .floor(let asm, let args, _):
+            // The desk, in this target's letters (Stone
+            // 24): the handed numbers are laid in the
+            // __floor_inputs row as they are worked out —
+            // x19 will point at the row and x20 say how
+            // many — and a handed piece of text or bytes
+            // crosses in x21/x22. The results desk (x23/
+            // x24) is 0: a bare host has none, as on x86.
+            // The block's give is what it leaves in x0.
+            let index = floorBlocks.count
+            floorBlocks.append(asm)
+            var numberIndex = 0
+            var hasText = false
+            for arg in args {
+                if slots(for: kindOf(arg)) == 2 {
+                    emitExpr(arg)
+                    emit("    mov x21, x0")
+                    emit("    mov x22, x1")
+                    hasText = true
+                } else {
+                    emitExpr(arg)
+                    emit("    ldr x9, =__floor_inputs")
+                    emit("    str x0, [x9, #\(8 * numberIndex)]")
+                    numberIndex += 1
+                }
+            }
+            emit("    ldr x19, =__floor_inputs")
+            emitLoadImm("x20", Int64(numberIndex))
+            if !hasText {
+                emit("    mov x21, #0")
+                emit("    mov x22, #0")
+            }
+            emit("    mov x23, #0")
+            emit("    mov x24, #0")
+            emit("    bl __floor_\(index)")
 
         case .negate(let inner, _):
             emitExpr(inner)
@@ -1159,7 +1415,10 @@ private func findLLVMTool(_ name: String) -> String? {
     return nil
 }
 
-func compileBareARM(inputPath: String, output: String?, program: [Stmt], fail: (String, Int32) -> Int32) -> Int32 {
+func compileBareARM(inputPath: String, output: String?, program: [Stmt], videoRequest: (width: Int, height: Int, depth: Int)? = nil, fail: (String, Int32) -> Int32) -> Int32 {
+    if let video = videoRequest, video.depth != 32 {
+        return fail("The ARM target's picture screen speaks 32-bit color (the virt machine's ramfb in its XRGB8888 form) — ask for a depth of 32, like: --video 1024x768x32. The depth you asked for was \(video.depth).", 2)
+    }
     let validator = BareValidator(guestMode: false)
     do {
         try validator.validate(program)
@@ -1173,6 +1432,7 @@ func compileBareARM(inputPath: String, output: String?, program: [Stmt], fail: (
     }
 
     var translator = BareTranslatorARM(validator: validator)
+    translator.videoRequest = videoRequest
     let asm = translator.translate(program, sourceName: URL(fileURLWithPath: inputPath).lastPathComponent)
 
     let outputPath: String

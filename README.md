@@ -2001,6 +2001,112 @@ and `sayerr` written as a statement where it is a tool
 call. The book now says both rightly, and the proof holds
 it to them.)
 
+## Stone 23 — the ARM door (November 15, 2026)
+
+The bare subset speaks a second machine now. The
+toolchain was spiked first, as the ladder ordered:
+qemu-system-aarch64 (QEMU 8.2.2) stands on this bench —
+one missing library (libfuse3) was fetched from the
+Ubuntu archive to let it run — and clang/lld from the
+workspace's Swift toolchain assemble and link for
+aarch64. The verdict was PROCEED, and the door stands:
+
+```
+niflac --bare --arm program.nifla -o program.elf
+```
+
+`--arm` chooses the machine a bare build is made for:
+aarch64, booting as an ELF at 0x40000000 on QEMU's
+`virt` machine. The language the target holds is the
+same bare subset the x86 road holds — the same
+validator reads the program first, and the same shapes
+come out: whole numbers as the machine's words, text
+and blocks of bytes travelling as an address and a
+count, variables in frame slots, annotations as the
+validator keeps them, and the same runaway guards (a
+million loop passes, five hundred nested calls), with
+a guard's failure stopping the machine silently, as on
+x86. What differs is the machine underneath, named
+plainly wherever it shows:
+
+- **The voice is the serial line.** The virt machine
+  has no text screen, so `say` speaks over the PL011
+  serial line at 0x09000000, and `readkey()` takes
+  bytes from the same line — the byte that arrived, or
+  0 when none is waiting — where the x86 road's keys
+  are scancodes from its keyboard. (Bare Nifla has no
+  byte-to-character tool on either target, so a program
+  that echoes a key names it or numbers it itself.)
+- **memorysize() reads the machine's own map.** The
+  device tree is looked for where this machine puts
+  it — in x0 when the loader hands it over, and at
+  address 0, where QEMU's virt machine lays it for ELF
+  kernels; the tree's magic word tells whether it is
+  there. The kernel walks the tree for the memory
+  node's `reg`, and memorysize() answers its size —
+  134217728 on the proof machine, its 128 MiB. With
+  no tree found, memorysize() answers 0 (no map was
+  given) and the heap is an 8 MiB arena above the
+  kernel; with a tree, the heap runs to memory's end.
+- **ticks() reads the machine's own counter**
+  (CNTPCT), scaled by its frequency (CNTFRQ) to the
+  same hundred ticks a second the x86 road keeps;
+  waittick() waits one out. No interrupts are
+  involved yet.
+
+Not stood up on this target yet, and refused in plain
+words at build time rather than silently mis-built:
+floor blocks and the picture screen (`--video`) —
+Stone 24's work, the next stone of this ladder — the
+disk tools (the virt machine has no ATA disk of the
+kind the x86 road speaks to), and guests and feathers
+(the guest door belongs to the x86 host's road in
+this ladder). `--arm` without `--bare`, beside
+`--guest`, or beside `--video` is refused the same
+way. The x86 bare road is untouched: its founding
+example builds byte-identical assembly and ELF to
+before this stone, and its full regression stands.
+
+Standing proof: `run-bare-arm.sh` — it builds
+`bare-examples/nifla-arm.nifla`, boots it on the virt
+machine, and reads the serial line: the greeting, the
+reckonings (a loop's sum, a function's square, whole
+division, a negative), a block of bytes written and
+read back, joined and compared text, memorysize()'s
+answer from the tree, ticks advancing across a
+waittick, and the key the proof sends ('z') echoed.
+It also checks the flag's refusals and the target's
+limits, each in plain words. (The proof earned its
+keep before it passed: the serial line stayed silent
+until two return-address faults in the new runtime —
+a walk that clobbered its caller's link register, and
+a caller that had not saved its own — were found by
+watching where the machine sat, and fixed.)
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The bare subset spoke one machine. It speaks two
+  now, with one validator and one set of shapes over
+  both.
+
+**Remaining, named:**
+
+- **Floor and face on ARM** — floor blocks with
+  aarch64 assembly under the desk contract, and the
+  `--video` asking honored by whichever framebuffer
+  the virt machine honestly offers. Stone 24's work.
+- **No interrupts on ARM yet** — ticks are polled
+  from the counter, keys are polled from the serial
+  line; the timer and the UART raise no interrupts
+  the kernel takes. Enough for this door; named so
+  it is not mistaken for more.
+- **One bench's QEMU** — the ARM proof runs where
+  qemu-system-aarch64 and an LLVM toolchain stand;
+  on a bench without them it says so plainly and
+  fails, rather than passing unproven.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

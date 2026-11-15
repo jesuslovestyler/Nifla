@@ -359,6 +359,7 @@ func compileMain(arguments: [String]) -> Int32 {
     var bare = false
     var guest = false
     var feather = false
+    var arm = false
     var videoRequest: (width: Int, height: Int, depth: Int)? = nil
     var preludes: [String] = []
     var index = 1
@@ -370,6 +371,8 @@ func compileMain(arguments: [String]) -> Int32 {
             guest = true
         } else if argument == "--feather" {
             feather = true
+        } else if argument == "--arm" {
+            arm = true
         } else if argument == "--video" {
             index += 1
             guard index < arguments.count else {
@@ -444,6 +447,23 @@ func compileMain(arguments: [String]) -> Int32 {
     if videoRequest != nil && guest {
         return fail("A guest is never booted by a loader, so there is no one to ask for a video mode — take '--video' out of the guest's build; the host owns the screen.", code: 2)
     }
+    // Stone 23: '--arm' chooses the machine a bare build is
+    // made for — aarch64, booting on QEMU's virt machine —
+    // so it only makes sense beside '--bare'. Guests and
+    // feathers ride the x86 host's door in this ladder, and
+    // the picture screen on ARM is Stone 24's work.
+    if arm && !bare {
+        return fail("The '--arm' flag chooses the machine a bare-metal build is made for (aarch64, QEMU's virt machine) — add '--bare' to use it, like: niflac --bare --arm program.nifla -o program.elf", code: 2)
+    }
+    if arm && guest {
+        return fail("Guests are not stood up on the ARM target yet: the guest door belongs to the x86 host's road in this ladder. Build the guest without '--arm'.", code: 2)
+    }
+    if arm && feather {
+        return fail("Feathers are not stood up on the ARM target yet: a feather is a guest together with its card, and guests belong to the x86 host's road in this ladder. Build the feather without '--arm'.", code: 2)
+    }
+    if arm && videoRequest != nil {
+        return fail("The picture screen is not stood up on the ARM target yet — it is Stone 24's work, the next stone of this ladder. For now, build this program without '--arm' to ask for a video mode, or take '--video' out.", code: 2)
+    }
     var preludeStatements: [Stmt] = []
     for preludePath in preludes {
         let preludeSource: String
@@ -482,6 +502,9 @@ func compileMain(arguments: [String]) -> Int32 {
     // and build (BareCompiler.swift) — no Swift runtime, no
     // hosted runtime file, nothing underneath the program.
     if bare {
+        if arm {
+            return compileBareARM(inputPath: inputPath, output: output, program: program, fail: fail)
+        }
         return compileBare(inputPath: inputPath, output: output, program: program, guestMode: guest, videoRequest: videoRequest, feather: feather, fail: fail)
     }
 

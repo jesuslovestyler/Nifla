@@ -1,0 +1,71 @@
+// Nifla on ARM (Stone 23): this program is compiled with
+// `niflac --bare --arm` into an aarch64 binary that boots on
+// its own on QEMU's virt machine — no operating system, no
+// runtime underneath. There is no text screen on this
+// machine, so `say` speaks over the PL011 serial line, and
+// readkey() takes bytes from the same line.
+//
+// The bare subset at work, the same shapes the x86 road
+// holds: functions with marked kinds, a while loop, a
+// repeat, whole-number division, a block of bytes written
+// and read back, text joined and compared — and the
+// machine's own gifts: memorysize() answering from the
+// device tree the loader left behind, ticks() reading the
+// machine's free-running counter, and one key echoed back.
+
+make greet(name: text) -> text {
+    give "Hello, " + name + "."
+}
+
+make square(n: number) -> number {
+    give n * n
+}
+
+say "Nifla stands on ARM."
+say "Memory: " + memorysize()
+say greet("virt machine")
+
+let total = 0
+let n = 1
+while n <= 10 {
+    total = total + n
+    n = n + 1
+}
+say "One to ten adds to " + total
+say "Square of nine is " + square(9)
+say "A hundred divided by seven is " + (100 / 7)
+say "Below zero: " + (0 - 5)
+
+let block = makebytes(4)
+block[0] = 72
+block[1] = 105
+say "Block: " + block[0] + " " + block[1]
+
+if "arm" == "arm" {
+    say "Words match."
+}
+
+repeat 3 {
+    say "Again."
+}
+
+let first = ticks()
+waittick()
+let second = ticks()
+if second > first {
+    say "Ticks advance."
+} else {
+    say "Ticks stood still."
+}
+
+say "Send a key and I will echo it."
+let key = 0
+while key == 0 {
+    waittick()
+    key = readkey()
+}
+if key == 122 {
+    say "Echo: z"
+} else {
+    say "Echo: " + key
+}

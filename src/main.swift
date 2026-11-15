@@ -15,6 +15,11 @@
 //                          card on it, making a .feather — the
 //                          form a host's door receives
 //                          (Stone 20; see BareCompiler.swift)
+//   niflac --bare --arm program.nifla
+//                          compile the bare-metal subset for
+//                          aarch64 — QEMU's virt machine, the
+//                          serial line its voice (Stone 23;
+//                          see BareCompilerARM.swift)
 //   feathercheck file.feather
 //                          read a .feather and answer in
 //                          plain words whether its card is

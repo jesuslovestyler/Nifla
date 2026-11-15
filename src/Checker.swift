@@ -131,6 +131,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "find": BuiltinRule(result: .number, needs: [([.text], "some text to look in"), ([.text], "some text to look for")]),
     "append": BuiltinRule(result: .list, needs: [([.list], "a list to add to"), (nil, "")]),
     "readfile": BuiltinRule(result: .text, needs: [([.text], "the name of a file, as text")]),
+    "readbytes": BuiltinRule(result: .bytes, needs: [([.text], "the name of a file, as text")]),
     "writefile": BuiltinRule(result: .number, needs: [([.text], "the name of a file, as text"), ([.text], "some text to write")]),
     "arguments": BuiltinRule(result: .list, needs: []),
     "makebytes": BuiltinRule(result: .bytes, needs: [([.number], "a number saying how many bytes to make")]),

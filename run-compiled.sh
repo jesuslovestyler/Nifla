@@ -44,10 +44,10 @@ fi
 
 # The notefile example (Stone 6) writes this note while it runs;
 # start and finish with it tidied away.
-rm -f stone6-note.txt
+rm -f stone6-note.txt stone25-bytes.txt
 
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"; rm -f stone6-note.txt' EXIT
+trap 'rm -rf "$WORK"; rm -f stone6-note.txt stone25-bytes.txt' EXIT
 
 pass=0
 fail=0

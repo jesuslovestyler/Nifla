@@ -55,7 +55,7 @@ fi
 pass=0
 fail=0
 total=0
-rm -f stone6-note.txt
+rm -f stone6-note.txt stone25-bytes.txt
 for f in examples/*.nifla; do
     name=$(basename "$f" .nifla)
     total=$((total + 1))
@@ -93,6 +93,6 @@ for f in examples/*.nifla; do
         fi
     fi
 done
-rm -f stone6-note.txt
+rm -f stone6-note.txt stone25-bytes.txt
 echo "Self-hosted suite: $pass passed, $fail failed (of $total examples)"
 [ "$fail" -eq 0 ]

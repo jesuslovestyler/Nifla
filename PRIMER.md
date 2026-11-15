@@ -630,6 +630,27 @@ Shalom
 6
 ```
 
+`readbytes(path)` (Stone 25) reads a file the other way:
+not as text, but as the bytes it is, into a block of
+bytes — the reader for files whose contents are not
+text at all, like a feather's program bytes, which
+`readfile` honestly refuses. The same 16 MiB cap as
+`makebytes` applies.
+
+```nifla
+writefile("note.txt", "Shalom")
+let block = readbytes("note.txt")
+say length(block)
+say block[0]
+say block[5]
+```
+
+```expected
+6
+83
+109
+```
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

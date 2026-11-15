@@ -2189,6 +2189,92 @@ and the x86 bare road's output is unchanged.
   did, and is the one the kernel uses. Recorded so
   the next reader does not re-walk the dead end.
 
+## Stone 25 — the first self-made tool (November 15, 2026)
+
+The toolchain has made its first tool out of itself:
+`tools/feathercheck.nifla` is the Stone 21 feather
+checker rewritten in Nifla, compiled by niflac into a
+standalone program through the repo's normal flow. It
+reads a `.feather` and answers in the hosted checker's
+own words — name, needs, stated and reckoned byte
+counts and checksums, and the verdict line — with the
+same exit codes (0 true, 1 not true or damaged, 2
+called wrongly). Both checkers stay in the repo: the
+hosted one as part of the compiler's own binary, and
+this one as the proof that the language can carry its
+own tools.
+
+Writing it needed one honest addition to the language
+first. A feather's program bytes are not text, and
+`readfile` — which reads a file as UTF-8 text —
+honestly refuses them; a checker written in Nifla had
+no way to read the file it exists to check. So the
+toolbox gained **`readbytes(path)`**: a file read as
+the bytes it is, into a block of bytes, under the
+same 16 MiB cap as `makebytes`. It stands in every
+mirror — the interpreter, the compiled runtime, the
+checker's rules, and the self-host (whose bytes are a
+list of byte values, so its readbytes unpacks the
+host's block into that shape) — with an example in
+the suites and its place in the Primer. Bare metal
+does not gain it: bare programs have no files, and
+the bare validator refuses it as it refuses
+`readfile`, by not knowing it.
+
+The reckoning itself is done in 16-bit limbs. A
+64-bit FNV-1a hash times its prime overflows the
+2^53 up to which Nifla's numbers are whole and
+exact, so the checker carries the hash as four
+16-bit limbs and multiplies limb by limb — every
+product and carry stays small and exact. Two helpers
+do work the language has no single word for, and
+they are written in the language too: `floordiv`,
+which reads a whole-number quotient off a division's
+spoken form (with the n < d road said directly, since
+small fractions can speak in the e-notation), and
+`xorbyte`, which works a byte's XOR out bit by bit.
+The whole check runs well inside the runaway guards,
+interpreted as well as compiled.
+
+Standing proof: `run-selfmade.sh` — it builds the
+Nifla checker and runs both checkers across the
+whole feather corpus (a true feather, one with a
+byte flipped in its program, one with a damaged
+card, the OS's own welcome feather, a missing file,
+and a wrongly-made call) and requires their answers
+to be identical: every line of output and every exit
+code. They are.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The toolchain can build its own tools: the feather
+  checker exists in the language it serves, and its
+  agreement with the hosted checker is a standing
+  proof, not a claim.
+- The toolbox can read a file as bytes (`readbytes`),
+  the reader any byte-honest tool needs.
+
+**Remaining, named:**
+
+- **One rendering edge, verdicts unaffected:** on a
+  card whose name or needs line holds bytes outside
+  the printable characters, the hosted checker prints
+  the line with the decoder's replacement characters,
+  while the Nifla checker skips the unclean bytes in
+  what it prints. The verdicts agree either way (an
+  unclean first line is refused by both); only the
+  printed name can differ, on cards no honest feather
+  carries.
+- **A stated byte count beyond exact whole-number
+  reach** (a card claiming more than 2^53 bytes) is
+  reckoned by the Nifla checker in the language's
+  numbers, which are not exact out there; the hosted
+  checker refuses such a card's line as not a whole
+  number. No real feather is within reach of the
+  difference.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

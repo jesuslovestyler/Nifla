@@ -316,6 +316,7 @@ let builtinTools: [String: BuiltinDef] = [
     "find": BuiltinDef(params: ["text", "piece"], example: "find(\"Tyler\", \"y\")"),
     "append": BuiltinDef(params: ["list", "value"], example: "append(items, 4)"),
     "readfile": BuiltinDef(params: ["path"], example: "readfile(\"notes.txt\")"),
+    "readbytes": BuiltinDef(params: ["path"], example: "readbytes(\"notes.txt\")"),
     "writefile": BuiltinDef(params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")"),
     "arguments": BuiltinDef(params: [], example: "arguments()"),
     "makebytes": BuiltinDef(params: ["count"], example: "makebytes(8)"),
@@ -951,6 +952,29 @@ final class Interpreter {
             } catch {
                 throw NiflaError(line: line, message: "I couldn't read the file '\(path)'. Check the name and the folder, and try again.")
             }
+
+        case "readbytes":
+            // Stone 25: a file read as the bytes it is, not
+            // as text — the reader the feather checker is
+            // written with, since a feather's program bytes
+            // are not text and 'readfile' honestly refuses
+            // them. The block holds the file's bytes whole,
+            // under the same 16 MiB cap as 'makebytes'.
+            guard case .text(let path) = args[0] else {
+                throw NiflaError(line: line, message: "'readbytes' needs the name of a file, as text, but it was given \(args[0].described).")
+            }
+            let data: Data
+            do {
+                data = try Data(contentsOf: URL(fileURLWithPath: path))
+            } catch {
+                throw NiflaError(line: line, message: "I couldn't read the file '\(path)'. Check the name and the folder, and try again.")
+            }
+            guard data.count <= 16_777_216 else {
+                throw NiflaError(line: line, message: "'readbytes' read the file '\(path)', but it holds \(data.count) bytes, and one block can hold at most 16777216 bytes.")
+            }
+            let block = NiflaBytes(count: data.count)
+            block.data = [UInt8](data)
+            return .bytes(block)
 
         case "writefile":
             guard case .text(let path) = args[0] else {

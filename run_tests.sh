@@ -24,7 +24,7 @@ fi
 
 # The notefile example (Stone 6) writes this note while it runs;
 # start and finish with it tidied away.
-rm -f stone6-note.txt
+rm -f stone6-note.txt stone25-bytes.txt
 
 pass=0
 fail=0
@@ -66,7 +66,7 @@ for program in examples/*.nifla; do
     rm -f "$out" "$err"
 done
 
-rm -f stone6-note.txt
+rm -f stone6-note.txt stone25-bytes.txt
 
 echo "---"
 echo "$pass passed, $fail failed"

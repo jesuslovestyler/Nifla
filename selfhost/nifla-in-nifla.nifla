@@ -3585,9 +3585,9 @@ make takesText(params) {
 // stones; 'makebytes' and the bytes it makes are mirrored here
 // with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"]]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -3752,6 +3752,30 @@ make runBuiltin(name, args, line) {
             give errAt(line, problem)
         }
         give okVal(vText(contents))
+    }
+    if name == "readbytes" {
+        if args[0].kind != "text" {
+            give errAt(line, "'readbytes' needs the name of a file, as text, but it was given " + described(args[0]) + ".")
+        }
+        // Stone 25: the host's readbytes gives a block of
+        // bytes; this interpreter's bytes are a list of byte
+        // values (the vBytes shape), so the block is unpacked
+        // into that shape here. The host's failure is caught
+        // and re-said with this program's line, as readfile's
+        // is above.
+        let block = makebytes(0)
+        attempt {
+            block = readbytes(args[0].text)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        let data = []
+        let i = 0
+        while i < length(block) {
+            append(data, block[i])
+            i = i + 1
+        }
+        give okVal(vBytes(data))
     }
     if name == "writefile" {
         if args[0].kind != "text" {

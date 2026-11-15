@@ -133,7 +133,7 @@ drive() {
 ./niflac --bare --arm bare-examples/nifla-arm.nifla -o "$WORK/nifla-arm.elf" >/dev/null \
     || fail "the ARM example did not compile."
 [ -f "$WORK/nifla-arm.elf" ] || fail "the ARM build left no binary behind."
-drive "$WORK/nifla-arm.elf" "Echo:" >"$WORK/serial.txt" || fail "the serial drive failed."
+drive "$WORK/nifla-arm.elf" "Echo: z" >"$WORK/serial.txt" || fail "the serial drive failed."
 
 for line in \
     "Nifla stands on ARM." \

@@ -1,0 +1,14 @@
+// Reading a file as bytes (Stone 25): readbytes reads a
+// whole file into a block of bytes — the file as it is, not
+// as text. readfile reads text, and honestly refuses a file
+// whose bytes are not text; readbytes holds any file's
+// bytes whole, which is what a tool that reckons over a
+// feather's program bytes needs. This program writes a
+// note, reads it back as bytes, and says what it holds.
+// (The test runs tidy the note file away when they finish.)
+let written = writefile("stone25-bytes.txt", "Shalom!")
+say written
+let block = readbytes("stone25-bytes.txt")
+say length(block)
+say block[0]
+say block[6]

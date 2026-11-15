@@ -1,0 +1,163 @@
+// A disk (Stone 16): the program reads a marker sector the
+// proof script wrote on the disk before the machine started,
+// asks the drive how many sectors it holds, and either finds
+// its own message already on the disk (it was written by an
+// earlier boot — it persisted) or writes it, reads it back,
+// and checks it. run-bare-disk.sh boots the machine twice on
+// the same scratch disk and reads the screen both times: the
+// first boot must say it wrote the message, the second must
+// find it there.
+
+// Shows the first 'count' bytes of a block of bytes at a row.
+make showbytes(b, row, count) {
+    floor(b, row, count) {
+        mov rax, [r10]
+        mov rdx, 0xB8000
+        shl rax, 1
+        imul rax, 80
+        add rdx, rax
+        mov r8, [r10 + 8]
+        mov rcx, 0
+    sb_loop:
+        cmp rcx, r8
+        jae sb_done
+        mov al, [rbx + rcx]
+        mov [rdx + rcx * 2], al
+        mov byte ptr [rdx + rcx * 2 + 1], 0x07
+        inc rcx
+        jmp sb_loop
+    sb_done:
+    }
+}
+
+// Shows a piece of text at a row.
+make showtext(t, row) {
+    floor(t, row) {
+        mov rax, [r10]
+        mov rdx, 0xB8000
+        shl rax, 1
+        imul rax, 80
+        add rdx, rax
+        mov rcx, 0
+    st_loop:
+        cmp rcx, r12
+        jae st_done
+        mov al, [rbx + rcx]
+        mov [rdx + rcx * 2], al
+        mov byte ptr [rdx + rcx * 2 + 1], 0x07
+        inc rcx
+        jmp st_loop
+    st_done:
+    }
+}
+
+// Shows a whole number's digits at a row and column.
+make shownum(n, row, col) {
+    floor(n, row, col) {
+        push r11
+        mov rax, [r10 + 8]
+        imul rax, 160
+        mov rcx, [r10 + 16]
+        shl rcx, 1
+        add rax, rcx
+        add rax, 0xB8000
+        mov r8, rax
+        mov rax, [r10]
+        mov r9, rax
+        mov ecx, 1
+    sn_count:
+        cmp r9, 10
+        jb sn_write
+        mov rax, r9
+        xor edx, edx
+        mov r11, 10
+        div r11
+        mov r9, rax
+        inc rcx
+        jmp sn_count
+    sn_write:
+        mov rax, [r10]
+        lea rdi, [r8 + rcx * 2]
+        sub rdi, 2
+    sn_loop:
+        xor edx, edx
+        mov r11, 10
+        div r11
+        add dl, 48
+        mov byte ptr [rdi], dl
+        mov byte ptr [rdi + 1], 0x07
+        sub rdi, 2
+        test rax, rax
+        jnz sn_loop
+        pop r11
+    }
+}
+
+let block = makebytes(512)
+let n = diskread(4, block)
+showbytes(block, 0, 32)
+showtext("sectors on this disk:", 1)
+shownum(disksectors(), 1, 22)
+
+let msg = makebytes(512)
+let m = diskread(9, msg)
+
+let score = 0
+if msg[0] == 78 {
+    score = score + 1
+}
+if msg[1] == 73 {
+    score = score + 1
+}
+if msg[13] == 69 {
+    score = score + 1
+}
+
+if score == 3 {
+    showbytes(msg, 2, 14)
+    showtext("FOUND - it persisted", 3)
+} else {
+    msg[0] = 78
+    msg[1] = 73
+    msg[2] = 70
+    msg[3] = 76
+    msg[4] = 65
+    msg[5] = 32
+    msg[6] = 87
+    msg[7] = 65
+    msg[8] = 83
+    msg[9] = 32
+    msg[10] = 72
+    msg[11] = 69
+    msg[12] = 82
+    msg[13] = 69
+    floor(msg) {
+        mov rcx, 14
+    wm_loop:
+        cmp rcx, 512
+        jae wm_done
+        mov rax, rcx
+        mov byte ptr [rbx + rcx], al
+        inc rcx
+        jmp wm_loop
+    wm_done:
+    }
+    let w = diskwrite(9, msg)
+    let back = makebytes(512)
+    let r3 = diskread(9, back)
+    let ok = 1
+    if back[0] != 78 {
+        ok = 0
+    }
+    if back[100] != 100 {
+        ok = 0
+    }
+    if back[511] != 255 {
+        ok = 0
+    }
+    if ok == 1 {
+        showtext("WROTE - and read it back", 3)
+    } else {
+        showtext("WRITE CHECK FAILED", 3)
+    }
+}

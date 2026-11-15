@@ -1218,6 +1218,102 @@ Honest limits of Stone 15:
   a program function with the same name collide, and the
   checker says so.
 
+## Stone 16 — a disk
+
+Laid on **November 15, 2026**, fifth of the six. Bare metal
+could see, hear, remember, and speak — but nothing it made
+outlived the power. This stone gives it a disk: whole
+sectors, read and written, that are still there when the
+machine boots again.
+
+**The controller, chosen plainly.** The first form speaks
+**ATA PIO on the primary IDE channel** — ports 0x1F0–0x1F7,
+the master drive, 28-bit LBA — because that is the drive
+the proof machine (and most simple emulators and old
+boards) attaches first, and because programmed I/O needs
+no DMA buffers, no bus-mastering setup, and no interrupt
+plumbing: the runtime polls the status port until the
+drive is ready, then moves 256 words through the data
+port. Polling only, honestly: the timer and keyboard
+interrupts from Stone 12 keep their own business, and the
+disk waits are bounded — a drive that never answers stops
+the machine rather than hanging it forever.
+
+**The tools** are bare-only, with plain names:
+
+- `disksectors()` — how many 512-byte sectors the attached
+  disk holds, asked of the drive itself (its IDENTIFY
+  answer). No drive, or one that won't say: the answer is
+  0, not a stopped machine — a program can ask first.
+- `diskread(sector, block)` — reads one whole sector into
+  a `bytes` block, and gives back 512.
+- `diskwrite(sector, block)` — writes one whole sector
+  from a `bytes` block, flushes the drive's cache, and
+  gives back 512.
+
+The block must hold at least a sector — a smaller one
+stops the machine, rather than reading or writing past
+its end. A read or write the drive refuses (or no drive
+at all) likewise stops the machine: these are raw-sector
+tools, and a silent half-write is worse than a halt.
+Hosted Nifla refuses the three names the ordinary way —
+they are the bare machine's tools, like `ticks()` and
+`memorysize()` before them.
+
+**A note on the road here.** The runtime's growth pushed
+the multiboot header — which a loader looks for in the
+file's first 8192 bytes — past that window in its own
+section, and the emulator refused the program whole. The
+header now stands as the first bytes of the text section
+itself, where it cannot drift; every bare proof re-passed
+after the move.
+
+**The proof** is `bare-examples/nifla-disk.nifla`, run by
+`./run-bare-disk.sh`. The script makes a scratch disk
+image — 8 MiB, a known marker written at sector 4, sector
+9 blank — and boots the program twice against it. Boot 1
+must show the marker it read ("DISK MARKER SECTOR"), the
+disk's size in sectors as the drive reported it
+("sectors on this disk: 16384"), and its own verdict
+"WROTE - and read it back", after writing a message and a
+counting pattern to sector 9 and reading them back. Boot 2
+— a fresh machine, the same image — must show the marker
+again, the count again, the message itself ("NIFLA WAS
+HERE"), and "FOUND - it persisted". It prints PASS — and
+it does.
+
+```sh
+./run-bare-disk.sh   # bare metal: PASS — sectors read and written on a scratch image, persisting across boots
+```
+
+**SAFETY, in plain words:** these tools address **raw
+sectors of an attached disk** — no partitions, no
+filesystem, no names, no undo. Sector numbers are the
+disk's own. The proofs only ever attach the scratch image
+the script itself creates; a program (or a person) that
+points `diskwrite` at a real disk's early sectors will
+destroy whatever lives there. That is what the tool is;
+handle it like one.
+
+Honest limits of Stone 16:
+
+- **Primary channel, master drive, ATA PIO, LBA28** —
+  one disk, the first one. No second channel, no slave,
+  no SATA/AHCI, no NVMe, no DMA, no 48-bit LBA: disks
+  past 128 GiB report their LBA28 size and only their
+  first stretch is addressable.
+- **Whole 512-byte sectors only.** Read or write a part
+  of a sector by moving the whole sector through a block
+  and changing the bytes you mean to change — as the
+  proof does.
+- **Polling, with bounded waits.** A healthy drive
+  answers at once; a dead or missing one stops the
+  machine on read/write (and answers 0 to
+  `disksectors()`), never corrupts quietly.
+- No partitions and no filesystem: the program owns the
+  meaning of every sector number itself. The guest door
+  (Stone 17) is the first tenant of that arrangement.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

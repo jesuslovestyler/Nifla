@@ -52,12 +52,18 @@ import Foundation
 // translator emits them as reads of the machine itself.
 // Stone 12 gave the first three: the timer's tick count, the
 // keyboard's next scancode, and a wait for the next tick.
-// Later bare stones add their own here.
+// Later bare stones add their own here. Stone 13 added
+// memorysize(); Stone 16 adds the disk tools: disksectors(),
+// and diskread / diskwrite, which move one whole 512-byte
+// sector between the disk and a block of bytes.
 let bareOnlyTools: [String: Int] = [
     "ticks": 0,
     "readkey": 0,
     "waittick": 0,
     "memorysize": 0,
+    "disksectors": 0,
+    "diskread": 2,
+    "diskwrite": 2,
 ]
 
 // The shape of a value, as far as bare metal needs to know it.
@@ -381,6 +387,24 @@ final class BareValidator {
             // number. (The checker has verified the count
             // already; this is the same refusal in the
             // validator's own voice, for safety.)
+            if name == "diskread" || name == "diskwrite" {
+                // Stone 16: the disk tools take a sector
+                // number and a block of bytes to move the
+                // sector into or out of.
+                guard args.count == arity else {
+                    throw NiflaError(line: line, message: "'\(name)' takes 2 values (sector, block), but it was given \(args.count). Call it like: \(name)(0, block) — a sector number, and a block of bytes made with makebytes.")
+                }
+                try requireNumber(args[0], line: line, doing: "say which sector to \(name == "diskread" ? "read" : "write")")
+                var blockKind = try kindOf(args[1])
+                if blockKind == .unknown, case .variable(let varName, _) = args[1] {
+                    try pin(varName, to: .bytes, line: line)
+                    blockKind = .bytes
+                }
+                guard blockKind == .bytes else {
+                    throw NiflaError(line: line, message: "'\(name)' moves a whole sector between the disk and a block of bytes — made with makebytes, at least 512 of them — but here it was given \(kindPhrase(blockKind)).")
+                }
+                return .number
+            }
             for arg in args { _ = try kindOf(arg) }
             guard args.count == arity else {
                 throw NiflaError(line: line, message: "'\(name)' takes no values, but it was given \(args.count). It reads the machine itself — call it with nothing between the parentheses: \(name)().")
@@ -399,7 +423,7 @@ final class BareValidator {
                 return .bytes
             }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there is no screen, no files, and no one to give tools there. Bare metal keeps 'length', for measuring text and blocks of bytes.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -682,13 +706,16 @@ struct BareTranslator {
         out.append("// processor into 64-bit long mode, then the program itself.")
         out.append("    .intel_syntax noprefix")
         out.append("")
-        out.append("    .section .multiboot")
+        out.append("// The multiboot header stands as the first bytes of")
+        out.append("// the text section itself (Stone 16): a loader looks")
+        out.append("// for it in the first 8192 bytes of the file, and a")
+        out.append("// section of its own drifted past that window as the")
+        out.append("// runtime grew. First in .text, it cannot drift.")
+        out.append("    .section .text")
         out.append("    .align 4")
         out.append("    .long 0x1BADB002")
         out.append("    .long 0x2")
         out.append("    .long -(0x1BADB002 + 0x2)")
-        out.append("")
-        out.append("    .section .text")
         out.append("    .code32")
         out.append("    .globl _start32")
         out.append("_start32:")
@@ -969,6 +996,171 @@ struct BareTranslator {
         out.append("__nl_done:")
         out.append("    ret")
         out.append("")
+        out.append("// Stone 16: a disk. The drive is the primary IDE")
+        out.append("// channel's master, spoken to in ATA PIO — ports")
+        out.append("// 0x1F0 to 0x1F7, LBA28 addressing, one 512-byte")
+        out.append("// sector at a time, polled: wait for the drive to")
+        out.append("// be ready, set the sector address, give the read")
+        out.append("// (0x20) or write (0x30) command, wait for the")
+        out.append("// data request, and move 256 words through the")
+        out.append("// data port. A write is followed by a cache flush")
+        out.append("// (0xE7), so what was written is on the disk, not")
+        out.append("// only in the drive's memory. A drive that never")
+        out.append("// answers, or answers with an error, stops the")
+        out.append("// machine — except disksectors(), which asks the")
+        out.append("// drive who it is (0xEC) and simply answers 0 when")
+        out.append("// no drive replies.")
+        out.append("__nifla_disk_read:")
+        out.append("    mov rsi, rbx")
+        out.append("    mov r8, rax")
+        out.append("    call __disk_setup")
+        out.append("    mov edx, 0x1F7")
+        out.append("    mov al, 0x20")
+        out.append("    out dx, al")
+        out.append("    call __disk_wait_drq")
+        out.append("    mov rdi, rsi")
+        out.append("    mov rcx, 256")
+        out.append("    mov edx, 0x1F0")
+        out.append("    rep insw")
+        out.append("    mov rax, 512")
+        out.append("    ret")
+        out.append("__nifla_disk_write:")
+        out.append("    mov rsi, rbx")
+        out.append("    mov r8, rax")
+        out.append("    call __disk_setup")
+        out.append("    mov edx, 0x1F7")
+        out.append("    mov al, 0x30")
+        out.append("    out dx, al")
+        out.append("    call __disk_wait_drq")
+        out.append("    mov rcx, 256")
+        out.append("    mov edx, 0x1F0")
+        out.append("    rep outsw")
+        out.append("    call __disk_wait_ready")
+        out.append("    mov edx, 0x1F7")
+        out.append("    mov al, 0xE7")
+        out.append("    out dx, al")
+        out.append("    call __disk_wait_ready")
+        out.append("    mov rax, 512")
+        out.append("    ret")
+        out.append("__disk_setup:")
+        out.append("    call __disk_wait_ready")
+        out.append("    mov edx, 0x1F6")
+        out.append("    mov rax, r8")
+        out.append("    shr rax, 24")
+        out.append("    and al, 0x0F")
+        out.append("    or al, 0xE0")
+        out.append("    out dx, al")
+        out.append("    call __disk_wait_ready")
+        out.append("    mov edx, 0x1F2")
+        out.append("    mov al, 1")
+        out.append("    out dx, al")
+        out.append("    mov edx, 0x1F3")
+        out.append("    mov rax, r8")
+        out.append("    out dx, al")
+        out.append("    mov edx, 0x1F4")
+        out.append("    mov rax, r8")
+        out.append("    shr rax, 8")
+        out.append("    out dx, al")
+        out.append("    mov edx, 0x1F5")
+        out.append("    mov rax, r8")
+        out.append("    shr rax, 16")
+        out.append("    out dx, al")
+        out.append("    ret")
+        out.append("__disk_wait_ready:")
+        out.append("    mov rcx, 10000000")
+        out.append("__dwr_loop:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    in al, dx")
+        out.append("    cmp al, 0xFF")
+        out.append("    je __halt_trap")
+        out.append("    test al, 0x80")
+        out.append("    jz __dwr_check")
+        out.append("    dec rcx")
+        out.append("    jnz __dwr_loop")
+        out.append("    jmp __halt_trap")
+        out.append("__dwr_check:")
+        out.append("    test al, 0x21")
+        out.append("    jnz __halt_trap")
+        out.append("    ret")
+        out.append("__disk_wait_drq:")
+        out.append("    mov rcx, 10000000")
+        out.append("__dwd_loop:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    in al, dx")
+        out.append("    cmp al, 0xFF")
+        out.append("    je __halt_trap")
+        out.append("    test al, 0x80")
+        out.append("    jnz __dwd_wait")
+        out.append("    test al, 0x21")
+        out.append("    jnz __halt_trap")
+        out.append("    test al, 0x08")
+        out.append("    jnz __dwd_done")
+        out.append("__dwd_wait:")
+        out.append("    dec rcx")
+        out.append("    jnz __dwd_loop")
+        out.append("    jmp __halt_trap")
+        out.append("__dwd_done:")
+        out.append("    ret")
+        out.append("__nifla_disk_sectors:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    in al, dx")
+        out.append("    cmp al, 0xFF")
+        out.append("    je __ds_none")
+        out.append("    test al, al")
+        out.append("    jz __ds_none")
+        out.append("    mov rcx, 10000000")
+        out.append("__ds_wait:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    in al, dx")
+        out.append("    test al, 0x80")
+        out.append("    jz __ds_sel")
+        out.append("    dec rcx")
+        out.append("    jnz __ds_wait")
+        out.append("    jmp __ds_none")
+        out.append("__ds_sel:")
+        out.append("    mov edx, 0x1F6")
+        out.append("    mov al, 0xE0")
+        out.append("    out dx, al")
+        out.append("    mov rcx, 100000")
+        out.append("__ds_settle:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    in al, dx")
+        out.append("    test al, 0x80")
+        out.append("    jz __ds_cmd")
+        out.append("    dec rcx")
+        out.append("    jnz __ds_settle")
+        out.append("    jmp __ds_none")
+        out.append("__ds_cmd:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    mov al, 0xEC")
+        out.append("    out dx, al")
+        out.append("    mov rcx, 10000000")
+        out.append("__ds_drq:")
+        out.append("    mov edx, 0x1F7")
+        out.append("    in al, dx")
+        out.append("    cmp al, 0xFF")
+        out.append("    je __ds_none")
+        out.append("    test al, 0x80")
+        out.append("    jnz __ds_drq_wait")
+        out.append("    test al, 0x01")
+        out.append("    jnz __ds_none")
+        out.append("    test al, 0x08")
+        out.append("    jnz __ds_read")
+        out.append("__ds_drq_wait:")
+        out.append("    dec rcx")
+        out.append("    jnz __ds_drq")
+        out.append("    jmp __ds_none")
+        out.append("__ds_read:")
+        out.append("    mov rdi, offset __disk_id_buf")
+        out.append("    mov rcx, 256")
+        out.append("    mov edx, 0x1F0")
+        out.append("    rep insw")
+        out.append("    mov eax, dword ptr [__disk_id_buf + 120]")
+        out.append("    ret")
+        out.append("__ds_none:")
+        out.append("    xor eax, eax")
+        out.append("    ret")
+        out.append("")
         out.append("// Stone 12: the machine learns to listen. An interrupt")
         out.append("// table is built and loaded; the two interrupt")
         out.append("// controllers (the PIC pair) are remapped so the timer")
@@ -1184,6 +1376,8 @@ struct BareTranslator {
         out.append("    .skip 8")
         out.append("__numtext_buf:")
         out.append("    .skip 32")
+        out.append("__disk_id_buf:")
+        out.append("    .skip 512")
         out.append("__guard_passes:")
         out.append("    .skip 8")
         out.append("__guard_depth:")
@@ -1591,6 +1785,28 @@ struct BareTranslator {
             emit("    mov rax, [__mem_total]")
             return
         }
+        if name == "disksectors" {
+            // Stone 16: the disk's size, in sectors, from the
+            // drive itself (0 when no drive answers).
+            emit("    call __nifla_disk_sectors")
+            return
+        }
+        if name == "diskread" || name == "diskwrite" {
+            // Stone 16: one whole 512-byte sector moves
+            // between the disk and a block of bytes. A block
+            // smaller than a sector stops the machine — the
+            // sector would not fit, and part of a sector is
+            // not a thing the disk moves.
+            emitExpr(args[0])
+            emit("    push rax")
+            emitExpr(args[1])
+            emit("    cmp rdx, 512")
+            emit("    jb __halt_trap")
+            emit("    mov rbx, rax")
+            emit("    pop rax")
+            emit(name == "diskread" ? "    call __nifla_disk_read" : "    call __nifla_disk_write")
+            return
+        }
         if name == "ticks" {
             emit("    mov rax, [__ticks]")
             return
@@ -1732,7 +1948,6 @@ func compileBare(inputPath: String, output: String?, program: [Stmt], fail: (Str
         ENTRY(_start32)
         SECTIONS {
             . = 0x100000;
-            .multiboot : { *(.multiboot) }
             .text : { *(.text) }
             .rodata : { *(.rodata) }
             .data : { *(.data) }

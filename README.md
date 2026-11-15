@@ -1123,6 +1123,101 @@ Honest limits of Stone 14:
   The guards still speak first for the programs they exist
   for, as the two examples now prove.
 
+## Stone 15 — words on the screen
+
+Laid on **November 14, 2026**, the same evening, fourth of
+the six. Bare metal could hold text, measure it, compare
+it, and hand it to a floor block — but it couldn't *join*
+text, couldn't write a number out as digits, and `say` was
+refused: there was no one to say it to. This stone gives
+the bare target its voice.
+
+**Joining.** `+` now joins on bare metal, the way it does
+everywhere in Nifla: text with text, and text with a whole
+number on either side (the number is written out as its
+digits first). A text is still an address and a count; a
+**joined text is a fresh block from the Stone 13
+allocator** holding the two sides side by side, owned by
+the program like any block of bytes — which means it is
+also never handed back (the allocator does not free), so a
+program that joins forever fills the heap and stops, like
+a program that makes blocks forever. A number's written
+form is built digit by digit into a fresh block of its own,
+minus sign and all.
+
+**`say` speaks to the screen.** The bare runtime keeps a
+cursor. `say` writes its value — text, or a number by its
+digits — at the cursor in the plain color, moves to a fresh
+line, wraps at a row's end, honors a newline inside the
+text, and **scrolls the screen up** when it fills. The
+screen starts cleared, so a saying program begins on a
+clean page. (The runtime's writing color is the plain
+0x07; placing words in chosen colors is the library's
+work, below.)
+
+**The screen library, and preludes.** `barelib/screen.nifla`
+is the first bare-metal library, written in Nifla: its work
+is floor work, because the screen is the processor's own
+memory. It offers `clearscreen()` and
+`writeat(row, col, text, color)`, which writes at a chosen
+place in a chosen color, stopping at the row's end. A bare
+program uses it through the build's smallest honest
+library mechanism:
+
+```sh
+niflac --bare program.nifla --prelude barelib/screen.nifla -o program.elf
+```
+
+A **prelude** is a file of function definitions laid under
+the program, as if they stood at its top; a prelude may
+only *make* functions — anything else in one is refused in
+plain words — and several may be named. To make a library's
+shapes knowable, the bare checker now settles them the way
+calls declare them: a body whose parameters were pinned by
+its calls is checked again with those shapes known, and a
+final strict pass over the floor desks refuses any handed
+value whose shape is still not known.
+
+**The proof** is `bare-examples/nifla-words.nifla`, run by
+`./run-bare-words.sh`: the first rows of the read-back
+screen must show a joined greeting ("Hello from Nifla!"),
+a join with a computed number ("2 + 3 = 5"), a line built
+a join at a time ("1 2 3 4"), a said number ("42"), and —
+placed by the library at row 10, column 20 — the word
+"Words!" whose **color byte must read 14** (yellow). It
+prints PASS — and it does. Scrolling was checked the same
+way: thirty said lines leave lines 7 to 30 on the screen,
+the cursor resting on the blank last row.
+
+```sh
+./run-bare-words.sh   # bare metal: PASS — joined words, said lines, a placed word in its color
+```
+
+Honest limits of Stone 15:
+
+- `say` shows **text and whole numbers only**. A true/false
+  value or a block of bytes is refused in plain words; join
+  a word about it, or say a byte at a time.
+- Joined texts are **never freed** (the bump allocator's
+  standing limit from Stone 13): each join takes fresh
+  memory for good. A long-running program that joins in a
+  loop spends memory as it goes and stops when the heap is
+  spent.
+- Picking one character out of a text (`text[i]`) is still
+  not part of bare metal, and neither is comparing a block
+  of bytes or joining one; the desk's rules from Stones 9
+  and 13 stand.
+- `say`'s cursor and the library's placed words are
+  independent: `writeat` does not move the cursor, and
+  `say` does not know what was placed. A program mixing
+  them lays its page out deliberately, or not at all.
+- Preludes belong to the **bare build only** for now —
+  `niflac` refuses one without `--bare`, in plain words —
+  and a prelude's definitions are simply part of the
+  program: there is no namespace, so a library function and
+  a program function with the same name collide, and the
+  checker says so.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

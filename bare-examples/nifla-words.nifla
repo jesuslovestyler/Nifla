@@ -1,0 +1,27 @@
+// Words on the screen (Stone 15): text is joined, numbers are
+// written out as digits, and 'say' shows lines on the text
+// screen — while the screen library (a prelude) places a word
+// at a chosen spot in a chosen color. Built with:
+//
+//   niflac --bare nifla-words.nifla --prelude barelib/screen.nifla -o nifla-words.elf
+//
+// run-bare-words.sh reads the screen back and checks all of
+// it, including the placed word's color byte.
+
+clearscreen()
+
+let name = "Nifla"
+say "Hello from " + name + "!"
+say "2 + 3 = " + (2 + 3)
+
+let line = ""
+let i = 1
+while i <= 4 {
+    line = line + i + " "
+    i = i + 1
+}
+say line
+say 100 - 58
+
+writeat(10, 20, "Words!", 14)
+say "done"

@@ -85,6 +85,9 @@ final class BareValidator {
 
     private var scopes: [[String: BareKind]] = []
     private var currentFunction: String? = nil
+    // Stone 15: the last validation round checks floor desks
+    // strictly (see validate()).
+    private var deskFinalCheck = false
 
     func validate(_ program: [Stmt]) throws {
         // Functions are collected from the program's top level
@@ -114,6 +117,36 @@ final class BareValidator {
             try validateStatement(statement, topLevel: true)
         }
         scopes = []
+        // Stone 15: a call pins the shapes of the values it
+        // hands a function, and bodies are checked before the
+        // calls that pin them. A library function's values may
+        // be handed straight to a floor block, whose desk must
+        // know each value's shape — so any body whose
+        // parameters were pinned by calls is checked again
+        // with those shapes known, until the shapes settle.
+        var settling = true
+        var rounds = 0
+        while settling && rounds < 8 {
+            settling = false
+            rounds += 1
+            for statement in program {
+                if case .define(let name, _, let body, _) = statement {
+                    let before = paramKinds[name]!
+                    try validateFunction(name: name, body: body)
+                    if paramKinds[name]! != before { settling = true }
+                }
+            }
+        }
+        // The final desk check: with every shape settled, any
+        // value handed to a floor block whose shape is still
+        // not known is refused (see the floor case of kindOf).
+        deskFinalCheck = true
+        for statement in program {
+            if case .define(let name, _, let body, _) = statement {
+                try validateFunction(name: name, body: body)
+            }
+        }
+        deskFinalCheck = false
     }
 
     private func validateFunction(name: String, body: [Stmt]) throws {
@@ -231,6 +264,18 @@ final class BareValidator {
                 case .boolean:
                     throw NiflaError(line: line, message: "A floor block can be handed numbers and one piece of text or block of bytes, but it was handed true or false. Hand it a number instead — 1 for true, 0 for false.")
                 case .unknown:
+                    // Inside a function, a value whose shape
+                    // a call will pin is let through until the
+                    // final desk check (see validate()) — a
+                    // library's shapes are known by its calls,
+                    // which are checked after its body. Anything
+                    // still shapeless there is refused.
+                    if currentFunction == nil || deskFinalCheck {
+                        throw NiflaError(line: line, message: "I can't tell whether this value handed to a floor block is a number or memory, and on bare metal the desk differs — numbers in a row, memory on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, a block of bytes, or a variable holding one of those.")
+                    }
+                    if case .variable = arg {
+                        break
+                    }
                     throw NiflaError(line: line, message: "I can't tell whether this value handed to a floor block is a number or memory, and on bare metal the desk differs — numbers in a row, memory on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, a block of bytes, or a variable holding one of those.")
                 }
             }
@@ -249,7 +294,27 @@ final class BareValidator {
                 let leftKind = try kindOf(left)
                 let rightKind = try kindOf(right)
                 if leftKind == .text || rightKind == .text {
-                    throw NiflaError(line: line, message: "Text can't be joined together on bare metal yet — there is no one there to own the joined text. Text there can be held, measured with length, compared, and handed to a floor block.")
+                    // Stone 15: joining. A joined text is a
+                    // fresh block from the Stone 13 allocator,
+                    // owned by the program like any block of
+                    // bytes. Numbers join by their written form,
+                    // as they do everywhere in Nifla.
+                    let other = leftKind == .text ? rightKind : leftKind
+                    if other == .boolean {
+                        throw NiflaError(line: line, message: "True and false can't be joined with text on bare metal yet — joining there joins text with text, or text with a whole number, which is written out as its digits.")
+                    }
+                    if other == .bytes {
+                        throw NiflaError(line: line, message: "A block of bytes can't be joined with text on bare metal — turn the bytes you need into numbers or text first, a byte at a time.")
+                    }
+                    if other == .unknown {
+                        let otherExpr = leftKind == .text ? right : left
+                        if case .variable(let name, _) = otherExpr {
+                            try pin(name, to: .text, line: line)
+                        } else {
+                            throw NiflaError(line: line, message: "I can't tell what kind of value this is, so I can't join it with text on bare metal. Join a piece of text, a variable holding text, or a whole number.")
+                        }
+                    }
+                    return .text
                 }
                 if leftKind == .boolean || rightKind == .boolean {
                     throw NiflaError(line: line, message: "True and false can't be added on bare metal — arithmetic there is for numbers, as it is everywhere in Nifla.")
@@ -430,8 +495,26 @@ final class BareValidator {
             }
             throw NiflaError(line: line, message: "Setting a field isn't part of bare metal yet — there are no objects there. Setting a byte in a block of bytes, like block[0] = 65, is the one setting-by-place it has.")
 
-        case .say(_, let line):
-            throw NiflaError(line: line, message: "Bare metal has no screen for 'say' yet — there is no one to say it to. To put words on the screen there, hand the text to a floor block and let it write to the screen's memory (0xB8000) itself.")
+        case .say(let value, let line):
+            // Stone 15: 'say' writes to the text screen, one
+            // line at a time, scrolling as it fills. It can
+            // show text, or a whole number (written out as its
+            // digits).
+            let kind = try kindOf(value)
+            switch kind {
+            case .text, .number:
+                break
+            case .unknown:
+                if case .variable(let name, _) = value {
+                    try pin(name, to: .text, line: line)
+                } else {
+                    throw NiflaError(line: line, message: "I can't tell what kind of value this is, so I can't say it on bare metal. Say a piece of text, a variable holding text, or a whole number.")
+                }
+            case .boolean:
+                throw NiflaError(line: line, message: "'say' on bare metal can show text or a whole number, but here it was given a true/false value. Compare it or count it first, and say the words or the number.")
+            case .bytes:
+                throw NiflaError(line: line, message: "'say' on bare metal can show text or a whole number, but here it was given a block of bytes. Say a byte at a time, like block[0], or join words about it.")
+            }
 
         case .ifElse(let condition, let then, let otherwise, let line):
             let kind = try kindOf(condition)
@@ -542,9 +625,14 @@ struct BareTranslator {
             return functions[name]?.giveKind ?? .number
         case .floor: return .number
         case .negate: return .number
-        case .binary(_, let op, _, _):
+        case .binary(let left, let op, let right, _):
             switch op {
             case "<", "<=", ">", ">=", "==", "!=": return .boolean
+            case "+":
+                // Stone 15: a join — text on either side makes
+                // the answer a piece of text.
+                if kindOf(left) == .text || kindOf(right) == .text { return .text }
+                return .number
             default: return .number
             }
         case .object, .list, .field, .index:
@@ -649,6 +737,7 @@ struct BareTranslator {
         out.append("    mov gs, ax")
         out.append("    mov ss, ax")
         out.append("    call __nifla_memory_init")
+        out.append("    call __nifla_screen_init")
         out.append("    call __nifla_interrupts_init")
         out.append("    call __nifla_main")
         out.append("__halt_trap:")
@@ -752,6 +841,132 @@ struct BareTranslator {
         out.append("    xor eax, eax")
         out.append("    rep stosb")
         out.append("    mov rax, r9")
+        out.append("    ret")
+        out.append("")
+        out.append("// Stone 15: words on the screen. A piece of text is")
+        out.append("// still an address and a count; a joined text is a")
+        out.append("// fresh block from the allocator holding the two")
+        out.append("// sides side by side, and a number's written form is")
+        out.append("// built digit by digit into a fresh block of its")
+        out.append("// own. 'say' writes at a cursor the runtime keeps,")
+        out.append("// wrapping at the row's end, stepping down a row at")
+        out.append("// a newline, and scrolling the screen up when it")
+        out.append("// fills. The writing color is the plain one, 0x07;")
+        out.append("// placing words at chosen spots in chosen colors is")
+        out.append("// the screen library's work (barelib/screen.nifla).")
+        out.append("__nifla_screen_init:")
+        out.append("    mov rdi, 0xB8000")
+        out.append("    mov rcx, 2000")
+        out.append("    mov ax, 0x0720")
+        out.append("    rep stosw")
+        out.append("    mov qword ptr [__cursor_row], 0")
+        out.append("    mov qword ptr [__cursor_col], 0")
+        out.append("    ret")
+        out.append("__nifla_numtext:")
+        out.append("    mov rcx, rax")
+        out.append("    xor r8d, r8d")
+        out.append("    test rax, rax")
+        out.append("    jns __nt_digits")
+        out.append("    mov r8d, 1")
+        out.append("    neg rcx")
+        out.append("__nt_digits:")
+        out.append("    lea rsi, [__numtext_buf + 32]")
+        out.append("    mov r9, rsi")
+        out.append("    mov rax, rcx")
+        out.append("    mov rcx, 10")
+        out.append("__nt_loop:")
+        out.append("    xor edx, edx")
+        out.append("    div rcx")
+        out.append("    add dl, 48")
+        out.append("    dec rsi")
+        out.append("    mov byte ptr [rsi], dl")
+        out.append("    test rax, rax")
+        out.append("    jnz __nt_loop")
+        out.append("    test r8d, r8d")
+        out.append("    jz __nt_copy")
+        out.append("    dec rsi")
+        out.append("    mov byte ptr [rsi], 45")
+        out.append("__nt_copy:")
+        out.append("    mov rax, r9")
+        out.append("    sub rax, rsi")
+        out.append("    push rsi")
+        out.append("    push rax")
+        out.append("    call __nifla_alloc")
+        out.append("    pop rcx")
+        out.append("    pop rsi")
+        out.append("    mov rdi, rax")
+        out.append("    rep movsb")
+        out.append("    ret")
+        out.append("__nifla_join:")
+        out.append("    push rbx")
+        out.append("    push r12")
+        out.append("    mov rbx, rax")
+        out.append("    mov r12, rcx")
+        out.append("    push rdx")
+        out.append("    push r8")
+        out.append("    mov rax, rdx")
+        out.append("    add rax, r8")
+        out.append("    call __nifla_alloc")
+        out.append("    pop r8")
+        out.append("    pop rcx")
+        out.append("    mov rdi, rax")
+        out.append("    push rax")
+        out.append("    push rdx")
+        out.append("    mov rsi, rbx")
+        out.append("    rep movsb")
+        out.append("    mov rsi, r12")
+        out.append("    mov rcx, r8")
+        out.append("    rep movsb")
+        out.append("    pop rdx")
+        out.append("    pop rax")
+        out.append("    pop r12")
+        out.append("    pop rbx")
+        out.append("    ret")
+        out.append("__nifla_say_text:")
+        out.append("    push rbx")
+        out.append("    push r12")
+        out.append("    push r13")
+        out.append("    mov rbx, rax")
+        out.append("    mov r12, rdx")
+        out.append("    xor r13d, r13d")
+        out.append("__say_loop:")
+        out.append("    cmp r13, r12")
+        out.append("    jae __say_done")
+        out.append("    movzx eax, byte ptr [rbx + r13]")
+        out.append("    inc r13")
+        out.append("    cmp al, 10")
+        out.append("    je __say_nl")
+        out.append("    mov rcx, [__cursor_row]")
+        out.append("    imul rcx, 80")
+        out.append("    add rcx, [__cursor_col]")
+        out.append("    mov byte ptr [0xB8000 + rcx * 2], al")
+        out.append("    mov byte ptr [0xB8000 + rcx * 2 + 1], 0x07")
+        out.append("    inc qword ptr [__cursor_col]")
+        out.append("    cmp qword ptr [__cursor_col], 80")
+        out.append("    jb __say_loop")
+        out.append("__say_nl:")
+        out.append("    call __nifla_say_newline")
+        out.append("    jmp __say_loop")
+        out.append("__say_done:")
+        out.append("    pop r13")
+        out.append("    pop r12")
+        out.append("    pop rbx")
+        out.append("    ret")
+        out.append("__nifla_say_newline:")
+        out.append("    mov qword ptr [__cursor_col], 0")
+        out.append("    inc qword ptr [__cursor_row]")
+        out.append("    cmp qword ptr [__cursor_row], 25")
+        out.append("    jb __nl_done")
+        out.append("    mov rsi, 0xB8000 + 160")
+        out.append("    mov rdi, 0xB8000")
+        out.append("    mov rcx, 3840")
+        out.append("    rep movsb")
+        out.append("    mov rdi, 0xB8000 + 3840")
+        out.append("    mov rcx, 80")
+        out.append("    mov ax, 0x0720")
+        out.append("    rep stosw")
+        out.append("    mov qword ptr [__cursor_row], 24")
+        out.append("__nl_done:")
         out.append("    ret")
         out.append("")
         out.append("// Stone 12: the machine learns to listen. An interrupt")
@@ -963,6 +1178,12 @@ struct BareTranslator {
         out.append("    .skip 8")
         out.append("__heap_limit:")
         out.append("    .skip 8")
+        out.append("__cursor_row:")
+        out.append("    .skip 8")
+        out.append("__cursor_col:")
+        out.append("    .skip 8")
+        out.append("__numtext_buf:")
+        out.append("    .skip 32")
         out.append("__guard_passes:")
         out.append("    .skip 8")
         out.append("__guard_depth:")
@@ -1112,7 +1333,18 @@ struct BareTranslator {
                 emit("    ud2")  // fields: refused by the validator
             }
 
-        case .say, .forEach, .attempt, .define:
+        case .say(let value, _):
+            // Stone 15: show the value on the text screen and
+            // move to a fresh line. A number is first written
+            // out as its digits.
+            emitExpr(value)
+            if kindOf(value) == .number {
+                emit("    call __nifla_numtext")
+            }
+            emit("    call __nifla_say_text")
+            emit("    call __nifla_say_newline")
+
+        case .forEach, .attempt, .define:
             // Refused by the validator; never emitted.
             emit("    ud2")
 
@@ -1250,6 +1482,28 @@ struct BareTranslator {
             emit("    neg rax")
 
         case .binary(let left, let op, let right, _):
+            if op == "+" && (kindOf(left) == .text || kindOf(right) == .text) {
+                // Stone 15: joining. Each side is made into
+                // text — a number by its digits — and
+                // __nifla_join lays the two side by side in a
+                // fresh block from the allocator.
+                emitExpr(left)
+                if kindOf(left) == .number {
+                    emit("    call __nifla_numtext")
+                }
+                emit("    push rax")
+                emit("    push rdx")
+                emitExpr(right)
+                if kindOf(right) == .number {
+                    emit("    call __nifla_numtext")
+                }
+                emit("    mov rcx, rax")
+                emit("    mov r8, rdx")
+                emit("    pop rdx")
+                emit("    pop rax")
+                emit("    call __nifla_join")
+                return
+            }
             if (op == "==" || op == "!=") && (kindOf(left) == .text || kindOf(right) == .text) {
                 emitExpr(left)
                 emit("    push rax")

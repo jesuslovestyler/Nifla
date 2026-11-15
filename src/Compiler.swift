@@ -341,11 +341,18 @@ func compileMain(arguments: [String]) -> Int32 {
     var input: String? = nil
     var output: String? = nil
     var bare = false
+    var preludes: [String] = []
     var index = 1
     while index < arguments.count {
         let argument = arguments[index]
         if argument == "--bare" {
             bare = true
+        } else if argument == "--prelude" {
+            index += 1
+            guard index < arguments.count else {
+                return fail("The '--prelude' needs the name of a file of function definitions to lay under the program, like: niflac --bare main.nifla --prelude barelib/screen.nifla -o main.elf", code: 2)
+            }
+            preludes.append(arguments[index])
         } else if argument == "-o" {
             index += 1
             guard index < arguments.count else {
@@ -371,10 +378,43 @@ func compileMain(arguments: [String]) -> Int32 {
         return fail("I couldn't open the file '\(inputPath)'. Check the name and the folder, and try again.", code: 2)
     }
 
+    // Stone 15: a bare build may lay prelude files under the
+    // program — libraries of function definitions (the screen
+    // library is the first) whose makes become part of the
+    // program, as if they stood at its top. A prelude may only
+    // make functions; anything else in one is refused in plain
+    // words. Preludes belong to the bare build, where there is
+    // no other library mechanism yet.
+    if !preludes.isEmpty && !bare {
+        return fail("Preludes (--prelude) are part of the bare-metal build for now — add '--bare' to use one, like: niflac --bare main.nifla --prelude barelib/screen.nifla -o main.elf", code: 2)
+    }
+    var preludeStatements: [Stmt] = []
+    for preludePath in preludes {
+        let preludeSource: String
+        do {
+            preludeSource = try String(contentsOf: URL(fileURLWithPath: preludePath), encoding: .utf8)
+        } catch {
+            return fail("I couldn't open the prelude file '\(preludePath)'. Check the name and the folder, and try again.", code: 2)
+        }
+        do {
+            let preludeProgram = try Parser(try Lexer(preludeSource).tokenize()).parseProgram()
+            for statement in preludeProgram {
+                guard case .define = statement else {
+                    return fail("The prelude '\(preludePath)' holds a line that isn't a function definition. A prelude may only make functions (make ...) — the program itself holds everything else.", code: 1)
+                }
+            }
+            preludeStatements += preludeProgram
+        } catch let error as NiflaError {
+            return fail("In the prelude '\(preludePath)': \(error.spoken)", code: 1)
+        } catch {
+            return fail("Something went wrong while reading the prelude '\(preludePath)'.", code: 1)
+        }
+    }
+
     let program: [Stmt]
     do {
         let tokens = try Lexer(source).tokenize()
-        program = try Parser(tokens).parseProgram()
+        program = preludeStatements + (try Parser(tokens).parseProgram())
         try Checker(program: program, forBareMetal: bare).check(program)
     } catch let error as NiflaError {
         return fail(error.spoken, code: 1)

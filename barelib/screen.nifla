@@ -1,0 +1,62 @@
+// The screen library — the first bare-metal library, laid
+// with Stone 15. A bare program uses it by naming it as a
+// prelude when it is built:
+//
+//   niflac --bare program.nifla --prelude barelib/screen.nifla -o program.elf
+//
+// A prelude may only make functions; these become part of the
+// program, as if they stood at its top. The library's work is
+// done in floor blocks, because the screen is the processor's
+// own memory (0xB8000) and writing there is floor work. It
+// keeps no state of its own: 'say' and its cursor belong to
+// the runtime, and these tools write at chosen places,
+// independently of where the cursor stands.
+//
+// The colors are the text screen's own: the low four bits
+// choose the letter's color, the high three its background —
+// 7 is the plain light-gray on black, 14 is yellow, 15 is
+// white, 4 is red. A color is handed to writeat each time, so
+// choosing a color is choosing it where you write.
+
+// Clears the whole screen to the plain color.
+make clearscreen() {
+    floor() {
+        mov rdi, 0xB8000
+        mov rcx, 2000
+        mov ax, 0x0720
+        rep stosw
+    }
+}
+
+// Writes text at a chosen row (0 to 24) and column (0 to 79),
+// in a chosen color. The text stops at the row's end — it
+// does not wrap onto the next row.
+make writeat(row, col, text, color) {
+    floor(text, row, col, color) {
+        mov rax, [r10]
+        inc rax
+        imul rax, 160
+        add rax, 0xB8000
+        mov r8, rax
+        mov rax, [r10]
+        imul rax, 80
+        add rax, [r10 + 8]
+        shl rax, 1
+        add rax, 0xB8000
+        mov rdi, rax
+        mov dl, byte ptr [r10 + 16]
+        xor ecx, ecx
+    wa_loop:
+        cmp rcx, r12
+        jae wa_done
+        cmp rdi, r8
+        jae wa_done
+        mov al, byte ptr [rbx + rcx]
+        mov ah, dl
+        mov word ptr [rdi], ax
+        add rdi, 2
+        inc rcx
+        jmp wa_loop
+    wa_done:
+    }
+}

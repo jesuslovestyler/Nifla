@@ -1972,6 +1972,35 @@ byte flipped in the program is declared not true; a
 checksum letter struck from the card is refused as
 damage. This is the doorman's test anyone can run.
 
+## Stone 22 — the Nifla Primer (November 15, 2026)
+
+The language has a book now: `PRIMER.md`, in this
+repository. It walks through every grammar word and every
+toolbox word — saying and keeping, numbers and text,
+deciding and repeating, lists and objects, functions,
+`attempt`, the toolbox tool by tool, kind marks and
+checked absence, the floor and its desk, and the bare
+subset with its own tools, guests, and feathers — each
+with a short plain explanation and a small runnable
+example, written for a reader who reads Nifla like
+JavaScript and learns by seeing code.
+
+The book cannot drift from the language: a standing proof,
+`run-primer.sh`, extracts every example from the Primer
+and runs it — interpreted, and compiled where the example
+can be compiled (floor examples compiled only, since the
+interpreter refuses floor code by design; bare examples
+compiled with `--bare`, and `--bare --guest` for the
+guest's side) — and compares the output, line for line,
+with the output the book prints. The proof joins the
+repo's test flow beside the other `run-*.sh` scripts; if
+an example ever stops being true, the proof fails. (Its
+first run earned its keep: it caught the book saying text
+inside a list speaks bare — it speaks with its quotes on —
+and `sayerr` written as a statement where it is a tool
+call. The book now says both rightly, and the proof holds
+it to them.)
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

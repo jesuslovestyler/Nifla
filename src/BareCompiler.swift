@@ -57,6 +57,7 @@ let bareOnlyTools: [String: Int] = [
     "ticks": 0,
     "readkey": 0,
     "waittick": 0,
+    "memorysize": 0,
 ]
 
 // The shape of a value, as far as bare metal needs to know it.
@@ -68,6 +69,7 @@ enum BareKind {
     case number
     case text
     case boolean
+    case bytes
     case unknown
 }
 
@@ -140,6 +142,7 @@ final class BareValidator {
         case .number: return "a number"
         case .text: return "text"
         case .boolean: return "true or false"
+        case .bytes: return "a block of bytes"
         case .unknown: return "a machine word"
         }
     }
@@ -199,26 +202,40 @@ final class BareValidator {
         case .field(_, _, let line):
             throw NiflaError(line: line, message: "Reading a field isn't part of bare metal yet — there are no objects there.")
 
-        case .index(_, _, let line):
-            throw NiflaError(line: line, message: "Taking an item by number isn't part of bare metal yet — there are no lists there. A block of bytes handed to a floor block is the one stretch of numbered memory.")
+        case .index(let base, let index, let line):
+            // Stone 13: a block of bytes is the one numbered
+            // memory on bare metal — bytes[b] reads a byte.
+            // (Lists and text still can't be indexed there.)
+            var baseKind = try kindOf(base)
+            if baseKind == .unknown, case .variable(let name, _) = base {
+                try pin(name, to: .bytes, line: line)
+                baseKind = .bytes
+            }
+            guard baseKind == .bytes else {
+                throw NiflaError(line: line, message: "Taking an item by number on bare metal works on a block of bytes — made with makebytes — but here the value being picked from is \(kindPhrase(baseKind)). Lists and text can't be picked apart there.")
+            }
+            try requireNumber(index, line: line, doing: "pick a byte")
+            return .number
 
         case .floor(_, let args, let line):
-            var textCount = 0
+            var memoryCount = 0
             for arg in args {
                 let kind = try kindOf(arg)
                 switch kind {
                 case .number:
                     break
-                case .text:
-                    textCount += 1
+                case .text, .bytes:
+                    // Text and blocks of bytes both cross on
+                    // the desk's one memory side (Stone 13).
+                    memoryCount += 1
                 case .boolean:
-                    throw NiflaError(line: line, message: "A floor block can be handed numbers and one piece of text, but it was handed true or false. Hand it a number instead — 1 for true, 0 for false.")
+                    throw NiflaError(line: line, message: "A floor block can be handed numbers and one piece of text or block of bytes, but it was handed true or false. Hand it a number instead — 1 for true, 0 for false.")
                 case .unknown:
-                    throw NiflaError(line: line, message: "I can't tell whether this value handed to a floor block is a number or text, and on bare metal the desk differs — numbers in a row, text on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, or a variable holding one of those.")
+                    throw NiflaError(line: line, message: "I can't tell whether this value handed to a floor block is a number or memory, and on bare metal the desk differs — numbers in a row, memory on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, a block of bytes, or a variable holding one of those.")
                 }
             }
-            if textCount > 1 {
-                throw NiflaError(line: line, message: "A floor block can be handed only one piece of text — the desk has one memory side (rbx and r12). Hand the rest as numbers, or write the other text from inside the block.")
+            if memoryCount > 1 {
+                throw NiflaError(line: line, message: "A floor block can be handed only one piece of text or block of bytes — the desk has one memory side (rbx and r12). Hand the rest as numbers, or work on the other memory from inside the block.")
             }
             return .number
 
@@ -237,6 +254,9 @@ final class BareValidator {
                 if leftKind == .boolean || rightKind == .boolean {
                     throw NiflaError(line: line, message: "True and false can't be added on bare metal — arithmetic there is for numbers, as it is everywhere in Nifla.")
                 }
+                if leftKind == .bytes || rightKind == .bytes {
+                    throw NiflaError(line: line, message: "A block of bytes can't be added on bare metal — arithmetic there is for numbers. Work with one byte at a time, like block[0], or hand the block to a floor block.")
+                }
                 return .number
             case "-", "*", "/":
                 try requireNumber(left, line: line, doing: "be part of arithmetic")
@@ -249,6 +269,9 @@ final class BareValidator {
             case "==", "!=":
                 let leftKind = try kindOf(left)
                 let rightKind = try kindOf(right)
+                if leftKind == .bytes || rightKind == .bytes {
+                    throw NiflaError(line: line, message: "Blocks of bytes can't be compared on bare metal — compare their lengths, or a byte at a time, like block[0] == 65.")
+                }
                 if leftKind != .unknown && rightKind != .unknown && leftKind != rightKind {
                     throw NiflaError(line: line, message: "On bare metal, comparing needs both sides to be the same kind of value — numbers with numbers, text with text — but here one side is \(kindPhrase(leftKind)) and the other is \(kindPhrase(rightKind)).")
                 }
@@ -279,6 +302,8 @@ final class BareValidator {
             throw NiflaError(line: line, message: "Text can't \(doing) — arithmetic on bare metal is for numbers, as it is everywhere in Nifla.")
         case .boolean:
             throw NiflaError(line: line, message: "True and false can't \(doing) — arithmetic on bare metal is for numbers, as it is everywhere in Nifla.")
+        case .bytes:
+            throw NiflaError(line: line, message: "A block of bytes can't \(doing) — arithmetic on bare metal is for numbers. Work with one byte at a time, like block[0], or hand the block to a floor block.")
         }
     }
 
@@ -298,15 +323,25 @@ final class BareValidator {
             return .number
         }
         if builtinTools[name] != nil {
+            if name == "makebytes" {
+                // Stone 13: blocks of bytes came to bare metal,
+                // backed by the allocator over the machine's
+                // real free memory.
+                guard args.count == 1 else {
+                    throw NiflaError(line: line, message: "'makebytes' takes 1 value (count), but it was given \(args.count).")
+                }
+                try requireNumber(args[0], line: line, doing: "say how many bytes to make")
+                return .bytes
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there is no screen, no files, and no one to give tools there. Bare metal keeps 'length', for measuring text.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there is no screen, no files, and no one to give tools there. Bare metal keeps 'length', for measuring text and blocks of bytes.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
             }
             let kind = try kindOf(args[0])
             if kind == .number || kind == .boolean {
-                throw NiflaError(line: line, message: "On bare metal 'length' measures text only — lists and objects, which it also measures in hosted Nifla, aren't there.")
+                throw NiflaError(line: line, message: "On bare metal 'length' measures text and blocks of bytes only — lists and objects, which it also measures in hosted Nifla, aren't there.")
             }
             if kind == .unknown, case .variable(let varName, _) = args[0] {
                 try pin(varName, to: .text, line: line)
@@ -321,7 +356,7 @@ final class BareValidator {
         var slots = 0
         for (index, arg) in args.enumerated() {
             let kind = try kindOf(arg)
-            slots += (kind == .text ? 2 : 1)
+            slots += (kind == .text || kind == .bytes ? 2 : 1)
             if index < info.params.count, kind != .unknown {
                 if paramKinds[name]![index] == .unknown {
                     paramKinds[name]![index] = kind
@@ -376,8 +411,24 @@ final class BareValidator {
                 try pin(name, to: kind, line: line)
             }
 
-        case .assignTarget(_, _, let line):
-            throw NiflaError(line: line, message: "Setting a field or an item isn't part of bare metal yet — there are no objects or lists there.")
+        case .assignTarget(let target, let value, let line):
+            // Stone 13: setting a byte in a block of bytes is
+            // the one setting-by-place bare metal has. Fields
+            // (objects) and list items remain outside it.
+            if case .index(let base, let index, _) = target {
+                var baseKind = try kindOf(base)
+                if baseKind == .unknown, case .variable(let name, _) = base {
+                    try pin(name, to: .bytes, line: line)
+                    baseKind = .bytes
+                }
+                guard baseKind == .bytes else {
+                    throw NiflaError(line: line, message: "Setting an item by number on bare metal works on a block of bytes — made with makebytes — but here the value being set into is \(kindPhrase(baseKind)).")
+                }
+                try requireNumber(index, line: line, doing: "pick a byte")
+                try requireNumber(value, line: line, doing: "be stored as a byte")
+                return
+            }
+            throw NiflaError(line: line, message: "Setting a field isn't part of bare metal yet — there are no objects there. Setting a byte in a block of bytes, like block[0] = 65, is the one setting-by-place it has.")
 
         case .say(_, let line):
             throw NiflaError(line: line, message: "Bare metal has no screen for 'say' yet — there is no one to say it to. To put words on the screen there, hand the text to a floor block and let it write to the screen's memory (0xB8000) itself.")
@@ -405,7 +456,7 @@ final class BareValidator {
             try validateBlock(body)
 
         case .forEach(_, _, _, let line):
-            throw NiflaError(line: line, message: "'for' isn't part of bare metal yet — there are no lists or blocks of bytes to walk there. Walk with 'while' and a counter instead.")
+            throw NiflaError(line: line, message: "'for' isn't part of bare metal yet — there are no lists there. Walk a block of bytes with 'while' and a counter instead.")
 
         case .define(let name, _, _, let line):
             if topLevel {
@@ -486,6 +537,7 @@ struct BareTranslator {
             return .number
         case .call(let name, _, _):
             if name == "length" { return .number }
+            if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             return functions[name]?.giveKind ?? .number
         case .floor: return .number
@@ -501,7 +553,7 @@ struct BareTranslator {
     }
 
     private func slots(for kind: BareKind) -> Int {
-        kind == .text ? 2 : 1
+        (kind == .text || kind == .bytes) ? 2 : 1
     }
 
     private mutating func declareVar(_ name: String, kind: BareKind) -> (offset: Int, kind: BareKind) {
@@ -545,13 +597,15 @@ struct BareTranslator {
         out.append("    .section .multiboot")
         out.append("    .align 4")
         out.append("    .long 0x1BADB002")
-        out.append("    .long 0")
-        out.append("    .long -0x1BADB002")
+        out.append("    .long 0x2")
+        out.append("    .long -(0x1BADB002 + 0x2)")
         out.append("")
         out.append("    .section .text")
         out.append("    .code32")
         out.append("    .globl _start32")
         out.append("_start32:")
+        out.append("    mov [__mb_info], ebx")
+        out.append("    mov [__mb_magic], eax")
         out.append("    mov esp, offset __stack_top")
         out.append("    mov eax, offset __pdpt")
         out.append("    or eax, 0x3")
@@ -594,6 +648,7 @@ struct BareTranslator {
         out.append("    mov fs, ax")
         out.append("    mov gs, ax")
         out.append("    mov ss, ax")
+        out.append("    call __nifla_memory_init")
         out.append("    call __nifla_interrupts_init")
         out.append("    call __nifla_main")
         out.append("__halt_trap:")
@@ -620,6 +675,83 @@ struct BareTranslator {
         out.append("    ret")
         out.append("__text_eq_no:")
         out.append("    xor eax, eax")
+        out.append("    ret")
+        out.append("")
+        out.append("// Stone 13: the machine learns what memory it has.")
+        out.append("// The loader handed over a map of the machine's")
+        out.append("// memory (the multiboot map, asked for in the")
+        out.append("// header); this walk adds up the usable stretches")
+        out.append("// into __mem_total, and finds the usable stretch")
+        out.append("// the program itself sits in — everything from the")
+        out.append("// program's end to that stretch's end is the heap.")
+        out.append("// The allocator is a bump allocator: each makebytes")
+        out.append("// takes the next slice, rounded up to a whole 16")
+        out.append("// bytes, and zeroes it. Nothing is ever handed")
+        out.append("// back — there is no free — and a request past the")
+        out.append("// heap's end, or past one block's 16 MiB cap, stops")
+        out.append("// the machine rather than corrupt anything.")
+        out.append("__nifla_memory_init:")
+        out.append("    mov eax, [__mb_magic]")
+        out.append("    cmp eax, 0x2BADB002")
+        out.append("    jne __mem_done")
+        out.append("    mov esi, [__mb_info]")
+        out.append("    test rsi, rsi")
+        out.append("    jz __mem_done")
+        out.append("    mov eax, [rsi]")
+        out.append("    test eax, 0x40")
+        out.append("    jz __mem_done")
+        out.append("    mov ecx, [rsi + 44]")
+        out.append("    mov esi, [rsi + 48]")
+        out.append("    mov rdx, rsi")
+        out.append("    add rdx, rcx")
+        out.append("__mem_walk:")
+        out.append("    cmp rsi, rdx")
+        out.append("    jae __mem_done")
+        out.append("    cmp dword ptr [rsi + 20], 1")
+        out.append("    jne __mem_next")
+        out.append("    mov rax, [rsi + 12]")
+        out.append("    add [__mem_total], rax")
+        out.append("    mov rax, [rsi + 4]")
+        out.append("    mov r8, offset __kernel_end")
+        out.append("    cmp r8, rax")
+        out.append("    jb __mem_next")
+        out.append("    add rax, [rsi + 12]")
+        out.append("    cmp r8, rax")
+        out.append("    jae __mem_next")
+        out.append("    mov [__heap_limit], rax")
+        out.append("__mem_next:")
+        out.append("    mov eax, [rsi]")
+        out.append("    add rax, 4")
+        out.append("    add rsi, rax")
+        out.append("    jmp __mem_walk")
+        out.append("__mem_done:")
+        out.append("    mov rax, offset __kernel_end")
+        out.append("    add rax, 15")
+        out.append("    and rax, -16")
+        out.append("    mov [__heap_cursor], rax")
+        out.append("    ret")
+        out.append("")
+        out.append("// makebytes' engine: a count in rax becomes a block")
+        out.append("// — its address in rax, its count in rdx.")
+        out.append("__nifla_alloc:")
+        out.append("    cmp rax, 16777216")
+        out.append("    ja __halt_trap")
+        out.append("    mov rdx, rax")
+        out.append("    add rax, 15")
+        out.append("    and rax, -16")
+        out.append("    mov r8, rax")
+        out.append("    mov rax, [__heap_cursor]")
+        out.append("    mov rcx, rax")
+        out.append("    add rcx, r8")
+        out.append("    cmp rcx, [__heap_limit]")
+        out.append("    ja __halt_trap")
+        out.append("    mov [__heap_cursor], rcx")
+        out.append("    mov r9, rax")
+        out.append("    mov rdi, rax")
+        out.append("    mov rcx, r8")
+        out.append("    xor eax, eax")
+        out.append("    rep stosb")
+        out.append("    mov rax, r9")
         out.append("    ret")
         out.append("")
         out.append("// Stone 12: the machine learns to listen. An interrupt")
@@ -821,6 +953,16 @@ struct BareTranslator {
         out.append("__key_buf:")
         out.append("    .skip 64")
         out.append("    .align 8")
+        out.append("__mb_info:")
+        out.append("    .skip 8")
+        out.append("__mb_magic:")
+        out.append("    .skip 8")
+        out.append("__mem_total:")
+        out.append("    .skip 8")
+        out.append("__heap_cursor:")
+        out.append("    .skip 8")
+        out.append("__heap_limit:")
+        out.append("    .skip 8")
         out.append("__guard_passes:")
         out.append("    .skip 8")
         out.append("__guard_depth:")
@@ -944,7 +1086,33 @@ struct BareTranslator {
             emitExpr(value)
             emitStore(lookupVar(name))
 
-        case .say, .assignTarget, .forEach, .attempt, .define:
+        case .assignTarget(let target, let value, _):
+            // Stone 13: setting a byte in a block of bytes —
+            // the one setting-by-place bare metal has. The
+            // validator has proven the shape; a pick outside
+            // the block, or a value that isn't a byte, stops
+            // the machine.
+            if case .index(let base, let index, _) = target {
+                emitExpr(base)
+                emit("    push rax")
+                emit("    push rdx")
+                emitExpr(index)
+                emit("    push rax")
+                emitExpr(value)
+                emit("    mov r8, rax")
+                emit("    pop rax")
+                emit("    pop rdx")
+                emit("    pop rcx")
+                emit("    cmp rax, rdx")
+                emit("    jae __halt_trap")
+                emit("    cmp r8, 255")
+                emit("    ja __halt_trap")
+                emit("    mov byte ptr [rcx + rax], r8b")
+            } else {
+                emit("    ud2")  // fields: refused by the validator
+            }
+
+        case .say, .forEach, .attempt, .define:
             // Refused by the validator; never emitted.
             emit("    ud2")
 
@@ -1008,10 +1176,10 @@ struct BareTranslator {
         }
     }
 
-    // Stores the value in rax (and rdx, for text) into a
-    // variable's slot(s).
+    // Stores the value in rax (and rdx, for a two-word value —
+    // text, or a block of bytes) into a variable's slot(s).
     private mutating func emitStore(_ entry: (offset: Int, kind: BareKind)) {
-        if entry.kind == .text {
+        if slots(for: entry.kind) == 2 {
             emit("    mov [rbp - \(entry.offset - 8)], rax")
             emit("    mov [rbp - \(entry.offset)], rdx")
         } else {
@@ -1038,7 +1206,7 @@ struct BareTranslator {
 
         case .variable(let name, _):
             let entry = lookupVar(name)
-            if entry.kind == .text {
+            if slots(for: entry.kind) == 2 {
                 emit("    mov rax, [rbp - \(entry.offset - 8)]")
                 emit("    mov rdx, [rbp - \(entry.offset)]")
             } else {
@@ -1054,7 +1222,9 @@ struct BareTranslator {
             var numberIndex = 0
             var hasText = false
             for arg in args {
-                if kindOf(arg) == .text {
+                if slots(for: kindOf(arg)) == 2 {
+                    // Text, or a block of bytes (Stone 13): both
+                    // cross on the desk's memory side.
                     emitExpr(arg)
                     emit("    mov rbx, rax")
                     emit("    mov r12, rdx")
@@ -1116,7 +1286,22 @@ struct BareTranslator {
             default: emit("    ud2")
             }
 
-        case .object, .list, .field, .index:
+        case .index(let base, let index, _):
+            // Stone 13: reading a byte from a block of bytes —
+            // the one indexing bare metal has. The validator
+            // has proven the base is a block of bytes; a pick
+            // outside it stops the machine.
+            emitExpr(base)
+            emit("    push rax")
+            emit("    push rdx")
+            emitExpr(index)
+            emit("    pop rdx")
+            emit("    pop rcx")
+            emit("    cmp rax, rdx")
+            emit("    jae __halt_trap")
+            emit("    movzx rax, byte ptr [rcx + rax]")
+
+        case .object, .list, .field:
             emit("    ud2")  // refused by the validator
         }
     }
@@ -1138,8 +1323,20 @@ struct BareTranslator {
             emit("    mov rax, rdx")
             return
         }
-        // The bare-only tools (Stone 12): reads of the machine
-        // itself, emitted where the call stands.
+        if name == "makebytes" {
+            // Stone 13: the allocator answers with the block's
+            // address in rax and its count in rdx — the same
+            // two words a piece of text travels in.
+            emitExpr(args[0])
+            emit("    call __nifla_alloc")
+            return
+        }
+        // The bare-only tools (Stones 12 and 13): reads of the
+        // machine itself, emitted where the call stands.
+        if name == "memorysize" {
+            emit("    mov rax, [__mem_total]")
+            return
+        }
         if name == "ticks" {
             emit("    mov rax, [__ticks]")
             return
@@ -1180,7 +1377,7 @@ struct BareTranslator {
             emitExpr(arg)
             emit("    push rax")
             slotCount += 1
-            if kindOf(arg) == .text {
+            if slots(for: kindOf(arg)) == 2 {
                 emit("    push rdx")
                 slotCount += 1
             }
@@ -1286,6 +1483,8 @@ func compileBare(inputPath: String, output: String?, program: [Stmt], fail: (Str
             .rodata : { *(.rodata) }
             .data : { *(.data) }
             .bss : { *(.bss) *(COMMON) }
+            . = ALIGN(4096);
+            __kernel_end = .;
         }
         """
     let scriptPath = scratch.appendingPathComponent("bare.ld").path

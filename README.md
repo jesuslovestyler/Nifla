@@ -936,6 +936,82 @@ Honest limits of Stone 12:
   says "a hundred", and the count is a count of knocks, not
   a clock on the wall.
 
+## Stone 13 — bare metal learns to remember
+
+Laid on **November 14, 2026**, the same evening, second of
+the three. Stone 11's machine lived in a fixed little room:
+a 16 KiB stack, its words in registers and frame slots, and
+not one byte more. This stone opens the house.
+
+**The map.** The multiboot header now asks the loader for
+memory information (flag bit 1), and the stub keeps the
+loader's map pointer before anything can overwrite it. At
+start-up a short walk of the **multiboot memory map** adds
+up every usable stretch into a total, and finds the usable
+stretch the program itself sits in: everything from the
+program's end to that stretch's end is the heap. One new
+bare-only tool reads the total:
+
+- `memorysize()` — the usable memory of the machine, in
+  bytes, as the loader's map reports it
+
+**Blocks of bytes came to bare metal.** `makebytes` — a
+hosted tool since Stone 9 — now works there too, backed by
+a **bump allocator** over the heap: each block takes the
+next slice, its size rounded up to a whole 16 bytes, and
+the slice is **zeroed** before the program sees it. A block
+is the same two words as a piece of text — an address and a
+count — so it travels everywhere text travels: into
+variables, through functions, and across a floor block's
+desk on the memory side (a block and a text now share that
+one side; a floor block takes one or the other). With the
+value came its manners: `length` measures it, `block[i]`
+reads a byte, `block[i] = n` writes one. A pick outside the
+block, a stored value that isn't a byte (0–255), a request
+past the heap's end, or a block past the hosted cap of
+16 MiB **stops the machine** — bare metal's silent answer,
+never a quiet corruption.
+
+**The proof** is `bare-examples/nifla-memory.nifla`, run by
+`./run-bare-memory.sh`, which boots the machine with a
+distinctive **96 MiB**: the first row must read "Memory
+total: " and the number `memorysize()` gave, in the band
+(94 MiB, 96 MiB] — the map's usable sum sits a little under
+the machine's size because the firmware's reserved
+stretches are not usable (measured on this bench:
+100,137,984 of 100,663,296). The second row must read
+"Bytes OK": a **4 MiB block** — far bigger than any buffer
+the machine code carries — was filled with a repeating
+pattern by a floor block, verified byte by byte with zero
+mismatches, and spot-checked from the Nifla side, length
+included. It prints PASS — and it does.
+
+```sh
+./run-bare-memory.sh   # bare metal: PASS — the map is read and bytes live in real memory
+```
+
+Honest limits of Stone 13:
+
+- **The allocator never frees.** Bump allocation is the
+  honest first form: memory is handed out in order and
+  never taken back, so a program that makes blocks forever
+  fills the heap and then stops the machine at the next
+  request. There is no free list, no reuse, no compaction —
+  those are later stones' work, if they come.
+- **The heap is one stretch**: the usable region the
+  program itself was loaded into. Usable memory elsewhere
+  in the map (below 1 MiB, or in any higher stretch) counts
+  toward `memorysize()` but is not handed out.
+- `for` still can't walk a block of bytes — `while` and a
+  counter do that work — and two blocks can't be compared,
+  added, or joined; a byte at a time, or a floor block, is
+  the way.
+- The map is trusted as the loader wrote it. On this bench
+  the loader is QEMU's multiboot loader and the map is its
+  e820; a loader that hands over no map leaves the total at
+  0 and the heap empty, and the first `makebytes` stops the
+  machine.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

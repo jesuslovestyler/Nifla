@@ -1,0 +1,130 @@
+// Nifla on bare metal, remembering (Stone 13): the loader
+// hands the machine a map of its memory, and memorysize()
+// tells the program how much of it is usable. Blocks of
+// bytes — makebytes — now live on bare metal too, carved by
+// a simple allocator out of the free memory the map reports,
+// above the program itself.
+//
+// The program says the memory total on the first row (the
+// number itself worked out and written by a floor block),
+// then makes a four-megabyte block — far bigger than any
+// fixed buffer the machine code carries — has the Floor fill
+// it with a repeating pattern and count any byte that
+// doesn't match, checks a few bytes itself from the Nifla
+// side, and gives its verdict on the second row.
+
+let total = memorysize()
+floor("Memory total: ", 0) {
+    mov rax, [r10]
+    mov rdx, 0xB8000
+    shl rax, 1
+    add rdx, rax
+    mov rcx, 0
+mw_loop:
+    cmp rcx, r12
+    jae mw_done
+    mov al, [rbx + rcx]
+    mov [rdx + rcx * 2], al
+    mov byte ptr [rdx + rcx * 2 + 1], 0x0F
+    inc rcx
+    jmp mw_loop
+mw_done:
+}
+
+floor(total) {
+    mov rax, [r10]
+    mov rbx, 0xB8000
+    add rbx, 28
+    mov rcx, 0
+    mov r8, 10
+dw_div:
+    xor rdx, rdx
+    div r8
+    add dl, 48
+    push rdx
+    inc rcx
+    test rax, rax
+    jne dw_div
+    mov r9, 0
+dw_write:
+    cmp r9, rcx
+    jae dw_clear
+    pop rdx
+    mov byte ptr [rbx + r9 * 2], dl
+    mov byte ptr [rbx + r9 * 2 + 1], 0x0F
+    inc r9
+    jmp dw_write
+dw_clear:
+    cmp r9, 12
+    jae dw_done
+    mov byte ptr [rbx + r9 * 2], 32
+    mov byte ptr [rbx + r9 * 2 + 1], 0x0F
+    inc r9
+    jmp dw_clear
+dw_done:
+}
+
+let b = makebytes(4194304)
+floor(b) {
+    mov rcx, 0
+fb_loop:
+    cmp rcx, r12
+    jae fb_done
+    mov rax, rcx
+    and rax, 255
+    mov byte ptr [rbx + rcx], al
+    inc rcx
+    jmp fb_loop
+fb_done:
+}
+
+let bad = floor(b) {
+    mov rcx, 0
+    mov rax, 0
+vb_loop:
+    cmp rcx, r12
+    jae vb_done
+    mov rdx, rcx
+    and rdx, 255
+    cmp byte ptr [rbx + rcx], dl
+    je vb_next
+    inc rax
+vb_next:
+    inc rcx
+    jmp vb_loop
+vb_done:
+}
+
+let spot = 0
+if length(b) == 4194304 {
+    spot = spot + 1
+}
+if b[12345] == 57 {
+    spot = spot + 1
+}
+if b[4194303] == 255 {
+    spot = spot + 1
+}
+
+let verdict = "Bytes BAD"
+if bad == 0 {
+    if spot == 3 {
+        verdict = "Bytes OK"
+    }
+}
+floor(verdict, 80) {
+    mov rax, [r10]
+    mov rdx, 0xB8000
+    shl rax, 1
+    add rdx, rax
+    mov rcx, 0
+bw_loop:
+    cmp rcx, r12
+    jae bw_done
+    mov al, [rbx + rcx]
+    mov [rdx + rcx * 2], al
+    mov byte ptr [rdx + rcx * 2 + 1], 0x0F
+    inc rcx
+    jmp bw_loop
+bw_done:
+}

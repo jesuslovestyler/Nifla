@@ -1,0 +1,6 @@
+// A repeat count can't be negative. Since Stone 18 the checker
+// proves it before the program runs, so this lives with the
+// checker examples now.
+repeat -2 {
+    say "This never runs"
+}

@@ -1,0 +1,1 @@
+Line 6: The value handed to 'double' for 'v' is some text, but 'v' is marked as a number by its annotation. Change what the call hands over, or change the annotation. I caught this before the program ran, so nothing ran.

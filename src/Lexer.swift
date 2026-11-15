@@ -131,9 +131,11 @@ final class Lexer {
         }
 
         // Two-character symbols first, so "=" and "==" stay distinct.
+        // (Stone 18 adds "->", the arrow that marks a function's
+        // promised kind: make f(...) -> number { ... }.)
         if let next = peekNext() {
             let pair = String([c, next])
-            if ["==", "!=", "<=", ">="].contains(pair) {
+            if ["==", "!=", "<=", ">=", "->"].contains(pair) {
                 pos += 2
                 return Token(kind: .symbol(pair), line: startLine)
             }

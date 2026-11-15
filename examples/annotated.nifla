@@ -1,0 +1,18 @@
+// Stone 18: kind annotations — offered, never required. A
+// variable can be marked with the kind it must hold, a
+// function's values can be marked, and a function can
+// promise the kind it gives back. Where the marks are kept,
+// the program runs exactly as it would without them.
+let name: text = "Tyler"
+let count: number = 3
+make greet(who: text, times: number) -> text {
+    give who + " x" + times
+}
+say greet(name, count)
+let total: number = count * 2
+say total
+make quiet() -> nothing {
+    say "inside"
+}
+quiet()
+say "done"

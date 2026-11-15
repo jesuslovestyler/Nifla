@@ -1,0 +1,4 @@
+// Stone 18: a negative index can never pick an item —
+// refused before the program runs.
+let items = [10, 20, 30]
+say items[-1]

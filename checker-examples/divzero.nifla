@@ -1,0 +1,5 @@
+// Stone 18: a division by a provably zero divisor — the
+// checker tracks the variable's number and refuses before
+// the program runs.
+let zero = 0
+say 10 / zero

@@ -1,0 +1,16 @@
+// Stone 18: the floor desk rule, fed by an annotation. The
+// variable's kind is known only because its 'let' line
+// marks it — the value arrived through a function the
+// checker can't see into. Handing a true/false value to a
+// floor block was already refused; now the annotation is
+// proof enough to refuse it before the program runs.
+make anything(x) {
+    give x
+}
+let flag: boolean = anything(true)
+make useit() {
+    give floor(flag) {
+        mov rax, [r10]
+    }
+}
+say useit()

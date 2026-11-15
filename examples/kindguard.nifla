@@ -1,0 +1,10 @@
+// Stone 18: the runtime guard at an annotated boundary.
+// The value reaches the marked variable through a function
+// the checker can't see into, so the checker stays silent —
+// and the guard at the boundary stops the run instead, in
+// the same plain words.
+make anything(x) {
+    give x
+}
+let n: number = anything("hello")
+say n

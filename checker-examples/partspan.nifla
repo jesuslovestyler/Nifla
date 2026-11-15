@@ -1,0 +1,3 @@
+// Stone 18: a 'part' whose span runs past the end of a
+// literal text — refused before the program runs.
+say part("Tyler", 4, 3)

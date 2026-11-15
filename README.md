@@ -1434,6 +1434,208 @@ Honest limits of Stone 17 — read these plainly:
   outlives its return except what it wrote to the
   screen, the disk, or the desk's parting number.
 
+## Stone 18 — marks of kind, and a checker that proves more
+
+Tyler asked how Nifla could become better than Swift. The
+answer this stone builds: keep the JavaScript-readable
+dynamic surface — no program that ran before needs a single
+new word — and grow the checker so it proves more before
+anything runs, with **optional kind annotations** for the
+places a writer wants a promise kept. Annotations are
+offered, never required.
+
+### The marks
+
+A variable can be marked with the kind it must hold:
+
+```
+let name: text = "Tyler"
+let count: number = 3
+```
+
+A function's values can be marked, and a function can
+promise the kind it gives back, after an arrow:
+
+```
+make greet(who: text, times: number) -> text {
+    give who + " x" + times
+}
+make quiet() -> nothing {
+    say "inside"
+}
+```
+
+The kind words are the checker's own vocabulary — no
+parallel set was invented: **number, text, boolean, list,
+object, bytes, nothing**. (`boolean` is spoken of as "a
+true/false value" in messages, as the checker always has.)
+
+Where an annotation exists, two keepers watch it:
+
+1. **The checker**, before anything runs, refuses any
+   assignment, call, or `give` whose kind it can *prove*
+   breaks the mark — in plain words, with the line number
+   and the checker's signature: "I caught this before the
+   program ran, so nothing ran."
+2. **A runtime guard** at the annotated boundary — the
+   `let` line, every later setting of the variable, each
+   annotated parameter at a call, each `give` in a
+   return-marked function, and the end of such a function
+   reached without a `give` — checks the actual value
+   where the checker couldn't prove either way, and stops
+   with the same plain words. An annotated boundary never
+   silently receives the wrong kind.
+
+All four mirrors keep the marks: the Swift interpreter
+(parses them, guards at runtime), the compiled runtime
+(the same guards, the same words), the checker, and the
+self-host (its parser accepts them and its evaluator
+enforces the runtime guards with the same messages — the
+self-host has no checker of its own, as it never has).
+Bare metal accepts annotations in the shapes it holds —
+number, text, true/false, bytes — checked by the checker
+and the BareValidator together; a mark naming a kind bare
+metal can't hold (a list, an object, nothing) is refused
+in plain words, annotation or not, exactly as the value
+itself would be. Proofs: `examples/annotated.nifla` (the
+marks, kept), `examples/kindguard.nifla`,
+`examples/paramguard.nifla`, `examples/giveguard.nifla`,
+`examples/nogive.nifla` (the runtime guards),
+`checker-examples/annotatedlet/annotatedparam/
+annotatedgive.nifla` (the checker's refusals), and
+`run-bare-kinds.sh` (bare metal: an annotated program
+boots and runs; three annotated mistakes are refused).
+
+### The checker proves more
+
+The checker now tracks three simple facts alongside kinds
+— a variable's constant number, a list variable's
+emptiness, and a list or text variable's exact length —
+each held only while it is provable, and given up the
+moment anything could change it quietly (a call, a list
+tool, a handing-on of the list to another name, a road
+through an `if` that disagrees). Facts never cross into a
+function body from outside: another function could change
+the variable before the call, so inside a body only facts
+the body itself establishes are provable. From those
+facts, before anything runs, the checker now refuses:
+
+- a `repeat` count it can prove is negative — on the
+  hosted side too (it was the run's discovery before);
+- `exitwith` with a provably non-whole number, or one
+  outside 0–255;
+- `makebytes` with a provably negative count or one over
+  the 16,777,216 cap;
+- an index provably outside a list or text whose length
+  is known — a literal's, or a variable's tracked from
+  its making — including any index into a provably empty
+  list, and any negative index into a known list, text,
+  or block of bytes;
+- `removeat` on a provably empty list, or past the end of
+  a list of known length;
+- a `part` span provably outside a literal text (a
+  negative start or count, a start past the end, a span
+  running past the end);
+- division by a provably zero divisor. (Nifla has no
+  modulo sign — `/` is the only divisor there is, so
+  there is no modulo case to refuse.)
+
+Each refusal speaks in the run's own words, plus the
+checker's signature. Proofs: the new `checker-examples/`
+(`repeatneg`, `divzero`, `exitrange`, `exitfrac`,
+`bytesneg`, `bytesbig`, `textindex`, `emptyindex`,
+`emptyremove`, `removeoob`, `partstart`, `partspan`,
+`negindex`), and two older examples moved house because
+this stone made their mistakes provable before the run:
+`badrepeat` and `badindex` now live in `checker-examples/`
+with the checker's wording. One more honest consequence:
+`examples/attempt.nifla` now makes its zero at runtime
+(`length("")`), because a zero written plainly — `10 / 0`
+— is refused before the program starts; a runtime zero is
+still `attempt`'s to catch, and the example still teaches
+exactly that.
+
+Floor blocks gain from the marks for free: an annotated
+variable's kind is known to the checker even inside an
+unannotated function, so the desk rules that already
+refused a true/false value handed to the floor now refuse
+it on the annotation's proof too
+(`checker-examples/floorannot.nifla`). Every existing
+floor refusal stands unchanged.
+
+### The gap ledger
+
+Tyler's instruction was "fix all safety gaps." The honest
+deliverable is every closable gap closed, and every
+remaining one named with its reason.
+
+**Closed by this stone:**
+
+- Annotated boundaries could silently receive a wrong
+  kind wherever the checker couldn't prove the value
+  (anything arriving through unannotated code). Now a
+  runtime guard stands at every annotated boundary, in
+  every mirror.
+- The provable range mistakes listed above were learned
+  only when the run reached them — a negative `repeat`
+  count, an oversized `makebytes`, a parting number
+  outside 0–255, indexes and `part` spans outside known
+  lengths, division by a written-out zero. The checker
+  now proves and refuses them before anything runs,
+  hosted and bare alike.
+- A floor block's desk inputs arriving from annotated
+  variables were unprovable; the annotation is now proof
+  the existing desk rules can bite on.
+
+**Remaining, named:**
+
+- **Fully dynamic, unannotated code keeps today's runtime
+  checks.** Where nothing is written and nothing can be
+  proven — a value from a call, a field, an item, input —
+  the checker stays silent *by design*: silence is not a
+  promise, and the runtime's own checks (which stop the
+  program in plain words) remain the keeper there. This
+  is the JavaScript-readable surface Tyler chose to keep;
+  annotations are how a writer asks for more.
+- **Raw floor assembly is unchecked — deliberately, not
+  as a gap.** The floor is raw processor talk: the words
+  inside a floor block are the processor's, and no
+  checker reads them. What is checked is the desk around
+  it — the kinds of the values handed in and out. A floor
+  block can still halt the machine, and on bare metal it
+  can still reach any memory. That is what the floor is
+  *for*; it is a boundary, named here so no one mistakes
+  it for an oversight.
+- **Proofs reach only as far as literals and simple
+  tracked facts.** Anything computed — through a call, a
+  field, an item, arithmetic the checker doesn't fold —
+  is unprovable, and deliberately left to the runtime
+  rather than guessed at. A checker that guesses would
+  refuse good programs; this one would rather stay
+  silent and let the run speak.
+- **Tracked facts are conservative around sharing.**
+  Lists are shared by reference, so when a proven list is
+  handed to another name, the facts about it are given
+  up — the other name could grow it where the checker
+  can't watch. Some provable things are therefore not
+  proven; the checker errs toward silence.
+- **The self-host has no checker.** It never has: it
+  parses and runs, and its refusals are the runtime's.
+  The checker's pre-run refusals (this stone's included)
+  are proven by the Swift tools' suites
+  (`checker-examples/`); the self-host proves the marks
+  it can — parsing them, and the runtime guards — in the
+  shared `examples/` suite.
+- **Bare metal's guards are the machine's halt, as
+  before.** The bare subset has no runtime error channel:
+  an unprovable index or count there stops the machine
+  (Stone 13's design). Annotations narrow what can be
+  *built*; they do not give bare metal a voice it doesn't
+  have.
+
+The guards' numbers are unchanged: a million loop passes,
+five hundred calls deep, 16,777,216 bytes to a block.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

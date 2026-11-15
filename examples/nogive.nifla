@@ -1,0 +1,7 @@
+// Stone 18: a function that promised to give a value back,
+// but reaches its end without one, is stopped at the call —
+// the promise is part of the function's word.
+make word() -> text {
+    let x = 1
+}
+say word()

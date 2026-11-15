@@ -1,0 +1,11 @@
+// Stone 18: an annotated parameter guards its boundary the
+// same way — a value the checker couldn't prove wrong is
+// checked when it is handed over, and refused in plain
+// words.
+make pick(x) {
+    give x
+}
+make double(v: number) -> number {
+    give v * 2
+}
+say double(pick("oops"))

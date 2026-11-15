@@ -141,6 +141,10 @@ enum Value {
 // scope around them; a variable made inside a block stays inside it.
 final class Scope {
     private var values: [String: Value] = [:]
+    // Stone 18: the kind annotation a variable in this scope was
+    // made with, if any — the runtime guard's memory of the
+    // promise, consulted whenever the variable is set.
+    private var annotations: [String: String] = [:]
     private let parent: Scope?
 
     init(parent: Scope? = nil) {
@@ -149,6 +153,14 @@ final class Scope {
 
     func lookup(_ name: String) -> Value? {
         values[name] ?? parent?.lookup(name)
+    }
+
+    func declareAnnotation(_ name: String, _ kindWord: String) {
+        annotations[name] = kindWord
+    }
+
+    func annotation(for name: String) -> String? {
+        annotations[name] ?? parent?.annotation(for: name)
     }
 
     func isDeclaredHere(_ name: String) -> Bool {
@@ -207,6 +219,11 @@ func editDistance(_ a: String, _ b: String) -> Int {
 // names stay inside it.
 struct FunctionDef {
     let params: [String]
+    // Stone 18: the annotations on the 'make' line — a kind word
+    // per parameter (nil where there is none) and the promised
+    // kind after the arrow, if any.
+    let paramKinds: [String?]
+    let returnKind: String?
     let body: [Stmt]
     let home: Scope
 }
@@ -216,6 +233,28 @@ struct FunctionDef {
 // reaches the person writing Nifla.
 private struct ReturnSignal: Error {
     let value: Value
+    let line: Int
+}
+
+// Stone 18: the kind word a value answers to — the annotation
+// vocabulary (see the parser), used by the runtime guards.
+func valueKindWord(_ value: Value) -> String {
+    switch value {
+    case .number: return "number"
+    case .text: return "text"
+    case .boolean: return "boolean"
+    case .object: return "object"
+    case .list: return "list"
+    case .bytes: return "bytes"
+    }
+}
+
+// Whether a value (or the lack of one, from a function that
+// gave nothing back) satisfies an annotation.
+func kindSatisfies(_ kindWord: String, _ value: Value?) -> Bool {
+    if kindWord == "nothing" { return value == nil }
+    guard let value else { return false }
+    return valueKindWord(value) == kindWord
 }
 
 // A built-in tool (Stone 6): a function every Nifla program has
@@ -274,7 +313,7 @@ let floorRefusalMessage = "This is floor code — raw instructions for the proce
 func firstFloorLine(in statements: [Stmt]) -> Int? {
     for statement in statements {
         switch statement {
-        case .declare(_, let value, _), .assign(_, let value, _):
+        case .declare(_, _, let value, _), .assign(_, let value, _):
             if let line = firstFloorLine(in: value) { return line }
         case .say(let value, _), .give(let value, _):
             if let line = firstFloorLine(in: value) { return line }
@@ -294,7 +333,7 @@ func firstFloorLine(in statements: [Stmt]) -> Int? {
         case .forEach(_, let over, let body, _):
             if let line = firstFloorLine(in: over) { return line }
             if let line = firstFloorLine(in: body) { return line }
-        case .define(_, _, let body, _):
+        case .define(_, _, _, _, let body, _):
             if let line = firstFloorLine(in: body) { return line }
         case .attempt(let body, let recovery, _):
             if let line = firstFloorLine(in: body) { return line }
@@ -385,14 +424,24 @@ final class Interpreter {
 
     private func execute(_ statement: Stmt, in scope: Scope) throws {
         switch statement {
-        case .declare(let name, let valueExpr, let line):
+        case .declare(let name, let kindWord, let valueExpr, let line):
             if scope.isDeclaredHere(name) {
                 throw NiflaError(line: line, message: "There is already a variable called '\(name)' in this block. To change what it holds, write: \(name) = ...")
             }
-            scope.declare(name, try evaluate(valueExpr, in: scope))
+            let value = try evaluate(valueExpr, in: scope)
+            if let kindWord {
+                try checkVariableGuard(name: name, kindWord: kindWord, value: value, line: line)
+                scope.declare(name, value)
+                scope.declareAnnotation(name, kindWord)
+            } else {
+                scope.declare(name, value)
+            }
 
         case .assign(let name, let valueExpr, let line):
             let value = try evaluate(valueExpr, in: scope)
+            if let kindWord = scope.annotation(for: name) {
+                try checkVariableGuard(name: name, kindWord: kindWord, value: value, line: line)
+            }
             if !scope.assign(name, value) {
                 throw NiflaError(line: line, message: "I can't set '\(name)', because no variable called '\(name)' has been made yet. Make one first with: let \(name) = ...")
             }
@@ -487,7 +536,7 @@ final class Interpreter {
                 }
             }
 
-        case .define(let name, let params, let body, let line):
+        case .define(let name, let params, let paramKinds, let returnKind, let body, let line):
             // Making a function is a line like any other: it runs when
             // the program reaches it, so a function is ready to call
             // from that line on.
@@ -497,13 +546,13 @@ final class Interpreter {
             if functions[name] != nil {
                 throw NiflaError(line: line, message: "There is already a function called '\(name)'. Each function needs its own name — rename this one, or take out the earlier 'make \(name)'.")
             }
-            functions[name] = FunctionDef(params: params, body: body, home: scope)
+            functions[name] = FunctionDef(params: params, paramKinds: paramKinds, returnKind: returnKind, body: body, home: scope)
 
         case .give(let valueExpr, let line):
             guard callDepth > 0 else {
                 throw NiflaError(line: line, message: "'give' hands a value back from a function to whoever called it, but this line is not inside a function. To show a value here, use 'say' instead.")
             }
-            throw ReturnSignal(value: try evaluate(valueExpr, in: scope))
+            throw ReturnSignal(value: try evaluate(valueExpr, in: scope), line: line)
 
         case .attempt(let body, let recovery, _):
             // Try the first block; if anything in it goes wrong —
@@ -669,23 +718,48 @@ final class Interpreter {
         guard args.count == def.params.count else {
             throw NiflaError(line: line, message: "The function '\(name)' takes \(takesText(def.params)), but it was given \(args.count). Make the call match how the function was made: \(name)(\(def.params.joined(separator: ", "))).")
         }
+        // Stone 18: the guards at the annotated boundaries of
+        // the call — each annotated parameter checks the value
+        // handed to it, here at the call.
+        for (index, param) in def.params.enumerated() {
+            if index < def.paramKinds.count, let kindWord = def.paramKinds[index], !kindSatisfies(kindWord, args[index]) {
+                throw NiflaError(line: line, message: "The value handed to '\(name)' for '\(param)' is \(args[index].described), but '\(param)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation. Change what the call hands over, or change the annotation.")
+            }
+        }
         guard callDepth < callDepthLimit else {
             throw NiflaError(line: line, message: "This call is more than five hundred functions deep and was stopped — it may never finish. A function that calls itself needs a way to stop, like an 'if' that gives an answer for the smallest case instead of calling again.")
         }
         callDepth += 1
         defer { callDepth -= 1 }
         let callScope = Scope(parent: def.home)
-        for (param, arg) in zip(def.params, args) {
-            callScope.declare(param, arg)
+        for (index, param) in def.params.enumerated() {
+            callScope.declare(param, args[index])
+            if index < def.paramKinds.count, let kindWord = def.paramKinds[index] {
+                callScope.declareAnnotation(param, kindWord)
+            }
         }
         do {
             for inner in def.body {
                 try execute(inner, in: callScope)
             }
         } catch let signal as ReturnSignal {
+            if let returnKind = def.returnKind, !kindSatisfies(returnKind, signal.value) {
+                throw NiflaError(line: signal.line, message: "'\(name)' is marked to give back \(StaticKind.phrase(forKindWord: returnKind)) by its annotation, but this 'give' hands back \(signal.value.described). Change the value, or change the annotation.")
+            }
             return signal.value
         }
+        if let returnKind = def.returnKind, returnKind != "nothing" {
+            throw NiflaError(line: line, message: "'\(name)' is marked to give back \(StaticKind.phrase(forKindWord: returnKind)) by its annotation, but it finished without giving a value back. Add a 'give' line inside '\(name)', or change the annotation.")
+        }
         return nil
+    }
+
+    // Stone 18: the runtime guard on a variable with an
+    // annotation — its 'let' line, and every later setting of
+    // it, must hand it a value of the marked kind.
+    private func checkVariableGuard(name: String, kindWord: String, value: Value, line: Int) throws {
+        guard !kindSatisfies(kindWord, value) else { return }
+        throw NiflaError(line: line, message: "'\(name)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation, but this value is \(value.described). Change the value, or change the annotation.")
     }
 
     // "no values", "1 value (name)", "2 values (a, b)" — for the

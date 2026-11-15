@@ -1,0 +1,5 @@
+// Stone 18: a 'let' whose value's kind is plain to see, and
+// plainer still against its annotation — refused before the
+// program runs.
+let n: number = "hello"
+say n

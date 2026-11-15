@@ -48,6 +48,27 @@ enum StaticKind {
         case .unknown: return "a value"
         }
     }
+
+    // Stone 18: the kind an annotation word names, or nil for
+    // 'nothing' (which no StaticKind stands for — a promise that
+    // a function gives nothing back, checked on its own terms).
+    static func fromKindWord(_ word: String) -> StaticKind? {
+        switch word {
+        case "number": return .number
+        case "text": return .text
+        case "boolean": return .boolean
+        case "list": return .list
+        case "object": return .object
+        case "bytes": return .bytes
+        default: return nil
+        }
+    }
+
+    // How an annotation word itself is phrased in a message.
+    static func phrase(forKindWord word: String) -> String {
+        if let kind = fromKindWord(word) { return kind.phrase }
+        return "nothing"
+    }
 }
 
 // The checker's rules for the built-in tools (Stone 6): the kind
@@ -90,6 +111,21 @@ private let builtinRules: [String: BuiltinRule] = [
 // ways things could go becomes unknown.
 struct StaticEnv {
     private(set) var scopes: [[String: StaticKind]] = [[:]]
+    // Stone 18: three more pictures, kept scope by scope beside
+    // the kinds — the annotation a variable was made with (a
+    // promise, not a fact: it survives even when kinds are
+    // forgotten), the constant number a variable provably holds,
+    // and whether a list variable provably holds an empty list.
+    // Facts are held only while they are provable; anything that
+    // could change them quietly takes them away.
+    private(set) var annotations: [[String: String]] = [[:]]
+    private(set) var constants: [[String: Double]] = [[:]]
+    private(set) var emptyLists: [[String: Bool]] = [[:]]
+    // Stone 18: the exact length of the list or text a variable
+    // provably holds (made from a literal of that length and not
+    // provably changed since). Held with the same care as the
+    // other facts.
+    private(set) var lengths: [[String: Int]] = [[:]]
 
     func lookup(_ name: String) -> StaticKind? {
         for scope in scopes.reversed() {
@@ -98,24 +134,101 @@ struct StaticEnv {
         return nil
     }
 
+    func lookupAnnotation(_ name: String) -> String? {
+        for scope in annotations.reversed() {
+            if let word = scope[name] { return word }
+        }
+        return nil
+    }
+
+    func lookupConstant(_ name: String) -> Double? {
+        for scope in constants.reversed() {
+            if let value = scope[name] { return value }
+        }
+        return nil
+    }
+
+    // True only while the list under this name is proven empty:
+    // made as [] and not grown, aliased, or handed anywhere the
+    // checker can't watch since.
+    func isProvenEmpty(_ name: String) -> Bool {
+        for scope in emptyLists.reversed() {
+            if let empty = scope[name] { return empty }
+        }
+        return false
+    }
+
+    func lookupLength(_ name: String) -> Int? {
+        for scope in lengths.reversed() {
+            if let length = scope[name] { return length }
+        }
+        return nil
+    }
+
     func isDeclaredHere(_ name: String) -> Bool {
         scopes.last?[name] != nil
     }
 
-    mutating func declare(_ name: String, _ kind: StaticKind) {
+    mutating func declare(_ name: String, _ kind: StaticKind, annotation: String? = nil, constant: Double? = nil, provenEmpty: Bool = false, length: Int? = nil) {
         scopes[scopes.count - 1][name] = kind
+        if let annotation {
+            annotations[annotations.count - 1][name] = annotation
+        }
+        if let constant {
+            constants[constants.count - 1][name] = constant
+        }
+        if provenEmpty {
+            emptyLists[emptyLists.count - 1][name] = true
+        }
+        if let length {
+            lengths[lengths.count - 1][name] = length
+        }
     }
 
     // Sets the kind in whichever block made the name. Returns false
     // when no block knows the name.
-    mutating func assign(_ name: String, _ kind: StaticKind) -> Bool {
+    mutating func assign(_ name: String, _ kind: StaticKind, constant: Double? = nil, provenEmpty: Bool = false, length: Int? = nil) -> Bool {
         for index in scopes.indices.reversed() {
             if scopes[index][name] != nil {
                 scopes[index][name] = kind
+                constants[index][name] = constant
+                if provenEmpty {
+                    emptyLists[index][name] = true
+                } else {
+                    emptyLists[index][name] = nil
+                }
+                lengths[index][name] = length
                 return true
             }
         }
         return false
+    }
+
+    // Takes away every tracked fact in every scope, keeping
+    // kinds and annotations. Used when a function body is
+    // checked: a fact about a variable outside the body (this
+    // global is 0, that list is empty) can be made false by
+    // another function before this one is ever called, so
+    // inside a body only facts the body itself establishes
+    // are provable.
+    mutating func dropFacts() {
+        constants = constants.map { _ in [:] }
+        emptyLists = emptyLists.map { _ in [:] }
+        lengths = lengths.map { _ in [:] }
+    }
+
+    // Takes away the facts (not the kind, not the annotation) for
+    // one name — used when a list is handed somewhere it could be
+    // grown out of the checker's sight, or changed by a tool.
+    mutating func forgetFacts(about name: String) {
+        for index in scopes.indices.reversed() {
+            if scopes[index][name] != nil {
+                constants[index][name] = nil
+                emptyLists[index][name] = nil
+                lengths[index][name] = nil
+                return
+            }
+        }
     }
 
     func allNames() -> [String] {
@@ -128,20 +241,33 @@ struct StaticEnv {
 
     mutating func pushScope() {
         scopes.append([:])
+        annotations.append([:])
+        constants.append([:])
+        emptyLists.append([:])
+        lengths.append([:])
     }
 
     mutating func popScope() {
         scopes.removeLast()
+        annotations.removeLast()
+        constants.removeLast()
+        emptyLists.removeLast()
+        lengths.removeLast()
     }
 
     // After a function call, a function may have set any variable it
     // can reach, to anything. Forget every proven kind; keep the
-    // names (they were still made).
+    // names (they were still made). Stone 18: the facts go too —
+    // but annotations stay, because they are promises the runtime
+    // still guards, not facts the checker proved.
     mutating func forgetKinds() {
         for index in scopes.indices {
             for name in scopes[index].keys {
                 scopes[index][name] = .unknown
             }
+            constants[index] = [:]
+            emptyLists[index] = [:]
+            lengths[index] = [:]
         }
     }
 
@@ -164,6 +290,38 @@ struct StaticEnv {
                 }
             }
             result.scopes[index] = scope
+            // Annotations are the same promise on both ways (they
+            // come from the one 'let' that made the name).
+            var anns: [String: String] = [:]
+            for name in Set(a.annotations[index].keys).union(b.annotations[index].keys) {
+                anns[name] = a.annotations[index][name] ?? b.annotations[index][name]
+            }
+            result.annotations[index] = anns
+            // A constant survives only when both ways hold the
+            // same number; an empty list only when both ways agree
+            // it is still empty.
+            var consts: [String: Double] = [:]
+            for name in Set(a.constants[index].keys).union(b.constants[index].keys) {
+                if let va = a.constants[index][name], let vb = b.constants[index][name], va == vb {
+                    consts[name] = va
+                }
+            }
+            result.constants[index] = consts
+            var empties: [String: Bool] = [:]
+            for name in Set(a.emptyLists[index].keys).union(b.emptyLists[index].keys) {
+                if a.emptyLists[index][name] == true && b.emptyLists[index][name] == true {
+                    empties[name] = true
+                }
+            }
+            result.emptyLists[index] = empties
+            // A length survives only when both ways agree on it.
+            var lens: [String: Int] = [:]
+            for name in Set(a.lengths[index].keys).union(b.lengths[index].keys) {
+                if let la = a.lengths[index][name], let lb = b.lengths[index][name], la == lb {
+                    lens[name] = la
+                }
+            }
+            result.lengths[index] = lens
         }
         return result
     }
@@ -177,7 +335,13 @@ final class Checker {
     // allows when the call happens after the making). When a name is
     // made twice, the first making is the one recorded; the
     // interpreter stops a second making when it runs, as before.
-    private var functions: [String: [String]] = [:]
+    private var functions: [String: (params: [String], paramKinds: [String?], returnKind: String?)] = [:]
+
+    // Stone 18: while a function body is being checked, the
+    // promise its 'make' line made about what it gives back —
+    // so 'give' lines inside it can be checked against it.
+    private var currentReturnKind: String? = nil
+    private var currentFunctionName: String? = nil
 
     // Stone 11: when the program is being compiled for bare
     // metal, the floor desk differs — it carries numbers and
@@ -203,8 +367,8 @@ final class Checker {
     private func collectFunctions(_ statements: [Stmt]) {
         for statement in statements {
             switch statement {
-            case .define(let name, let params, let body, _):
-                if functions[name] == nil { functions[name] = params }
+            case .define(let name, let params, let paramKinds, let returnKind, let body, _):
+                if functions[name] == nil { functions[name] = (params: params, paramKinds: paramKinds, returnKind: returnKind) }
                 collectFunctions(body)
             case .attempt(let body, let recovery, _):
                 collectFunctions(body)
@@ -227,7 +391,7 @@ final class Checker {
     private func declaredNames(in statements: [Stmt]) -> Set<String> {
         var names = Set<String>()
         for statement in statements {
-            if case .declare(let name, _, _) = statement {
+            if case .declare(let name, _, _, _) = statement {
                 names.insert(name)
             }
         }
@@ -259,9 +423,15 @@ final class Checker {
 
     private func checkStatement(_ statement: Stmt, env: inout StaticEnv, outerNames: Set<String>) throws {
         switch statement {
-        case .declare(let name, let valueExpr, _):
+        case .declare(let name, let kindWord, let valueExpr, let line):
             let kind = try checkExpr(valueExpr, env: &env, outerNames: outerNames)
-            env.declare(name, kind)
+            if let kindWord {
+                try checkAnnotation(kindWord: kindWord, proven: kind, line: line, wording: "'\(name)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation, but this value is \(kind.phrase). Change the value, or change the annotation.")
+            }
+            let constant = constNumber(valueExpr, in: env)
+            let provenEmpty = isEmptyListExpr(valueExpr, in: env)
+            noteAliasing(of: valueExpr, env: &env)
+            env.declare(name, declaredKind(kindWord: kindWord, proven: kind), annotation: kindWord, constant: constant, provenEmpty: provenEmpty, length: literalLength(of: valueExpr))
 
         case .assign(let name, let valueExpr, let line):
             // The interpreter works the value out first, then looks
@@ -270,7 +440,13 @@ final class Checker {
             if env.lookup(name) == nil {
                 throw NiflaError(line: line, message: "I can't set '\(name)', because no variable called '\(name)' has been made yet. Make one first with: let \(name) = ...")
             }
-            _ = env.assign(name, kind)
+            if let kindWord = env.lookupAnnotation(name) {
+                try checkAnnotation(kindWord: kindWord, proven: kind, line: line, wording: "'\(name)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation, but this value is \(kind.phrase). Change the value, or change the annotation.")
+            }
+            let constant = constNumber(valueExpr, in: env)
+            let provenEmpty = isEmptyListExpr(valueExpr, in: env)
+            noteAliasing(of: valueExpr, env: &env)
+            _ = env.assign(name, declaredKind(kindWord: env.lookupAnnotation(name), proven: kind), constant: constant, provenEmpty: provenEmpty, length: literalLength(of: valueExpr))
 
         case .assignTarget(let target, let valueExpr, _):
             _ = try checkExpr(target, env: &env, outerNames: outerNames)
@@ -294,8 +470,9 @@ final class Checker {
             _ = try checkExpr(condition, env: &env, outerNames: outerNames)
             try checkChildBlock(body, env: &env, outerNames: outerNames, mergeWithBefore: true)
 
-        case .repeatLoop(let count, let body, _):
+        case .repeatLoop(let count, let body, let line):
             _ = try checkExpr(count, env: &env, outerNames: outerNames)
+            try checkRepeatCount(count, env: env, line: line)
             try checkChildBlock(body, env: &env, outerNames: outerNames, mergeWithBefore: true)
 
         case .forEach(let name, let over, let body, _):
@@ -307,11 +484,12 @@ final class Checker {
             env.popScope()
             env = StaticEnv.merged(before, env)
 
-        case .define(let name, let params, let body, _):
-            try checkDefine(name: name, params: params, body: body, env: env, outerNames: outerNames)
+        case .define(let name, let params, let paramKinds, let returnKind, let body, _):
+            try checkDefine(name: name, params: params, paramKinds: paramKinds, returnKind: returnKind, body: body, env: env, outerNames: outerNames)
 
-        case .give(let valueExpr, _):
-            _ = try checkExpr(valueExpr, env: &env, outerNames: outerNames)
+        case .give(let valueExpr, let line):
+            let kind = try checkExpr(valueExpr, env: &env, outerNames: outerNames)
+            try checkGive(kind: kind, line: line)
 
         case .attempt(let body, let recovery, _):
             // Either block may be the one that runs to the end —
@@ -346,16 +524,30 @@ final class Checker {
     // later, and by then a later 'let' in an enclosing block has
     // run. What the body may have changed is not carried back: a
     // body may never run at all.
-    private func checkDefine(name: String, params: [String], body: [Stmt], env: StaticEnv, outerNames: Set<String>) throws {
+    private func checkDefine(name: String, params: [String], paramKinds: [String?], returnKind: String?, body: [Stmt], env: StaticEnv, outerNames: Set<String>) throws {
         var bodyEnv = env
+        // Stone 18: kinds and annotations carry into the body;
+        // tracked facts do not (see dropFacts).
+        bodyEnv.dropFacts()
         bodyEnv.pushScope()
-        for param in params {
-            bodyEnv.declare(param, .unknown)
+        for (index, param) in params.enumerated() {
+            // Stone 18: an annotated parameter is a promise the
+            // body is checked against — its kind is known inside,
+            // the way a literal's would be. An unannotated one
+            // stays unknown, as before.
+            let kindWord = index < paramKinds.count ? paramKinds[index] : nil
+            bodyEnv.declare(param, declaredKind(kindWord: kindWord, proven: .unknown), annotation: kindWord)
         }
         let bodyOuter = outerNames.union(declaredNames(in: body))
+        let savedReturnKind = currentReturnKind
+        let savedFunctionName = currentFunctionName
+        currentReturnKind = returnKind
+        currentFunctionName = name
         for statement in body {
             try checkStatementInFunction(statement, env: &bodyEnv, outerNames: bodyOuter)
         }
+        currentReturnKind = savedReturnKind
+        currentFunctionName = savedFunctionName
     }
 
     // Statements inside a function body are checked like any others,
@@ -365,8 +557,8 @@ final class Checker {
     // function makings keep the same forgiveness.
     private func checkStatementInFunction(_ statement: Stmt, env: inout StaticEnv, outerNames: Set<String>) throws {
         switch statement {
-        case .define(let name, let params, let body, _):
-            try checkDefine(name: name, params: params, body: body, env: env, outerNames: outerNames)
+        case .define(let name, let params, let paramKinds, let returnKind, let body, _):
+            try checkDefine(name: name, params: params, paramKinds: paramKinds, returnKind: returnKind, body: body, env: env, outerNames: outerNames)
         default:
             try checkStatementWithForgiveness(statement, env: &env, outerNames: outerNames)
         }
@@ -381,16 +573,28 @@ final class Checker {
         // this recurses through the statement shapes rather than
         // delegating wholesale.
         switch statement {
-        case .declare(let name, let valueExpr, _):
+        case .declare(let name, let kindWord, let valueExpr, let line):
             let kind = try checkExprForgiving(valueExpr, env: &env, outerNames: outerNames)
-            env.declare(name, kind)
+            if let kindWord {
+                try checkAnnotation(kindWord: kindWord, proven: kind, line: line, wording: "'\(name)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation, but this value is \(kind.phrase). Change the value, or change the annotation.")
+            }
+            let constant = constNumber(valueExpr, in: env)
+            let provenEmpty = isEmptyListExpr(valueExpr, in: env)
+            noteAliasing(of: valueExpr, env: &env)
+            env.declare(name, declaredKind(kindWord: kindWord, proven: kind), annotation: kindWord, constant: constant, provenEmpty: provenEmpty, length: literalLength(of: valueExpr))
 
         case .assign(let name, let valueExpr, let line):
             let kind = try checkExprForgiving(valueExpr, env: &env, outerNames: outerNames)
             if env.lookup(name) == nil && !outerNames.contains(name) {
                 throw NiflaError(line: line, message: "I can't set '\(name)', because no variable called '\(name)' has been made yet. Make one first with: let \(name) = ...")
             }
-            _ = env.assign(name, kind)
+            if let kindWord = env.lookupAnnotation(name) {
+                try checkAnnotation(kindWord: kindWord, proven: kind, line: line, wording: "'\(name)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation, but this value is \(kind.phrase). Change the value, or change the annotation.")
+            }
+            let constant = constNumber(valueExpr, in: env)
+            let provenEmpty = isEmptyListExpr(valueExpr, in: env)
+            noteAliasing(of: valueExpr, env: &env)
+            _ = env.assign(name, declaredKind(kindWord: env.lookupAnnotation(name), proven: kind), constant: constant, provenEmpty: provenEmpty, length: literalLength(of: valueExpr))
 
         case .assignTarget(let target, let valueExpr, _):
             _ = try checkExprForgiving(target, env: &env, outerNames: outerNames)
@@ -416,8 +620,9 @@ final class Checker {
             try checkChildBlockInFunction(body, env: &env, outerNames: outerNames)
             env = StaticEnv.merged(before, env)
 
-        case .repeatLoop(let count, let body, _):
+        case .repeatLoop(let count, let body, let line):
             _ = try checkExprForgiving(count, env: &env, outerNames: outerNames)
+            try checkRepeatCount(count, env: env, line: line)
             let before = env
             try checkChildBlockInFunction(body, env: &env, outerNames: outerNames)
             env = StaticEnv.merged(before, env)
@@ -434,11 +639,12 @@ final class Checker {
             env.popScope()
             env = StaticEnv.merged(before, env)
 
-        case .define(let name, let params, let body, _):
-            try checkDefine(name: name, params: params, body: body, env: env, outerNames: outerNames)
+        case .define(let name, let params, let paramKinds, let returnKind, let body, _):
+            try checkDefine(name: name, params: params, paramKinds: paramKinds, returnKind: returnKind, body: body, env: env, outerNames: outerNames)
 
-        case .give(let valueExpr, _):
-            _ = try checkExprForgiving(valueExpr, env: &env, outerNames: outerNames)
+        case .give(let valueExpr, let line):
+            let kind = try checkExprForgiving(valueExpr, env: &env, outerNames: outerNames)
+            try checkGive(kind: kind, line: line)
 
         case .attempt(let body, let recovery, _):
             let before = env
@@ -499,6 +705,14 @@ final class Checker {
             let need = rule.needs[index]
             if let allowed = need.kinds, !allowed.contains(kind) {
                 throw NiflaError(line: line, message: "'\(name)' needs \(need.need), but it was given \(kind.phrase). I caught this before the program ran, so nothing ran.")
+            }
+        }
+        // Stone 18: the ranges the checker can prove, and the
+        // facts the list tools change.
+        try checkBuiltinRanges(name: name, args: args, env: env, line: line)
+        if name == "append" || name == "insertat" || name == "removeat" {
+            if case .variable(let listName, _) = args[0] {
+                env.forgetFacts(about: listName)
             }
         }
         return rule.result
@@ -562,19 +776,21 @@ final class Checker {
         if try checkBareToolCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: false) != nil {
             return
         }
-        guard let params = functions[name] else {
+        guard let record = functions[name] else {
             var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
             if let suggestion = closestFunctionName(to: name) {
                 message += " Did you mean '\(suggestion)'?"
             }
             throw NiflaError(line: line, message: message)
         }
+        var argKinds: [StaticKind] = []
         for arg in args {
-            _ = try checkExpr(arg, env: &env, outerNames: outerNames)
+            argKinds.append(try checkExpr(arg, env: &env, outerNames: outerNames))
         }
-        guard args.count == params.count else {
-            throw NiflaError(line: line, message: "The function '\(name)' takes \(takesText(params)), but it was given \(args.count). Make the call match how the function was made: \(name)(\(params.joined(separator: ", "))).")
+        guard args.count == record.params.count else {
+            throw NiflaError(line: line, message: "The function '\(name)' takes \(takesText(record.params)), but it was given \(args.count). Make the call match how the function was made: \(name)(\(record.params.joined(separator: ", "))).")
         }
+        try checkCallAnnotations(name: name, record: record, argKinds: argKinds, line: line)
         env.forgetKinds()
     }
 
@@ -586,19 +802,21 @@ final class Checker {
         if try checkBareToolCall(name: name, args: args, line: line, env: &env, outerNames: outerNames, forgiving: true) != nil {
             return
         }
-        guard let params = functions[name] else {
+        guard let record = functions[name] else {
             var message = "I don't know a function called '\(name)' yet. You can make one with: make \(name)(...) { ... }"
             if let suggestion = closestFunctionName(to: name) {
                 message += " Did you mean '\(suggestion)'?"
             }
             throw NiflaError(line: line, message: message)
         }
+        var argKinds: [StaticKind] = []
         for arg in args {
-            _ = try checkExprForgiving(arg, env: &env, outerNames: outerNames)
+            argKinds.append(try checkExprForgiving(arg, env: &env, outerNames: outerNames))
         }
-        guard args.count == params.count else {
-            throw NiflaError(line: line, message: "The function '\(name)' takes \(takesText(params)), but it was given \(args.count). Make the call match how the function was made: \(name)(\(params.joined(separator: ", "))).")
+        guard args.count == record.params.count else {
+            throw NiflaError(line: line, message: "The function '\(name)' takes \(takesText(record.params)), but it was given \(args.count). Make the call match how the function was made: \(name)(\(record.params.joined(separator: ", "))).")
         }
+        try checkCallAnnotations(name: name, record: record, argKinds: argKinds, line: line)
         env.forgetKinds()
     }
 
@@ -630,6 +848,12 @@ final class Checker {
                 return kind
             }
             try checkCall(name: name, args: args, line: line, env: &env, outerNames: outerNames)
+            // Stone 18: a function that promised a kind gives
+            // that kind provably — its callers can be checked
+            // against the promise.
+            if let returnKind = functions[name]?.returnKind, let kind = StaticKind.fromKindWord(returnKind) {
+                return kind
+            }
             return .unknown
 
         case .object(let fields, _):
@@ -652,6 +876,7 @@ final class Checker {
             let baseKind = try checkExpr(base, env: &env, outerNames: outerNames)
             let indexKind = try checkExpr(index, env: &env, outerNames: outerNames)
             try checkIndexKind(base: baseKind, index: indexKind, line: line)
+            try checkIndexRange(base: base, baseKind: baseKind, index: index, env: env, line: line)
             // A character taken from text is provably text; an item
             // taken from a list could be anything.
             return baseKind == .text ? .text : .unknown
@@ -666,6 +891,7 @@ final class Checker {
         case .binary(let leftExpr, let op, let rightExpr, let line):
             let left = try checkExpr(leftExpr, env: &env, outerNames: outerNames)
             let right = try checkExpr(rightExpr, env: &env, outerNames: outerNames)
+            try checkDivisor(op: op, right: rightExpr, env: env, line: line)
             return try checkBinary(op: op, left: left, right: right, line: line)
         }
     }
@@ -696,6 +922,9 @@ final class Checker {
                 return kind
             }
             try checkCallForgiving(name: name, args: args, line: line, env: &env, outerNames: outerNames)
+            if let returnKind = functions[name]?.returnKind, let kind = StaticKind.fromKindWord(returnKind) {
+                return kind
+            }
             return .unknown
 
         case .object(let fields, _):
@@ -718,6 +947,7 @@ final class Checker {
             let baseKind = try checkExprForgiving(base, env: &env, outerNames: outerNames)
             let indexKind = try checkExprForgiving(index, env: &env, outerNames: outerNames)
             try checkIndexKind(base: baseKind, index: indexKind, line: line)
+            try checkIndexRange(base: base, baseKind: baseKind, index: index, env: env, line: line)
             return baseKind == .text ? .text : .unknown
 
         case .floor(let asm, let args, let line):
@@ -730,6 +960,7 @@ final class Checker {
         case .binary(let leftExpr, let op, let rightExpr, let line):
             let left = try checkExprForgiving(leftExpr, env: &env, outerNames: outerNames)
             let right = try checkExprForgiving(rightExpr, env: &env, outerNames: outerNames)
+            try checkDivisor(op: op, right: rightExpr, env: env, line: line)
             return try checkBinary(op: op, left: left, right: right, line: line)
 
         default:
@@ -746,6 +977,266 @@ final class Checker {
         guard base == .list || base == .text || base == .bytes else { return }
         guard index != .unknown && index != .number else { return }
         throw NiflaError(line: line, message: "I can't use \(index.phrase) to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+    }
+
+    // MARK: Stone 18 — annotations and provable ranges
+
+    // The kind a name is recorded under: an annotation's kind
+    // when there is one ('nothing' records as unknown — it is a
+    // promise about a function's giving, not a value's kind),
+    // otherwise the kind the value was proven to have.
+    private func declaredKind(kindWord: String?, proven: StaticKind) -> StaticKind {
+        guard let kindWord else { return proven }
+        return StaticKind.fromKindWord(kindWord) ?? .unknown
+    }
+
+    // Refuses when a proven kind can never satisfy an
+    // annotation. Stays silent when the kind can't be proven —
+    // the runtime guard at the boundary is the keeper there.
+    private func checkAnnotation(kindWord: String, proven: StaticKind, line: Int, wording: String) throws {
+        if kindWord == "nothing" {
+            if proven != .unknown {
+                throw NiflaError(line: line, message: wording + " I caught this before the program ran, so nothing ran.")
+            }
+            return
+        }
+        guard let wanted = StaticKind.fromKindWord(kindWord) else { return }
+        if proven != .unknown && proven != wanted {
+            throw NiflaError(line: line, message: wording + " I caught this before the program ran, so nothing ran.")
+        }
+    }
+
+    // The annotation check at a call: each handed value whose
+    // kind is proven against the parameter it lands in.
+    private func checkCallAnnotations(name: String, record: (params: [String], paramKinds: [String?], returnKind: String?), argKinds: [StaticKind], line: Int) throws {
+        for (index, kindWord) in record.paramKinds.enumerated() {
+            guard let kindWord, index < argKinds.count else { continue }
+            let proven = argKinds[index]
+            guard proven != .unknown else { continue }
+            try checkAnnotation(kindWord: kindWord, proven: proven, line: line, wording: "The value handed to '\(name)' for '\(record.params[index])' is \(proven.phrase), but '\(record.params[index])' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation. Change what the call hands over, or change the annotation.")
+        }
+    }
+
+    // The annotation check at a 'give': the value handed back,
+    // against the promise on the function's 'make' line.
+    private func checkGive(kind: StaticKind, line: Int) throws {
+        guard let returnKind = currentReturnKind, let fname = currentFunctionName else { return }
+        try checkAnnotation(kindWord: returnKind, proven: kind, line: line, wording: "'\(fname)' is marked to give back \(StaticKind.phrase(forKindWord: returnKind)) by its annotation, but this 'give' hands back \(kind.phrase). Change the value, or change the annotation.")
+    }
+
+    // A 'repeat' count the checker can prove is negative.
+    private func checkRepeatCount(_ count: Expr, env: StaticEnv, line: Int) throws {
+        if let value = constNumber(count, in: env), value < 0 {
+            throw NiflaError(line: line, message: "'repeat' was told to run \(formatNumber(value)) times, but a count can't be negative — a loop can't run less than zero times. Use zero or more, like: repeat 3 { ... } I caught this before the program ran, so nothing ran.")
+        }
+    }
+
+    // A division whose second number the checker can prove is
+    // zero. (Nifla has no modulo sign; '/' is the only divisor.)
+    private func checkDivisor(op: String, right: Expr, env: StaticEnv, line: Int) throws {
+        guard op == "/" else { return }
+        if let value = constNumber(right, in: env), value == 0 {
+            throw NiflaError(line: line, message: "I can't divide by zero. Dividing needs a second number that isn't zero. I caught this before the program ran, so nothing ran.")
+        }
+    }
+
+    // An index the checker can prove lands outside: a literal
+    // text or list carries its length on its face; a list
+    // variable proven empty refuses any index; a negative whole
+    // index can never pick from anything.
+    private func checkIndexRange(base: Expr, baseKind: StaticKind, index: Expr, env: StaticEnv, line: Int) throws {
+        let raw = constNumber(index, in: env)
+        let whole: Int? = raw.flatMap { $0 == $0.rounded() && abs($0) < 1e15 ? Int($0) : nil }
+        let suffix = " I caught this before the program ran, so nothing ran."
+        if case .text(let text, _) = base {
+            let length = text.count
+            if length == 0 {
+                if let i = whole {
+                    throw NiflaError(line: line, message: "This text has no characters yet, so there is no character \(i) to take from it." + suffix)
+                }
+                throw NiflaError(line: line, message: "This text is empty — it has no characters — so no number can pick a character from it." + suffix)
+            }
+            if let i = whole, i < 0 || i >= length {
+                throw NiflaError(line: line, message: "This text has \(length) characters, numbered 0 to \(length - 1), but I was asked for character \(i)." + suffix)
+            }
+            return
+        }
+        if case .list(let items, _) = base {
+            if items.isEmpty {
+                if let i = whole {
+                    throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(i) to take from it. Items can be added with append — like: append(items, ...)." + suffix)
+                }
+                throw NiflaError(line: line, message: "This list is empty — it has no items — so no number can pick an item from it. Items can be added with append — like: append(items, ...)." + suffix)
+            }
+            if let i = whole, i < 0 || i >= items.count {
+                throw NiflaError(line: line, message: "This list has \(items.count) items, numbered 0 to \(items.count - 1), but I was asked for item \(i)." + suffix)
+            }
+            return
+        }
+        if case .variable(let name, _) = base, baseKind == .list, env.isProvenEmpty(name) {
+            if let i = whole {
+                throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(i) to take from it. Items can be added with append — like: append(items, ...)." + suffix)
+            }
+            throw NiflaError(line: line, message: "This list is empty — it has no items — so no number can pick an item from it. Items can be added with append — like: append(items, ...)." + suffix)
+        }
+        // A variable whose list or text length is tracked (it
+        // was made from a literal of that length and nothing
+        // provably changed it since).
+        if case .variable(let name, _) = base, let length = env.lookupLength(name), baseKind == .list || baseKind == .text {
+            if length == 0 {
+                if baseKind == .text {
+                    if let i = whole {
+                        throw NiflaError(line: line, message: "This text has no characters yet, so there is no character \(i) to take from it." + suffix)
+                    }
+                    throw NiflaError(line: line, message: "This text is empty — it has no characters — so no number can pick a character from it." + suffix)
+                }
+                if let i = whole {
+                    throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(i) to take from it. Items can be added with append — like: append(items, ...)." + suffix)
+                }
+                throw NiflaError(line: line, message: "This list is empty — it has no items — so no number can pick an item from it. Items can be added with append — like: append(items, ...)." + suffix)
+            }
+            if let i = whole, i < 0 || i >= length {
+                if baseKind == .text {
+                    throw NiflaError(line: line, message: "This text has \(length) characters, numbered 0 to \(length - 1), but I was asked for character \(i)." + suffix)
+                }
+                throw NiflaError(line: line, message: "This list has \(length) items, numbered 0 to \(length - 1), but I was asked for item \(i)." + suffix)
+            }
+            return
+        }
+        if let i = whole, i < 0, baseKind == .list || baseKind == .text || baseKind == .bytes {
+            throw NiflaError(line: line, message: "Items are numbered starting at 0, so item \(i) can never be taken — there is nothing before the first one." + suffix)
+        }
+    }
+
+    // The ranges of the built-in tools that the checker can
+    // prove from literals and tracked facts: makebytes' count,
+    // exitwith's parting number, removeat on a list proven
+    // empty or of literal length, and part's span over a
+    // literal text. Each refusal speaks in the run's own words.
+    private func checkBuiltinRanges(name: String, args: [Expr], env: StaticEnv, line: Int) throws {
+        let suffix = " I caught this before the program ran, so nothing ran."
+        switch name {
+        case "makebytes":
+            guard args.count == 1, let value = constNumber(args[0], in: env) else { return }
+            if value < 0 {
+                throw NiflaError(line: line, message: "'makebytes' was told to make \(formatNumber(value)) bytes, but a count can't be less than 0." + suffix)
+            }
+            if value > 16_777_216 {
+                throw NiflaError(line: line, message: "'makebytes' was told to make \(formatNumber(value)) bytes, but one block can hold at most 16777216 bytes." + suffix)
+            }
+        case "exitwith":
+            guard args.count == 1, let value = constNumber(args[0], in: env) else { return }
+            if value != value.rounded() || value < 0 || value > 255 {
+                throw NiflaError(line: line, message: "'exitwith' needs a whole number from 0 to 255, but it was given \(formatNumber(value))." + suffix)
+            }
+        case "removeat":
+            guard args.count == 2 else { return }
+            let raw = constNumber(args[1], in: env)
+            let whole: Int? = raw.flatMap { $0 == $0.rounded() && abs($0) < 1e15 ? Int($0) : nil }
+            var length: Int? = nil
+            var provenEmpty = false
+            if case .list(let items, _) = args[0] {
+                length = items.count
+                provenEmpty = items.isEmpty
+            } else if case .variable(let listName, _) = args[0] {
+                provenEmpty = env.isProvenEmpty(listName)
+                length = env.lookupLength(listName)
+            }
+            if provenEmpty {
+                if let i = whole {
+                    throw NiflaError(line: line, message: "This list has no items yet, so there is no item \(i) to remove." + suffix)
+                }
+                throw NiflaError(line: line, message: "This list is empty — it has no items — so there is no item to remove from it." + suffix)
+            }
+            if let length, let i = whole, i < 0 || i >= length {
+                throw NiflaError(line: line, message: "This list has \(length) items, numbered 0 to \(length - 1), but I was asked to remove item \(i)." + suffix)
+            }
+        case "part":
+            guard args.count == 3, case .text(let text, _) = args[0] else { return }
+            let length = text.count
+            let start = constNumber(args[1], in: env).flatMap { $0 == $0.rounded() && abs($0) < 1e15 ? Int($0) : nil }
+            let count = constNumber(args[2], in: env).flatMap { $0 == $0.rounded() && abs($0) < 1e15 ? Int($0) : nil }
+            if let s = start, s < 0 {
+                throw NiflaError(line: line, message: "'part' was told to start at character \(s), but the first character is number 0 — a start can't be less than 0." + suffix)
+            }
+            if let c = count, c < 0 {
+                throw NiflaError(line: line, message: "'part' was told to take \(c) characters, but a count can't be less than 0." + suffix)
+            }
+            if let s = start, s > length {
+                if length == 0 {
+                    throw NiflaError(line: line, message: "'part' was told to start at character \(s), but the text has no characters yet." + suffix)
+                }
+                throw NiflaError(line: line, message: "'part' was told to start at character \(s), but the text has only \(length) characters, numbered 0 to \(length - 1)." + suffix)
+            }
+            if let s = start, let c = count, length > 0, s + c > length {
+                throw NiflaError(line: line, message: "'part' was told to take \(c) characters starting at character \(s), but the text has only \(length) characters, numbered 0 to \(length - 1) — that runs past the end." + suffix)
+            }
+        default:
+            return
+        }
+    }
+
+    // The number an expression provably holds, from literals and
+    // simple tracked facts only: a literal, the negative of one,
+    // a variable whose constant is tracked, and plain arithmetic
+    // over those. Anything else — a call, a field, an item —
+    // proves nothing, and this stays silent (nil).
+    private func constNumber(_ expr: Expr, in env: StaticEnv) -> Double? {
+        switch expr {
+        case .number(let value, _):
+            return value
+        case .negate(let inner, _):
+            return constNumber(inner, in: env).map { -$0 }
+        case .variable(let name, _):
+            return env.lookupConstant(name)
+        case .binary(let left, let op, let right, _):
+            guard let a = constNumber(left, in: env), let b = constNumber(right, in: env) else { return nil }
+            switch op {
+            case "+": return a + b
+            case "-": return a - b
+            case "*": return a * b
+            case "/": return b == 0 ? nil : a / b
+            default: return nil
+            }
+        default:
+            return nil
+        }
+    }
+
+    // The length an expression provably holds, when it is a
+    // literal list or text: the length is on its face. (A
+    // variable's length is never taken from another variable —
+    // the two names share one list, and either could change it
+    // where the checker can't watch.)
+    private func literalLength(of expr: Expr) -> Int? {
+        switch expr {
+        case .list(let items, _): return items.count
+        case .text(let text, _): return text.count
+        default: return nil
+        }
+    }
+
+    // Whether an expression provably holds an empty list: the
+    // empty list itself, or a variable tracked as holding one.
+    private func isEmptyListExpr(_ expr: Expr, in env: StaticEnv) -> Bool {
+        switch expr {
+        case .list(let items, _):
+            return items.isEmpty
+        case .variable(let name, _):
+            return env.isProvenEmpty(name)
+        default:
+            return false
+        }
+    }
+
+    // A list value handed on — into a new variable, by a 'let'
+    // or a set — is the same list under two names, and the new
+    // name could grow it where the checker can't watch. The old
+    // name's facts are given up, so the checker stays honest.
+    private func noteAliasing(of expr: Expr, env: inout StaticEnv) {
+        if case .variable(let name, _) = expr {
+            env.forgetFacts(about: name)
+        }
     }
 
     // A floor block (Stones 7 and 9): the checker treats the

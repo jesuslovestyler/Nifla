@@ -1,0 +1,4 @@
+// Stone 18: a block of bytes asked to hold more than the
+// 16777216-byte cap — refused before the program runs.
+let b = makebytes(20000000)
+say length(b)

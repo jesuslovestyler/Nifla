@@ -1,0 +1,1 @@
+Line 4: 'word' is marked to give back some text by its annotation, but this 'give' hands back a number. Change the value, or change the annotation. I caught this before the program ran, so nothing ran.

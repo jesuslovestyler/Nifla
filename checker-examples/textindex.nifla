@@ -1,0 +1,5 @@
+// Stone 18: a character asked for past the end of a text
+// whose length the checker tracks from its making —
+// refused before the program runs.
+let t = "Tyler"
+say t[9]

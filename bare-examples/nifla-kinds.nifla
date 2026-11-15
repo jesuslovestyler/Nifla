@@ -1,0 +1,12 @@
+// Stone 18: annotations on bare metal. A marked variable,
+// marked parameters, and a promised give — all in the shapes
+// bare metal holds (a number, some text). The marks are
+// checked before the program is built, the same as anywhere
+// in Nifla; the program then runs as it would without them.
+let base: number = 40
+let word: text = "kinds"
+make add(a: number, b: number) -> number {
+    give a + b
+}
+say word
+say add(base, 2)

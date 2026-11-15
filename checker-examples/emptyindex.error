@@ -1,0 +1,1 @@
+Line 4: This list has no items yet, so there is no item 0 to take from it. Items can be added with append — like: append(items, ...). I caught this before the program ran, so nothing ran.

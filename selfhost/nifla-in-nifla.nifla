@@ -405,6 +405,40 @@ make described(v) {
     give ""
 }
 
+// Stone 18: how a kind word is spoken of in a guard's
+// message — the same phrases the Swift checker uses.
+make kindPhrase(word) {
+    if word == "number" {
+        give "a number"
+    }
+    if word == "text" {
+        give "some text"
+    }
+    if word == "boolean" {
+        give "a true/false value"
+    }
+    if word == "list" {
+        give "a list"
+    }
+    if word == "object" {
+        give "an object"
+    }
+    if word == "bytes" {
+        give "a block of bytes"
+    }
+    give "nothing"
+}
+
+// Stone 18: whether a value satisfies an annotation. A
+// value's own kind answers to the same word (see the value
+// makers above); 'nothing' is satisfied only by no value.
+make kindSatisfies(word, v) {
+    if word == "nothing" {
+        give v.kind == "nothing"
+    }
+    give v.kind == word
+}
+
 // What 'say' shows for a value, at the top level.
 make spokenOf(v) {
     give renderValue(v, [], false)
@@ -416,7 +450,7 @@ make spokenOf(v) {
 // variable reaches the scope that made it.
 
 make makeScope(parent) {
-    give { kind: "scope", names: [], values: [], parent: parent }
+    give { kind: "scope", names: [], values: [], parent: parent, annNames: [], annWords: [] }
 }
 
 make scopeLookup(scope, name) {
@@ -438,6 +472,28 @@ make scopeDeclaredHere(scope, name) {
 make scopeDeclare(scope, name, value) {
     append(scope.names, name)
     append(scope.values, value)
+}
+
+// Stone 18: remembers the kind annotation a variable was
+// made with, in the scope that made it — the runtime guard's
+// memory of the promise.
+make scopeDeclareAnnotation(scope, name, word) {
+    append(scope.annNames, name)
+    append(scope.annWords, word)
+}
+
+// The annotation a variable was made with, looked up through
+// the scopes around it; "" when it was made with none.
+make scopeAnnotation(scope, name) {
+    let here = scope
+    while here.kind != "nothing" {
+        let i = nameIndex(here.annNames, name)
+        if i >= 0 {
+            give here.annWords[i]
+        }
+        here = here.parent
+    }
+    give ""
 }
 
 // Sets the variable in whichever scope made it; gives back
@@ -655,6 +711,10 @@ make lexOne() {
         give okVal({ kind: "symbol", symbol: pair, line: startLine })
     }
     if pair == ">=" {
+        gPos = gPos + 2
+        give okVal({ kind: "symbol", symbol: pair, line: startLine })
+    }
+    if pair == "->" {
         gPos = gPos + 2
         give okVal({ kind: "symbol", symbol: pair, line: startLine })
     }
@@ -932,7 +992,7 @@ make lexFloorRest(startLine) {
 // ---------- the parser ----------
 // Reads the tokens and builds a tree of statements and
 // expressions, as tagged objects:
-//   statements: { type: "declare", name, value, line }
+//   statements: { type: "declare", name, kindWord, value, line }
 //               { type: "assign", name, value, line }
 //               { type: "assignTarget", target, value, line }
 //               { type: "say", value, line }
@@ -940,7 +1000,7 @@ make lexFloorRest(startLine) {
 //               { type: "while", condition, body, line }
 //               { type: "repeat", count, body, line }
 //               { type: "for", name, over, body, line }
-//               { type: "define", name, params, body, line }
+//               { type: "define", name, params, paramKinds, returnKind, body, line }
 //               { type: "give", value, line }
 //               { type: "attempt", body, recovery, line }
 //               { type: "doCall", name, args, line }
@@ -1059,6 +1119,49 @@ make parseBlock(openLine) {
     give okVal(stmts)
 }
 
+// Stone 18: reads one kind word where an annotation puts
+// one — after a ':' in a 'let' or a 'make', or after the
+// arrow of a 'make'. The words are the checker's own kind
+// vocabulary; anything else is refused in plain words, in
+// the Swift parser's own wording.
+make isKindWord(word) {
+    if word == "number" {
+        give true
+    }
+    if word == "text" {
+        give true
+    }
+    if word == "boolean" {
+        give true
+    }
+    if word == "list" {
+        give true
+    }
+    if word == "object" {
+        give true
+    }
+    if word == "bytes" {
+        give true
+    }
+    if word == "nothing" {
+        give true
+    }
+    give false
+}
+
+make parseKindWord(after) {
+    let t = pCur()
+    if t.kind != "name" {
+        give errAt(t.line, "After the " + after + " I need a kind — one of: number, text, boolean, list, object, bytes, nothing. Instead I found " + pSpoken(t) + ".")
+    }
+    let word = t.name
+    if isKindWord(word) == false {
+        give errAt(t.line, "I don't know a kind called '" + word + "'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing.")
+    }
+    pAdvance()
+    give okVal(word)
+}
+
 make parseStatement() {
     let token = pCur()
 
@@ -1086,6 +1189,15 @@ make parseStatement() {
         }
         let name = pCur().name
         pAdvance()
+        let kindWord = ""
+        if pIsSym(":") {
+            pAdvance()
+            let k = parseKindWord("':' after 'let " + name + "'")
+            if k.ok == false {
+                give k
+            }
+            kindWord = k.value
+        }
         if pIsSym("=") == false {
             give errAt(pCur().line, "After 'let " + name + "' I need an '=' and then a value, like: let " + name + " = 29. Instead I found " + pSpoken(pCur()) + ".")
         }
@@ -1094,7 +1206,7 @@ make parseStatement() {
         if v.ok == false {
             give v
         }
-        give okVal({ type: "declare", name: name, value: v.value, line: token.line })
+        give okVal({ type: "declare", name: name, kindWord: kindWord, value: v.value, line: token.line })
     }
 
     if pIsKw("say") {
@@ -1221,6 +1333,7 @@ make parseStatement() {
         }
         pAdvance()  // the '('
         let params = []
+        let paramKinds = []
         if pIsSym(")") == false {
             let collecting = true
             while collecting {
@@ -1233,6 +1346,16 @@ make parseStatement() {
                 }
                 append(params, param)
                 pAdvance()
+                let pkind = ""
+                if pIsSym(":") {
+                    pAdvance()
+                    let k = parseKindWord("':' after '" + param + "'")
+                    if k.ok == false {
+                        give k
+                    }
+                    pkind = k.value
+                }
+                append(paramKinds, pkind)
                 if pIsSym(",") {
                     pAdvance()
                 } else {
@@ -1244,6 +1367,15 @@ make parseStatement() {
             give errAt(pCur().line, "I expected a ')' to close the list of values for '" + name + "', but I found " + pSpoken(pCur()) + ".")
         }
         pAdvance()  // the ')'
+        let returnKind = ""
+        if pIsSym("->") {
+            pAdvance()
+            let k = parseKindWord("'->' in 'make " + name + "'")
+            if k.ok == false {
+                give k
+            }
+            returnKind = k.value
+        }
         if pIsSym("{") == false {
             give errAt(pCur().line, "After 'make " + name + "(...)' I need a '{' to start the block that runs when the function is called. Instead I found " + pSpoken(pCur()) + ".")
         }
@@ -1253,7 +1385,7 @@ make parseStatement() {
         if bodyR.ok == false {
             give bodyR
         }
-        give okVal({ type: "define", name: name, params: params, body: bodyR.value, line: token.line })
+        give okVal({ type: "define", name: name, params: params, paramKinds: paramKinds, returnKind: returnKind, body: bodyR.value, line: token.line })
     }
 
     if pIsKw("give") {
@@ -1781,6 +1913,9 @@ let mStack = []
 let mResult = okDone()
 let mHasResult = false
 let mGave = false
+// Stone 18: the line of the 'give' whose value is travelling
+// — the return guard at the call boundary speaks of it.
+let mGiveLine = 0
 let mDone = { ok: true, gave: false, value: NOTHING }
 let mNotLeaf = { leaf: false }
 
@@ -1961,11 +2096,27 @@ make stepTop() {
             give mDone
         }
         if top.kind == "declare" {
+            if top.stmt.kindWord != "" {
+                if kindSatisfies(top.stmt.kindWord, mResult.value) == false {
+                    finishFrame(errAt(top.stmt.line, "'" + top.stmt.name + "' is marked as " + kindPhrase(top.stmt.kindWord) + " by its annotation, but this value is " + described(mResult.value) + ". Change the value, or change the annotation."), false)
+                    give mDone
+                }
+            }
             scopeDeclare(top.scope, top.stmt.name, mResult.value)
+            if top.stmt.kindWord != "" {
+                scopeDeclareAnnotation(top.scope, top.stmt.name, top.stmt.kindWord)
+            }
             finishFrame(mDone, false)
             give mDone
         }
         if top.kind == "assign" {
+            let aw = scopeAnnotation(top.scope, top.stmt.name)
+            if aw != "" {
+                if kindSatisfies(aw, mResult.value) == false {
+                    finishFrame(errAt(top.stmt.line, "'" + top.stmt.name + "' is marked as " + kindPhrase(aw) + " by its annotation, but this value is " + described(mResult.value) + ". Change the value, or change the annotation."), false)
+                    give mDone
+                }
+            }
             if scopeAssign(top.scope, top.stmt.name, mResult.value) == false {
                 finishFrame(errAt(top.stmt.line, "I can't set '" + top.stmt.name + "', because no variable called '" + top.stmt.name + "' has been made yet. Make one first with: let " + top.stmt.name + " = ..."), false)
                 give mDone
@@ -1983,6 +2134,7 @@ make stepTop() {
             give mDone
         }
         if top.kind == "giveStmt" {
+            mGiveLine = top.stmt.line
             finishFrame({ ok: true, gave: true, value: mResult.value }, true)
             give mDone
         }
@@ -2043,6 +2195,14 @@ make stepUnwind(top) {
             gCallDepth = gCallDepth - 1
             if mGave {
                 let value = mResult.value
+                if top.def.returnKind != "" {
+                    if kindSatisfies(top.def.returnKind, value) == false {
+                        removeat(mStack, length(mStack) - 1)
+                        mGave = false
+                        holdResult(errAt(mGiveLine, "'" + top.name + "' is marked to give back " + kindPhrase(top.def.returnKind) + " by its annotation, but this 'give' hands back " + described(value) + ". Change the value, or change the annotation."), false)
+                        give mDone
+                    }
+                }
                 removeat(mStack, length(mStack) - 1)
                 mGave = false
                 if top.inExpr {
@@ -2130,7 +2290,7 @@ make dispatchStmt(blockFrame, s) {
             give mDone
         }
         append(gFnNames, s.name)
-        append(gFnDefs, { params: s.params, body: s.body, home: blockFrame.scope })
+        append(gFnDefs, { params: s.params, paramKinds: s.paramKinds, returnKind: s.returnKind, body: s.body, home: blockFrame.scope })
         holdResult(mDone, false)
         give mDone
     }
@@ -3008,6 +3168,12 @@ make consumeCall(top) {
     }
     if top.stage == 2 {
         gCallDepth = gCallDepth - 1
+        if top.def.returnKind != "" {
+            if top.def.returnKind != "nothing" {
+                finishFrame(errAt(top.line, "'" + top.name + "' is marked to give back " + kindPhrase(top.def.returnKind) + " by its annotation, but it finished without giving a value back. Add a 'give' line inside '" + top.name + "', or change the annotation."), false)
+                give mDone
+            }
+        }
         finishCall(top, okVal(NOTHING))
         give mDone
     }
@@ -3030,6 +3196,20 @@ make dispatchCall(top) {
         finishFrame(errAt(top.line, "The function '" + top.name + "' takes " + takesText(def.params) + ", but it was given " + length(top.values) + ". Make the call match how the function was made: " + top.name + "(" + join(def.params, ", ") + ")."), false)
         give mDone
     }
+    // Stone 18: the guards at the annotated boundaries of
+    // the call — each annotated parameter checks the value
+    // handed to it, here at the call.
+    let pi = 0
+    while pi < length(def.params) {
+        let kw = def.paramKinds[pi]
+        if kw != "" {
+            if kindSatisfies(kw, top.values[pi]) == false {
+                finishFrame(errAt(top.line, "The value handed to '" + top.name + "' for '" + def.params[pi] + "' is " + described(top.values[pi]) + ", but '" + def.params[pi] + "' is marked as " + kindPhrase(kw) + " by its annotation. Change what the call hands over, or change the annotation."), false)
+                give mDone
+            }
+        }
+        pi = pi + 1
+    }
     if gCallDepth >= 500 {
         finishFrame(errAt(top.line, "This call is more than five hundred functions deep and was stopped — it may never finish. A function that calls itself needs a way to stop, like an 'if' that gives an answer for the smallest case instead of calling again."), false)
         give mDone
@@ -3039,6 +3219,9 @@ make dispatchCall(top) {
     let i = 0
     while i < length(def.params) {
         scopeDeclare(callScope, def.params[i], top.values[i])
+        if def.paramKinds[i] != "" {
+            scopeDeclareAnnotation(callScope, def.params[i], def.paramKinds[i])
+        }
         i = i + 1
     }
     top.stage = 2

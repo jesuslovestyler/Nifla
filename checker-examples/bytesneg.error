@@ -1,0 +1,1 @@
+Line 3: 'makebytes' was told to make -3 bytes, but a count can't be less than 0. I caught this before the program ran, so nothing ran.

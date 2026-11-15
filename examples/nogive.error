@@ -1,0 +1,1 @@
+Line 7: 'word' is marked to give back some text by its annotation, but it finished without giving a value back. Add a 'give' line inside 'word', or change the annotation.

@@ -1,0 +1,6 @@
+// Asking a list for an item it doesn't have. Since Stone 18 the
+// checker proves it before the program runs (the list's length
+// is tracked from its making), so this lives with the checker
+// examples now.
+let items = [1, 2, 3]
+say items[5]

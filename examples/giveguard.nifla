@@ -1,0 +1,10 @@
+// Stone 18: a function that promised a kind guards its own
+// 'give' lines — a value the checker couldn't prove wrong
+// is checked as it is handed back.
+make pick(x) {
+    give x
+}
+make word() -> text {
+    give pick(7)
+}
+say word()

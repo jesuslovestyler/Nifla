@@ -1,0 +1,4 @@
+// Stone 18: an item asked for from a list the checker can
+// prove is empty — refused before the program runs.
+let items = []
+say items[0]

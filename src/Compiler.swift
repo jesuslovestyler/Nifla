@@ -87,9 +87,21 @@ struct SwiftTranslator {
 
     private mutating func translateStatement(_ statement: Stmt, scope: String, inFunction: Bool, indent: String) {
         switch statement {
-        case .declare(let name, let valueExpr, let line):
+        case .declare(let name, let kindWord, let valueExpr, let line):
             emit(indent, "try __m.checkDeclare(\(swiftText(name)), in: \(scope), line: \(line))")
-            emit(indent, "\(scope).declare(\(swiftText(name)), \(genExpr(valueExpr, scope: scope)))")
+            if let kindWord {
+                // Stone 18: an annotated 'let' — the value is
+                // checked against the annotation before the
+                // variable exists, and the annotation is
+                // remembered for every later setting of it.
+                let value = fresh("v")
+                emit(indent, "let \(value) = \(genExpr(valueExpr, scope: scope))")
+                emit(indent, "try __m.checkAnnotation(name: \(swiftText(name)), kindWord: \(swiftText(kindWord)), value: \(value), line: \(line))")
+                emit(indent, "\(scope).declare(\(swiftText(name)), \(value))")
+                emit(indent, "\(scope).declareAnnotation(\(swiftText(name)), \(swiftText(kindWord)))")
+            } else {
+                emit(indent, "\(scope).declare(\(swiftText(name)), \(genExpr(valueExpr, scope: scope)))")
+            }
 
         case .assign(let name, let valueExpr, let line):
             emit(indent, "try __m.assign(\(swiftText(name)), \(genExpr(valueExpr, scope: scope)), in: \(scope), line: \(line))")
@@ -159,15 +171,17 @@ struct SwiftTranslator {
             emit(indent + "    ", "\(pos) += 1")
             emit(indent, "}")
 
-        case .define(let name, let params, let body, let line):
+        case .define(let name, let params, let paramKinds, let returnKind, let body, let line):
             let paramList = params.map { swiftText($0) }.joined(separator: ", ")
-            emit(indent, "try __m.define(\(swiftText(name)), params: [\(paramList)], home: \(scope), line: \(line)) { __m, __call in")
+            let kindList = paramKinds.map { $0.map { swiftText($0) } ?? "nil" }.joined(separator: ", ")
+            let retKind = returnKind.map { swiftText($0) } ?? "nil"
+            emit(indent, "try __m.define(\(swiftText(name)), params: [\(paramList)], paramKinds: [\(kindList)], returnKind: \(retKind), home: \(scope), line: \(line)) { __m, __call in")
             translateBlock(body, scope: "__call", inFunction: true, indent: indent + "    ")
             emit(indent, "}")
 
         case .give(let valueExpr, let line):
             if inFunction {
-                emit(indent, "throw NiflaReturn(value: \(genExpr(valueExpr, scope: scope)))")
+                emit(indent, "throw NiflaReturn(value: \(genExpr(valueExpr, scope: scope)), line: \(line))")
             } else {
                 emit(indent, "try __m.giveOutside(line: \(line))")
             }

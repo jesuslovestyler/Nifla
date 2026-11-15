@@ -1,0 +1,4 @@
+// Stone 18: a block of bytes asked to hold a negative
+// count — refused before the program runs.
+let b = makebytes(-3)
+say length(b)

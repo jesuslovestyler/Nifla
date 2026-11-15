@@ -1,0 +1,3 @@
+// Stone 18: a parting number that isn't whole — refused
+// before the program runs.
+exitwith(2.5)

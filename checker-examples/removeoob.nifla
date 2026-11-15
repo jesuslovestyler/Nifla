@@ -1,0 +1,5 @@
+// Stone 18: an item removed past the end of a list whose
+// length the checker tracks — refused before the program
+// runs.
+let items = [10, 20, 30]
+removeat(items, 5)

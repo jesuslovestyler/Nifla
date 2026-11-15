@@ -10,7 +10,12 @@ attempt {
     say "No notes yet — starting fresh."
 }
 attempt {
-    let answer = 10 / 0
+    // The zero here is worked out while the program runs. A
+    // zero written plainly — 10 / 0 — is refused before the
+    // program starts, since Stone 18 taught the checker to
+    // prove it; a runtime zero is attempt's to catch.
+    let zero = length("")
+    let answer = 10 / zero
     say answer
 } if it fails {
     say "That sum went wrong: " + problem

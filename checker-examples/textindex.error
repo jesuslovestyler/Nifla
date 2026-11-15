@@ -1,0 +1,1 @@
+Line 5: This text has 5 characters, numbered 0 to 4, but I was asked for character 9. I caught this before the program ran, so nothing ran.

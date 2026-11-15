@@ -50,7 +50,12 @@ indirect enum Expr {
 }
 
 enum Stmt {
-    case declare(name: String, value: Expr, line: Int)
+    // Stone 18: a 'let' may carry an optional kind annotation
+    // (let name: number = ...), and a 'make' may annotate its
+    // parameters (make f(a: number)) and the kind it gives back
+    // (make f(...) -> number). The annotation is the kind's word
+    // as written, or nil when there is none — most code has none.
+    case declare(name: String, kind: String?, value: Expr, line: Int)
     case assign(name: String, value: Expr, line: Int)
     case assignTarget(target: Expr, value: Expr, line: Int)  // target ends in a .field or [index] step
     case say(Expr, line: Int)
@@ -58,7 +63,7 @@ enum Stmt {
     case whileLoop(condition: Expr, body: [Stmt], line: Int)
     case repeatLoop(count: Expr, body: [Stmt], line: Int)
     case forEach(name: String, over: Expr, body: [Stmt], line: Int)
-    case define(name: String, params: [String], body: [Stmt], line: Int)
+    case define(name: String, params: [String], paramKinds: [String?], returnKind: String?, body: [Stmt], line: Int)
     case give(Expr, line: Int)
     case attempt(body: [Stmt], recovery: [Stmt], line: Int)
     case doCall(name: String, args: [Expr], line: Int)
@@ -98,6 +103,25 @@ final class Parser {
         return statements
     }
 
+    // The kinds a value may be marked as (Stone 18) — the
+    // checker's own vocabulary, plus 'nothing' for a function
+    // that promises to give nothing back.
+    static let kindWords: Set<String> = ["number", "text", "boolean", "list", "object", "bytes", "nothing"]
+
+    // Reads one kind word where an annotation stands. The word
+    // arrives as a name token; anything else — or a name that
+    // isn't a kind — is refused in plain words.
+    private func parseKindWord(after: String) throws -> String {
+        guard case .name(let word) = current.kind else {
+            throw NiflaError(line: current.line, message: "After the \(after) I need a kind — one of: number, text, boolean, list, object, bytes, nothing. Instead I found \(current.spoken).")
+        }
+        guard Parser.kindWords.contains(word) else {
+            throw NiflaError(line: current.line, message: "I don't know a kind called '\(word)'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing.")
+        }
+        advance()
+        return word
+    }
+
     private func parseBlock(openLine: Int) throws -> [Stmt] {
         var statements: [Stmt] = []
         while !checkSymbol("}") {
@@ -133,12 +157,19 @@ final class Parser {
                 throw NiflaError(line: current.line, message: "After 'let' I need a name for the new variable, like: let years = 29. Instead I found \(current.spoken).")
             }
             advance()
+            // Stone 18: an optional kind annotation —
+            // let years: number = 29.
+            var kind: String? = nil
+            if checkSymbol(":") {
+                advance()
+                kind = try parseKindWord(after: "':' after 'let \(name)'")
+            }
             guard checkSymbol("=") else {
                 throw NiflaError(line: current.line, message: "After 'let \(name)' I need an '=' and then a value, like: let \(name) = 29. Instead I found \(current.spoken).")
             }
             advance()
             let value = try parseExpression()
-            return .declare(name: name, value: value, line: token.line)
+            return .declare(name: name, kind: kind, value: value, line: token.line)
         }
 
         if checkKeyword("say") {
@@ -230,6 +261,7 @@ final class Parser {
             }
             advance()  // the '('
             var params: [String] = []
+            var paramKinds: [String?] = []
             if !checkSymbol(")") {
                 while true {
                     guard case .name(let param) = current.kind else {
@@ -240,6 +272,14 @@ final class Parser {
                     }
                     params.append(param)
                     advance()
+                    // Stone 18: an optional kind annotation on
+                    // the value — make greet(name: text) { ... }.
+                    var paramKind: String? = nil
+                    if checkSymbol(":") {
+                        advance()
+                        paramKind = try parseKindWord(after: "':' after '\(param)'")
+                    }
+                    paramKinds.append(paramKind)
                     if checkSymbol(",") {
                         advance()
                         continue
@@ -251,13 +291,20 @@ final class Parser {
                 throw NiflaError(line: current.line, message: "I expected a ')' to close the list of values for '\(name)', but I found \(current.spoken).")
             }
             advance()  // the ')'
+            // Stone 18: an optional promised kind after the
+            // arrow — make twice(n: number) -> number { ... }.
+            var returnKind: String? = nil
+            if checkSymbol("->") {
+                advance()
+                returnKind = try parseKindWord(after: "'->' in 'make \(name)'")
+            }
             guard checkSymbol("{") else {
                 throw NiflaError(line: current.line, message: "After 'make \(name)(...)' I need a '{' to start the block that runs when the function is called. Instead I found \(current.spoken).")
             }
             let openLine = current.line
             advance()
             let body = try parseBlock(openLine: openLine)
-            return .define(name: name, params: params, body: body, line: token.line)
+            return .define(name: name, params: params, paramKinds: paramKinds, returnKind: returnKind, body: body, line: token.line)
         }
 
         if checkKeyword("give") {

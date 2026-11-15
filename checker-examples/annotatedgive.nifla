@@ -1,0 +1,6 @@
+// Stone 18: a 'give' whose kind provably breaks the promise
+// on the 'make' line — refused before the program runs.
+make word() -> text {
+    give 7
+}
+say word()

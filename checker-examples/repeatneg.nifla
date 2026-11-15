@@ -1,0 +1,8 @@
+// Stone 18: a repeat count the checker can prove is
+// negative, through a variable whose number it tracks —
+// refused before the program runs. (Hosted Nifla used to
+// learn this only when the loop was reached.)
+let times = 0 - 2
+repeat times {
+    say "x"
+}

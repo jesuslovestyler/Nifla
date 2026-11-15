@@ -1,0 +1,6 @@
+// Stone 18: a call handing a provably wrong kind to an
+// annotated parameter — refused before the program runs.
+make double(v: number) -> number {
+    give v * 2
+}
+say double("oops")

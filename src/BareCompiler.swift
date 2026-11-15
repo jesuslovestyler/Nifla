@@ -127,20 +127,42 @@ final class BareValidator {
         // Functions are collected from the program's top level
         // only; a 'make' anywhere else is refused when met.
         for statement in program {
-            if case .define(let name, let params, _, let line) = statement {
+            if case .define(let name, let params, let paramKindWords, let returnKindWord, _, let line) = statement {
                 if bareOnlyTools[name] != nil || guestDeskTools[name] != nil || guestDoorTools[name] != nil {
                     throw NiflaError(line: line, message: "There is already a bare-metal tool called '\(name)' — every bare program has it from the start. A function can't be made with that name; rename the function.")
                 }
                 functions[name] = (params: params, giveKind: .unknown)
                 defineLines[name] = line
                 definitionOrder.append(name)
-                paramKinds[name] = [BareKind](repeating: .unknown, count: params.count)
+                // Stone 18: annotations on the 'make' line seed
+                // the shapes — a parameter's marked kind is the
+                // shape every call and every use must agree on,
+                // and the arrow's kind is the shape of the give.
+                // Kinds bare metal can't hold are refused here.
+                var seeded: [BareKind] = []
+                for word in paramKindWords {
+                    if let word {
+                        guard let kind = bareKind(forAnnotation: word) else {
+                            throw NiflaError(line: line, message: "Bare metal can't hold \(StaticKind.phrase(forKindWord: word)) — an annotation there can only mark a number, some text, a true/false value, or a block of bytes.")
+                        }
+                        seeded.append(kind)
+                    } else {
+                        seeded.append(.unknown)
+                    }
+                }
+                paramKinds[name] = seeded
+                if let returnKindWord {
+                    guard let kind = bareKind(forAnnotation: returnKindWord) else {
+                        throw NiflaError(line: line, message: "Bare metal can't hold \(StaticKind.phrase(forKindWord: returnKindWord)) — an annotation there can only mark a number, some text, a true/false value, or a block of bytes.")
+                    }
+                    functions[name]!.giveKind = kind
+                }
             }
         }
         // Bodies first, in the order they were written, then
         // the program's own statements.
         for statement in program {
-            if case .define(let name, _, let body, _) = statement {
+            if case .define(let name, _, _, _, let body, _) = statement {
                 try validateFunction(name: name, body: body)
             }
         }
@@ -164,7 +186,7 @@ final class BareValidator {
             settling = false
             rounds += 1
             for statement in program {
-                if case .define(let name, _, let body, _) = statement {
+                if case .define(let name, _, _, _, let body, _) = statement {
                     let before = paramKinds[name]!
                     try validateFunction(name: name, body: body)
                     if paramKinds[name]! != before { settling = true }
@@ -176,7 +198,7 @@ final class BareValidator {
         // not known is refused (see the floor case of kindOf).
         deskFinalCheck = true
         for statement in program {
-            if case .define(let name, _, let body, _) = statement {
+            if case .define(let name, _, _, _, let body, _) = statement {
                 try validateFunction(name: name, body: body)
             }
         }
@@ -211,6 +233,29 @@ final class BareValidator {
         case .boolean: return "true or false"
         case .bytes: return "a block of bytes"
         case .unknown: return "a machine word"
+        }
+    }
+
+    // Stone 18: the BareKind an annotation word names, when
+    // bare metal can hold that kind at all.
+    private func bareKind(forAnnotation word: String) -> BareKind? {
+        switch word {
+        case "number": return .number
+        case "text": return .text
+        case "boolean": return .boolean
+        case "bytes": return .bytes
+        default: return nil
+        }
+    }
+
+    // The annotation word a BareKind answers to.
+    private func bareKindWord(_ kind: BareKind) -> String {
+        switch kind {
+        case .number: return "number"
+        case .text: return "text"
+        case .boolean: return "boolean"
+        case .bytes: return "bytes"
+        case .unknown: return "number"
         }
     }
 
@@ -536,16 +581,32 @@ final class BareValidator {
 
     private func validateStatement(_ statement: Stmt, topLevel: Bool) throws {
         switch statement {
-        case .declare(let name, let value, _):
+        case .declare(let name, let kindWord, let value, let line):
             var kind = try kindOf(value)
+            // Stone 18: an annotation on the 'let' line marks
+            // the shape the variable must hold. A kind bare
+            // metal can't hold is refused; a value whose shape
+            // is known and differs is refused; a value whose
+            // shape isn't known yet takes the marked shape.
+            var marked: BareKind? = nil
+            if let kindWord {
+                guard let m = bareKind(forAnnotation: kindWord) else {
+                    throw NiflaError(line: line, message: "Bare metal can't hold \(StaticKind.phrase(forKindWord: kindWord)) — an annotation there can only mark a number, some text, a true/false value, or a block of bytes.")
+                }
+                marked = m
+            }
             if kind == .unknown {
                 // A copy of an unpinned variable, or the result
                 // of a call whose give isn't known yet: it lives
-                // as a machine word.
-                if case .variable(let source, let line) = value {
-                    try pin(source, to: .number, line: line)
+                // as a machine word — or as the marked shape,
+                // when the line carries an annotation.
+                if case .variable(let source, let srcLine) = value {
+                    try pin(source, to: marked ?? .number, line: srcLine)
                 }
-                kind = .number
+                kind = marked ?? .number
+            }
+            if let marked, let kindWord, kind != marked {
+                throw NiflaError(line: line, message: "'\(name)' is marked as \(StaticKind.phrase(forKindWord: kindWord)) by its annotation, but this value is \(StaticKind.phrase(forKindWord: bareKindWord(kind))). Change the value, or change the annotation.")
             }
             scopes[scopes.count - 1][name] = kind
 
@@ -629,7 +690,7 @@ final class BareValidator {
         case .forEach(_, _, _, let line):
             throw NiflaError(line: line, message: "'for' isn't part of bare metal yet — there are no lists there. Walk a block of bytes with 'while' and a counter instead.")
 
-        case .define(let name, _, _, let line):
+        case .define(let name, _, _, _, _, let line):
             if topLevel {
                 // Already collected and validated; nested or
                 // stray defines never reach here as topLevel.
@@ -769,7 +830,7 @@ struct BareTranslator {
         // are collected on the way), then the program itself.
         var functionCode: [String] = []
         for statement in program {
-            if case .define(let name, _, let body, _) = statement {
+            if case .define(let name, _, _, _, let body, _) = statement {
                 code = []
                 emitFunction(name: name, body: body)
                 functionCode += code
@@ -1628,7 +1689,7 @@ struct BareTranslator {
 
     private mutating func emitStatement(_ statement: Stmt) {
         switch statement {
-        case .declare(let name, let value, _):
+        case .declare(let name, _, let value, _):
             let kind = kindOf(value)
             emitExpr(value)
             let entry = declareVar(name, kind: kind)

@@ -1,0 +1,1 @@
+Line 3: 'part' was told to take 3 characters starting at character 4, but the text has only 5 characters, numbered 0 to 4 — that runs past the end. I caught this before the program ran, so nothing ran.

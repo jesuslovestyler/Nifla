@@ -1,4 +1,0 @@
-// A repeat count can't be negative. Nifla says so in plain words.
-repeat -2 {
-    say "This never runs"
-}

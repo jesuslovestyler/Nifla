@@ -1726,321 +1726,1345 @@ make tickLoop(line) {
     give okVal(NOTHING)
 }
 
-// Runs a block of statements in one scope, stopping at the first
-// error or 'give'.
-make execBlock(stmts, scope) {
-    for stmt in stmts {
-        let r = execStmt(stmt, scope)
-        if r.ok == false {
-            give r
-        }
-        if r.gave {
-            give r
-        }
-    }
-    give okDone()
+// ---------- the machine (Stone 14) ----------
+// The interpreter used to run a program by calling itself:
+// a block ran its statements by calling the statement worker,
+// which worked values out by calling the value worker, which
+// called the function caller, which ran a block again — one
+// host call inside another, as deep as the program's own calls
+// went. Two of the thirty-six example programs showed what
+// that costs: a program that calls itself five hundred times
+// (the depth the language itself allows) needed some six host
+// calls for every one of its own, so the host's own depth
+// guard — and, compiled, the native stack — gave out around
+// depth eighty, long before the program's own guard could
+// speak; and an endless loop's passes each cost a host loop
+// pass of the worker's own loops, on top of what starting up
+// had already spent, so the host's million-pass guard spoke
+// first there too, naming a line inside this interpreter
+// instead of the program's own line.
+//
+// So the run is a machine now. The work in flight is a stack
+// of frames held in a plain list — heap, not call stack — and
+// a driver takes one small step at a time: start a frame,
+// hand a finished value to the frame waiting under it, or
+// unwind. A program's own calls push frames; they no longer
+// push the host's stack, so the depth a program can reach is
+// bounded by its own five-hundred guard and by memory, the
+// way the Swift interpreter bounds it. And the driver takes
+// up to thirty-two steps per pass of its own loop, so the
+// host's million-pass guard measures the machine's work in
+// coarse units: a program's loop passes are counted by
+// tickLoop in the program's own units, exactly as before, and
+// for a runaway program its own guard — with its own line —
+// is the one that speaks. No guard's number changed, and no
+// count is kept in anything but the program's own units.
+//
+// A frame is an object with a 'kind'. The result of the last
+// finished piece of work travels in mResult; mGave says
+// whether it is a 'give' on its way out of a function (a plain
+// value result carries no 'gave' field, so the flag travels
+// beside it rather than being read off the result). Two
+// small honest frugalities keep the machine quick enough to
+// be useful: a value that needs no gathering — a number, a
+// piece of text, a true/false, a variable's contents — is
+// handed over at once instead of taking a frame round-trip,
+// and a block with no statements in it is finished the
+// moment it is laid down, since an empty block's outcome is
+// always the same. Neither changes what anything means; both
+// only skip journeys that would have arrived at the same
+// place. mDone is the one shared 'finished, nothing to hand
+// back' result — results are never changed once made, so a
+// single one serves everywhere it is needed.
+
+let mStack = []
+let mResult = okDone()
+let mHasResult = false
+let mGave = false
+let mDone = { ok: true, gave: false, value: NOTHING }
+let mNotLeaf = { leaf: false }
+
+// Puts a finished result in the travelling place, for the
+// frame underneath to pick up.
+make holdResult(result, gave) {
+    mResult = result
+    mGave = gave
+    mHasResult = true
 }
 
-make execStmt(s, scope) {
+// Finishes the frame on top of the stack with a result.
+make finishFrame(result, gave) {
+    removeat(mStack, length(mStack) - 1)
+    holdResult(result, gave)
+}
+
+// Lays a block of statements on the machine in a scope — or,
+// if there is nothing in it, hands its outcome over at once.
+make pushBlock(stmts, scope) {
+    if length(stmts) == 0 {
+        holdResult(mDone, false)
+        give mDone
+    }
+    mHasResult = false
+    append(mStack, { kind: "block", stmts: stmts, next: 0, scope: scope })
+    give mDone
+}
+
+// Works out a value that needs no gathering, if this is one:
+// gives back its result, or mNotLeaf when the value has
+// pieces that must be gathered a frame at a time.
+make evalLeaf(e, scope) {
+    if e.type == "number" {
+        give okVal(vNumber(e.value))
+    }
+    if e.type == "text" {
+        give okVal(vText(e.value))
+    }
+    if e.type == "boolean" {
+        give okVal(vBool(e.flag))
+    }
+    if e.type == "variable" {
+        let r = scopeLookup(scope, e.name)
+        if r.found == false {
+            let message = "I don't know a variable called '" + e.name + "' yet. You can make one with: let " + e.name + " = ..."
+            let close = closestOf(e.name, scopeAllNames(scope))
+            if close.found {
+                message = message + " Did you mean '" + close.name + "'?"
+            }
+            give errAt(e.line, message)
+        }
+        give okVal(r.value)
+    }
+    if e.type == "floor" {
+        give errAt(e.line, "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.")
+    }
+    give mNotLeaf
+}
+
+// Sets a value's work going for the frame on top: handed over
+// at once when it needs no gathering, otherwise an 'expr'
+// frame is laid down for it.
+make pushExpr(e, scope) {
+    let r = evalLeaf(e, scope)
+    if r == mNotLeaf {
+        mHasResult = false
+        append(mStack, { kind: "expr", e: e, scope: scope })
+        give mDone
+    }
+    holdResult(r, false)
+    give mDone
+}
+
+// Runs a whole program: one block frame on the machine, then
+// steps until the stack is empty. Gives back the run's
+// outcome — an error result, or the done result.
+make runProgram(stmts) {
+    mStack = []
+    mHasResult = false
+    mGave = false
+    mResult = mDone
+    append(mStack, { kind: "block", stmts: stmts, next: 0, scope: makeScope(NOTHING) })
+    while length(mStack) > 0 {
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+        stepTop()
+    }
+    give mResult
+}
+
+// Takes one step of whatever sits on top of the stack: hand
+// the waiting result to its frame, unwind a travelling error
+// or 'give', or start a frame that is waiting to begin. The
+// checks run hottest-first — blocks, calls, and values are
+// the frames a run spends its life among.
+make stepTop() {
+    if length(mStack) == 0 {
+        give mDone
+    }
+    let top = mStack[length(mStack) - 1]
+    if mHasResult {
+        if mResult.ok == false {
+            stepUnwind(top)
+            give mDone
+        }
+        if mGave {
+            stepUnwind(top)
+            give mDone
+        }
+        if top.kind == "block" {
+            mHasResult = false
+            give mDone
+        }
+        if top.kind == "whileStmt" {
+            consumeWhile(top)
+            give mDone
+        }
+        if top.kind == "repeatStmt" {
+            consumeRepeat(top)
+            give mDone
+        }
+        if top.kind == "forStmt" {
+            consumeFor(top)
+            give mDone
+        }
+        if top.kind == "call" {
+            consumeCall(top)
+            give mDone
+        }
+        if top.kind == "binary" {
+            consumeBinary(top)
+            give mDone
+        }
+        if top.kind == "getIndex" {
+            consumeGetIndex(top)
+            give mDone
+        }
+        if top.kind == "getField" {
+            consumeGetField(top)
+            give mDone
+        }
+        if top.kind == "negate" {
+            consumeNegate(top)
+            give mDone
+        }
+        if top.kind == "ifStmt" {
+            consumeIf(top)
+            give mDone
+        }
+        if top.kind == "declare" {
+            scopeDeclare(top.scope, top.stmt.name, mResult.value)
+            finishFrame(mDone, false)
+            give mDone
+        }
+        if top.kind == "assign" {
+            if scopeAssign(top.scope, top.stmt.name, mResult.value) == false {
+                finishFrame(errAt(top.stmt.line, "I can't set '" + top.stmt.name + "', because no variable called '" + top.stmt.name + "' has been made yet. Make one first with: let " + top.stmt.name + " = ..."), false)
+                give mDone
+            }
+            finishFrame(mDone, false)
+            give mDone
+        }
+        if top.kind == "sayStmt" {
+            say spokenOf(mResult.value)
+            finishFrame(mDone, false)
+            give mDone
+        }
+        if top.kind == "doExpr" {
+            finishFrame(mDone, false)
+            give mDone
+        }
+        if top.kind == "giveStmt" {
+            finishFrame({ ok: true, gave: true, value: mResult.value }, true)
+            give mDone
+        }
+        if top.kind == "attempt" {
+            finishFrame(mDone, false)
+            give mDone
+        }
+        if top.kind == "setTarget" {
+            consumeSetTarget(top)
+            give mDone
+        }
+        if top.kind == "objlit" {
+            consumeObjlit(top)
+            give mDone
+        }
+        if top.kind == "listlit" {
+            consumeListlit(top)
+            give mDone
+        }
+        give mDone
+    }
+    if top.kind == "block" {
+        stepBlockStart(top)
+        give mDone
+    }
+    if top.kind == "expr" {
+        stepExprStart(top)
+        give mDone
+    }
+    if top.kind == "call" {
+        stepCallStart(top)
+        give mDone
+    }
+    give mDone
+}
+
+// A result is travelling up: an error looking for an 'attempt'
+// that will catch it, or a 'give' looking for the function it
+// leaves. Frames it passes are simply lifted off — except an
+// attempt that hasn't caught yet, which catches an error, and
+// a call frame whose function body just finished, which is
+// the boundary a 'give' steps across (and where the depth
+// count steps back down, on every road out).
+make stepUnwind(top) {
+    if top.kind == "attempt" {
+        if mResult.ok == false {
+            if top.caught == false {
+                top.caught = true
+                let recoveryScope = makeScope(top.scope)
+                scopeDeclare(recoveryScope, "problem", vText(mResult.bare))
+                pushBlock(top.stmt.recovery, recoveryScope)
+                give mDone
+            }
+        }
+    }
+    if top.kind == "call" {
+        if top.stage == 2 {
+            gCallDepth = gCallDepth - 1
+            if mGave {
+                let value = mResult.value
+                removeat(mStack, length(mStack) - 1)
+                mGave = false
+                if top.inExpr {
+                    if value.kind == "nothing" {
+                        holdResult(errAt(top.line, "The function '" + top.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + top.name + "', or call it on its own line instead."), false)
+                        give mDone
+                    }
+                }
+                holdResult(okVal(value), false)
+                give mDone
+            }
+        }
+    }
+    removeat(mStack, length(mStack) - 1)
+    give mDone
+}
+
+// A block frame's start: take the next statement and set its
+// work going. Statements that need no values worked out are
+// settled on the spot; the rest push a frame of their own,
+// with the first value they need set going above it.
+make stepBlockStart(top) {
+    if top.next >= length(top.stmts) {
+        finishFrame(mDone, false)
+        give mDone
+    }
+    let s = top.stmts[top.next]
+    top.next = top.next + 1
+    dispatchStmt(top, s)
+    give mDone
+}
+
+make dispatchStmt(blockFrame, s) {
     if s.type == "declare" {
-        if scopeDeclaredHere(scope, s.name) {
-            give errAt(s.line, "There is already a variable called '" + s.name + "' in this block. To change what it holds, write: " + s.name + " = ...")
+        if scopeDeclaredHere(blockFrame.scope, s.name) {
+            holdResult(errAt(s.line, "There is already a variable called '" + s.name + "' in this block. To change what it holds, write: " + s.name + " = ..."), false)
+            give mDone
         }
-        let v = evalExpr(s.value, scope)
-        if v.ok == false {
-            give v
-        }
-        scopeDeclare(scope, s.name, v.value)
-        give okDone()
+        append(mStack, { kind: "declare", stmt: s, scope: blockFrame.scope })
+        pushExpr(s.value, blockFrame.scope)
+        give mDone
     }
     if s.type == "assign" {
-        let v = evalExpr(s.value, scope)
-        if v.ok == false {
-            give v
-        }
-        if scopeAssign(scope, s.name, v.value) == false {
-            give errAt(s.line, "I can't set '" + s.name + "', because no variable called '" + s.name + "' has been made yet. Make one first with: let " + s.name + " = ...")
-        }
-        give okDone()
+        append(mStack, { kind: "assign", stmt: s, scope: blockFrame.scope })
+        pushExpr(s.value, blockFrame.scope)
+        give mDone
     }
     if s.type == "assignTarget" {
-        give assignTo(s.target, s.value, s.line, scope)
+        append(mStack, { kind: "setTarget", stmt: s, scope: blockFrame.scope, stage: 0, base: NOTHING, idx: 0 })
+        pushExpr(s.target.base, blockFrame.scope)
+        give mDone
     }
     if s.type == "say" {
-        let v = evalExpr(s.value, scope)
-        if v.ok == false {
-            give v
-        }
-        say spokenOf(v.value)
-        give okDone()
+        append(mStack, { kind: "sayStmt", stmt: s, scope: blockFrame.scope })
+        pushExpr(s.value, blockFrame.scope)
+        give mDone
     }
     if s.type == "if" {
-        let v = evalExpr(s.condition, scope)
-        if v.ok == false {
-            give v
-        }
-        if v.value.kind != "boolean" {
-            give errAt(s.line, "'if' needs a true or false value to decide with, but here it was given " + described(v.value) + ". Try a comparison, like: if years > 12 { ... }")
-        }
-        let child = makeScope(scope)
-        if v.value.flag {
-            give execBlock(s.thenStmts, child)
-        }
-        if s.hasElse {
-            give execBlock(s.elseStmts, child)
-        }
-        give okDone()
+        append(mStack, { kind: "ifStmt", stmt: s, scope: blockFrame.scope, stage: 0 })
+        pushExpr(s.condition, blockFrame.scope)
+        give mDone
     }
     if s.type == "while" {
-        let running = true
-        while running {
-            let v = evalExpr(s.condition, scope)
-            if v.ok == false {
-                give v
-            }
-            if v.value.kind != "boolean" {
-                give errAt(s.line, "'while' needs a true or false value to decide with, but here it was given " + described(v.value) + ". Try a comparison, like: while years < 40 { ... }")
-            }
-            if v.value.flag == false {
-                running = false
-            }
-            if running {
-                let t = tickLoop(s.line)
-                if t.ok == false {
-                    give t
-                }
-                let child = makeScope(scope)
-                let r = execBlock(s.body, child)
-                if r.ok == false {
-                    give r
-                }
-                if r.gave {
-                    give r
-                }
-            }
-        }
-        give okDone()
+        append(mStack, { kind: "whileStmt", stmt: s, scope: blockFrame.scope, stage: 0, bodyEmpty: length(s.body) == 0, condReady: false, condResult: NOTHING })
+        pushExpr(s.condition, blockFrame.scope)
+        give mDone
     }
     if s.type == "repeat" {
-        let v = evalExpr(s.count, scope)
-        if v.ok == false {
-            give v
-        }
-        if v.value.kind != "number" {
-            give errAt(s.line, "'repeat' needs a number saying how many times to run, but here it was given " + described(v.value) + ". Write it like: repeat 3 { ... }")
-        }
-        let n = v.value.num
-        if n < 0 {
-            give errAt(s.line, "'repeat' was told to run " + numText(n) + " times, but a count can't be negative — a loop can't run less than zero times. Use zero or more, like: repeat 3 { ... }")
-        }
-        if isWholeNum(n) == false {
-            give errAt(s.line, "'repeat' was told to run " + numText(n) + " times, but a loop can only run a whole number of times. Use a whole number instead, like " + numText(floorNum(n)) + " or " + numText(ceilNum(n)) + ".")
-        }
-        let done = 0
-        while done < n {
-            let t = tickLoop(s.line)
-            if t.ok == false {
-                give t
-            }
-            let child = makeScope(scope)
-            let r = execBlock(s.body, child)
-            if r.ok == false {
-                give r
-            }
-            if r.gave {
-                give r
-            }
-            done = done + 1
-        }
-        give okDone()
+        append(mStack, { kind: "repeatStmt", stmt: s, scope: blockFrame.scope, stage: 0, n: 0, done: 0, bodyEmpty: length(s.body) == 0 })
+        pushExpr(s.count, blockFrame.scope)
+        give mDone
     }
     if s.type == "for" {
-        let v = evalExpr(s.over, scope)
-        if v.ok == false {
-            give v
-        }
-        let items = []
-        if v.value.kind == "list" {
-            items = copyList(v.value.items)
-        } else {
-            if v.value.kind == "text" {
-                for ch in v.value.text {
-                    append(items, vText(ch))
-                }
-            } else {
-                if v.value.kind == "bytes" {
-                    for b in v.value.data {
-                        append(items, vNumber(b))
-                    }
-                } else {
-                    give errAt(s.line, "'for' needs a list, some text, or a block of bytes to walk through, but here it was given " + described(v.value) + ". Write it like: for item in items { ... }")
-                }
-            }
-        }
-        for item in items {
-            let t = tickLoop(s.line)
-            if t.ok == false {
-                give t
-            }
-            let child = makeScope(scope)
-            scopeDeclare(child, s.name, item)
-            let r = execBlock(s.body, child)
-            if r.ok == false {
-                give r
-            }
-            if r.gave {
-                give r
-            }
-        }
-        give okDone()
+        append(mStack, { kind: "forStmt", stmt: s, scope: blockFrame.scope, stage: 0, items: [], index: 0 })
+        pushExpr(s.over, blockFrame.scope)
+        give mDone
     }
     if s.type == "define" {
         if isBuiltinName(s.name) {
-            give errAt(s.line, "There is already a built-in tool called '" + s.name + "' — every Nifla program has it from the start. A function can't be made with that name; rename the function.")
+            holdResult(errAt(s.line, "There is already a built-in tool called '" + s.name + "' — every Nifla program has it from the start. A function can't be made with that name; rename the function."), false)
+            give mDone
         }
         if nameIndex(gFnNames, s.name) >= 0 {
-            give errAt(s.line, "There is already a function called '" + s.name + "'. Each function needs its own name — rename this one, or take out the earlier 'make " + s.name + "'.")
+            holdResult(errAt(s.line, "There is already a function called '" + s.name + "'. Each function needs its own name — rename this one, or take out the earlier 'make " + s.name + "'."), false)
+            give mDone
         }
         append(gFnNames, s.name)
-        append(gFnDefs, { params: s.params, body: s.body, home: scope })
-        give okDone()
+        append(gFnDefs, { params: s.params, body: s.body, home: blockFrame.scope })
+        holdResult(mDone, false)
+        give mDone
     }
     if s.type == "give" {
         if gCallDepth == 0 {
-            give errAt(s.line, "'give' hands a value back from a function to whoever called it, but this line is not inside a function. To show a value here, use 'say' instead.")
+            holdResult(errAt(s.line, "'give' hands a value back from a function to whoever called it, but this line is not inside a function. To show a value here, use 'say' instead."), false)
+            give mDone
         }
-        let v = evalExpr(s.value, scope)
-        if v.ok == false {
-            give v
-        }
-        give { ok: true, gave: true, value: v.value }
+        append(mStack, { kind: "giveStmt", stmt: s, scope: blockFrame.scope })
+        pushExpr(s.value, blockFrame.scope)
+        give mDone
     }
     if s.type == "attempt" {
-        // Run the first block in its own scope. A 'give' inside
-        // it hands back from the function, as anywhere; an error
-        // runs the second block instead, in its own scope, with
-        // the problem's bare words held in 'problem'.
-        let child = makeScope(scope)
-        let r = execBlock(s.body, child)
-        if r.ok {
-            give r
-        }
-        let recoveryScope = makeScope(scope)
-        scopeDeclare(recoveryScope, "problem", vText(r.bare))
-        give execBlock(s.recovery, recoveryScope)
+        append(mStack, { kind: "attempt", stmt: s, scope: blockFrame.scope, caught: false })
+        pushBlock(s.body, makeScope(blockFrame.scope))
+        give mDone
     }
     if s.type == "doCall" {
-        let r = callFunction(s.name, s.args, s.line, scope)
-        if r.ok == false {
-            give r
+        let frame = { kind: "call", name: s.name, argExprs: s.args, line: s.line, scope: blockFrame.scope, inExpr: false, stage: 0, values: [], nextArg: 0, def: NOTHING }
+        let begun = callBegin(frame)
+        if begun.ok == false {
+            holdResult(begun, false)
+            give mDone
         }
-        give okDone()
+        append(mStack, frame)
+        give mDone
     }
     if s.type == "doExpr" {
-        let r = evalExpr(s.expr, scope)
-        if r.ok == false {
-            give r
-        }
-        give okDone()
+        append(mStack, { kind: "doExpr", stmt: s, scope: blockFrame.scope })
+        pushExpr(s.expr, blockFrame.scope)
+        give mDone
     }
-    give okDone()
+    holdResult(mDone, false)
+    give mDone
 }
 
-// Sets the field or item a target chain names, in the Swift
-// interpreter's order: the chain's base is read, the holder is
-// checked, and only then is the new value worked out.
-make assignTo(target, valueExpr, stmtLine, scope) {
-    if target.type == "field" {
-        let b = evalExpr(target.base, scope)
-        if b.ok == false {
-            give b
+
+// An 'if' frame: the condition's value is waiting. Decide,
+// and run the chosen branch in a child scope; when its block
+// finishes, the 'if' is finished too.
+make consumeIf(top) {
+    if top.stage == 0 {
+        let v = mResult.value
+        if v.kind != "boolean" {
+            finishFrame(errAt(top.stmt.line, "'if' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: if years > 12 { ... }"), false)
+            give mDone
         }
-        if b.value.kind != "object" {
-            give errAt(stmtLine, "I can't set the field '" + target.name + "' on " + described(b.value) + ", because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person." + target.name + " = ... works.")
+        let child = makeScope(top.scope)
+        if v.flag {
+            top.stage = 1
+            pushBlock(top.stmt.thenStmts, child)
+            give mDone
         }
-        let v = evalExpr(valueExpr, scope)
-        if v.ok == false {
-            give v
+        if top.stmt.hasElse {
+            top.stage = 1
+            pushBlock(top.stmt.elseStmts, child)
+            give mDone
         }
-        objSet(b.value, target.name, v.value)
-        give okDone()
+        finishFrame(mDone, false)
+        give mDone
     }
-    if target.type == "index" {
-        let b = evalExpr(target.base, scope)
-        if b.ok == false {
-            give b
-        }
-        if b.value.kind == "list" {
-            let iv = evalExpr(target.index, scope)
-            if iv.ok == false {
-                give iv
-            }
-            let num = itemNumber(iv.value, target.line)
-            if num.ok == false {
-                give num
-            }
-            let idx = num.value
-            if length(b.value.items) == 0 {
-                give errAt(target.line, "This list has no items yet, so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...).")
-            }
-            if idx < 0 {
-                give errAt(target.line, "This list has " + length(b.value.items) + " items, numbered 0 to " + (length(b.value.items) - 1) + ", so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...).")
-            }
-            if idx >= length(b.value.items) {
-                give errAt(target.line, "This list has " + length(b.value.items) + " items, numbered 0 to " + (length(b.value.items) - 1) + ", so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...).")
-            }
-            let v = evalExpr(valueExpr, scope)
-            if v.ok == false {
-                give v
-            }
-            b.value.items[idx] = v.value
-            give okDone()
-        }
-        if b.value.kind == "text" {
-            give errAt(target.line, "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead.")
-        }
-        if b.value.kind == "bytes" {
-            let iv = evalExpr(target.index, scope)
-            if iv.ok == false {
-                give iv
-            }
-            let num = itemNumber(iv.value, target.line)
-            if num.ok == false {
-                give num
-            }
-            let idx = num.value
-            if length(b.value.data) == 0 {
-                give errAt(target.line, "This block of bytes has no bytes yet, so there is no byte " + idx + " to set. Make a bigger block with makebytes — like: makebytes(8).")
-            }
-            if idx < 0 {
-                give errAt(target.line, "This block of bytes has " + length(b.value.data) + " bytes, numbered 0 to " + (length(b.value.data) - 1) + ", so there is no byte " + idx + " to set.")
-            }
-            if idx >= length(b.value.data) {
-                give errAt(target.line, "This block of bytes has " + length(b.value.data) + " bytes, numbered 0 to " + (length(b.value.data) - 1) + ", so there is no byte " + idx + " to set.")
-            }
-            let v = evalExpr(valueExpr, scope)
-            if v.ok == false {
-                give v
-            }
-            if v.value.kind != "number" {
-                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
-            }
-            if isWholeNum(v.value.num) == false {
-                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
-            }
-            if v.value.num < 0 {
-                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
-            }
-            if v.value.num > 255 {
-                give errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v.value) + ".")
-            }
-            b.value.data[idx] = v.value.num
-            give okDone()
-        }
-        give errAt(target.line, "I can only set an item in a list, like: items[0] = 30 — but this is " + described(b.value) + ", which has no items to set.")
-    }
-    give errAt(stmtLine, "I can only set a field on an object or an item in a list, like: person.years = 30 or items[0] = 30.")
+    finishFrame(mDone, false)
+    give mDone
 }
+
+// A 'while' frame: stage 0 waits for the condition — the pass
+// is counted (tickLoop) only once the condition says go, the
+// same order the interpreter has always kept — and stage 1
+// waits for the body's block, then starts the next pass. A
+// body with no statements in it is a waiting loop, and takes
+// the waiting road below instead.
+make consumeWhile(top) {
+    if top.stage == 0 {
+        if top.bodyEmpty {
+            waitLoop(top)
+            give mDone
+        }
+        let v = mResult.value
+        if v.kind != "boolean" {
+            finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+            give mDone
+        }
+        if v.flag == false {
+            finishFrame(mDone, false)
+            give mDone
+        }
+        let t = tickLoop(top.stmt.line)
+        if t.ok == false {
+            finishFrame(t, false)
+            give mDone
+        }
+        top.stage = 1
+        pushBlock(top.stmt.body, makeScope(top.scope))
+        give mDone
+    }
+    top.stage = 0
+    pushExpr(top.stmt.condition, top.scope)
+    give mDone
+}
+
+// ---------- waiting loops ----------
+// A loop whose body holds no statements does no work per
+// pass but wait: nothing in it can change a variable, call a
+// function, or speak. Stepping such a loop one frame at a
+// time would spend far more of the host's time than the
+// passes themselves hold — the compiled host's every call is
+// a journey through its runtime's desk — so a waiting loop
+// runs its passes in a tight counting loop of its own, eight
+// passes to a turn. The host's own loop guard counts turns,
+// so it stays far behind; the program's guard counts passes,
+// in the program's own units, exactly as everywhere else,
+// and it is the one that speaks for a loop that never ends.
+// The condition of a waiting 'while' is worked out once when
+// it needs no gathering (a literal, or a variable — whose
+// value an empty body cannot change) and kept in the frame;
+// the moment anything needs the machine — a condition with
+// pieces — the ordinary road takes over, in the same state
+// the step-by-step road would have left.
+
+make waitLoop(top) {
+    let going = true
+    while going {
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+        if going {
+            let v = mResult.value
+            if v.kind != "boolean" {
+                finishFrame(errAt(top.stmt.line, "'while' needs a true or false value to decide with, but here it was given " + described(v) + ". Try a comparison, like: while years < 40 { ... }"), false)
+                give mDone
+            }
+            if v.flag == false {
+                finishFrame(mDone, false)
+                give mDone
+            }
+            let t = tickLoop(top.stmt.line)
+            if t.ok == false {
+                finishFrame(t, false)
+                give mDone
+            }
+            if top.condReady == false {
+                let r = evalLeaf(top.stmt.condition, top.scope)
+                if r == mNotLeaf {
+                    pushExpr(top.stmt.condition, top.scope)
+                    give mDone
+                }
+                if r.ok == false {
+                    holdResult(r, false)
+                    give mDone
+                }
+                top.condResult = r
+                top.condReady = true
+            }
+            mResult = top.condResult
+            mGave = false
+            mHasResult = true
+        }
+    }
+    give mDone
+}
+
+// A 'repeat' frame: stage 0 waits for the count and checks
+// it; stage 1 waits for a pass's block. Either way the frame
+// then falls into the same advance: count the pass, and set
+// the next one going, or finish.
+make consumeRepeat(top) {
+    if top.stage == 0 {
+        let v = mResult.value
+        if v.kind != "number" {
+            finishFrame(errAt(top.stmt.line, "'repeat' needs a number saying how many times to run, but here it was given " + described(v) + ". Write it like: repeat 3 { ... }"), false)
+            give mDone
+        }
+        let n = v.num
+        if n < 0 {
+            finishFrame(errAt(top.stmt.line, "'repeat' was told to run " + numText(n) + " times, but a count can't be negative — a loop can't run less than zero times. Use zero or more, like: repeat 3 { ... }"), false)
+            give mDone
+        }
+        if isWholeNum(n) == false {
+            finishFrame(errAt(top.stmt.line, "'repeat' was told to run " + numText(n) + " times, but a loop can only run a whole number of times. Use a whole number instead, like " + numText(floorNum(n)) + " or " + numText(ceilNum(n)) + "."), false)
+            give mDone
+        }
+        top.n = n
+        top.done = 0
+        top.stage = 1
+        if top.bodyEmpty {
+            repeatWait(top)
+            give mDone
+        }
+    } else {
+        top.done = top.done + 1
+    }
+    if top.done >= top.n {
+        finishFrame(mDone, false)
+        give mDone
+    }
+    let t = tickLoop(top.stmt.line)
+    if t.ok == false {
+        finishFrame(t, false)
+        give mDone
+    }
+    pushBlock(top.stmt.body, makeScope(top.scope))
+    give mDone
+}
+
+// A waiting 'repeat': the same counting loop as a waiting
+// 'while' (see above), counting passes against the count the
+// frame was given. The first pass is counted on entry; each
+// pass after it is counted as the one before finishes.
+make repeatWait(top) {
+    if top.done >= top.n {
+        finishFrame(mDone, false)
+        give mDone
+    }
+    let t = tickLoop(top.stmt.line)
+    if t.ok == false {
+        finishFrame(t, false)
+        give mDone
+    }
+    let going = true
+    while going {
+        going = repeatPass(top)
+        if going {
+            going = repeatPass(top)
+        }
+        if going {
+            going = repeatPass(top)
+        }
+        if going {
+            going = repeatPass(top)
+        }
+        if going {
+            going = repeatPass(top)
+        }
+        if going {
+            going = repeatPass(top)
+        }
+        if going {
+            going = repeatPass(top)
+        }
+        if going {
+            going = repeatPass(top)
+        }
+    }
+    give mDone
+}
+
+make repeatPass(top) {
+    top.done = top.done + 1
+    if top.done >= top.n {
+        finishFrame(mDone, false)
+        give false
+    }
+    let t = tickLoop(top.stmt.line)
+    if t.ok == false {
+        finishFrame(t, false)
+        give false
+    }
+    give true
+}
+
+// A 'for' frame: stage 0 waits for the value being walked and
+// lays its items out in a list of their own (a copy, so adding
+// to the walked list as we go can't change the walk); stage 1
+// waits for a pass's block. Either way the frame then falls
+// into the same advance: count the pass, and set the next one
+// going, in a fresh child scope with the walked item declared
+// in it, or finish.
+make consumeFor(top) {
+    if top.stage == 0 {
+        let over = mResult.value
+        let items = []
+        if over.kind == "list" {
+            items = copyList(over.items)
+        } else {
+            if over.kind == "text" {
+                for ch in over.text {
+                    append(items, vText(ch))
+                }
+            } else {
+                if over.kind == "bytes" {
+                    for b in over.data {
+                        append(items, vNumber(b))
+                    }
+                } else {
+                    finishFrame(errAt(top.stmt.line, "'for' needs a list, some text, or a block of bytes to walk through, but here it was given " + described(over) + ". Write it like: for item in items { ... }"), false)
+                    give mDone
+                }
+            }
+        }
+        top.items = items
+        top.index = 0
+        top.stage = 1
+    } else {
+        top.index = top.index + 1
+    }
+    if top.index >= length(top.items) {
+        finishFrame(mDone, false)
+        give mDone
+    }
+    let t = tickLoop(top.stmt.line)
+    if t.ok == false {
+        finishFrame(t, false)
+        give mDone
+    }
+    let child = makeScope(top.scope)
+    scopeDeclare(child, top.stmt.name, top.items[top.index])
+    pushBlock(top.stmt.body, child)
+    give mDone
+}
+
+// Setting a field or an item: the stages walk the same road
+// the interpreter always walked — the chain's base is read,
+// the holder is checked, and only then is the new value
+// worked out. Stage 0 waits for the base; stage 1 for the
+// item number (or, for a field, the new value); stage 2 for
+// the new value of an item.
+make consumeSetTarget(top) {
+    let target = top.stmt.target
+    if top.stage == 0 {
+        let base = mResult.value
+        top.base = base
+        if target.type == "field" {
+            if base.kind != "object" {
+                finishFrame(errAt(top.stmt.line, "I can't set the field '" + target.name + "' on " + described(base) + ", because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person." + target.name + " = ... works."), false)
+                give mDone
+            }
+            top.stage = 1
+            pushExpr(top.stmt.value, top.scope)
+            give mDone
+        }
+        if target.type == "index" {
+            if base.kind == "text" {
+                finishFrame(errAt(target.line, "I can't change one character of some text — once text is made, it doesn't change. To change it, build the new text and set the variable to it instead."), false)
+                give mDone
+            }
+            if base.kind == "list" {
+                top.stage = 1
+                pushExpr(target.index, top.scope)
+                give mDone
+            }
+            if base.kind == "bytes" {
+                top.stage = 1
+                pushExpr(target.index, top.scope)
+                give mDone
+            }
+            finishFrame(errAt(target.line, "I can only set an item in a list, like: items[0] = 30 — but this is " + described(base) + ", which has no items to set."), false)
+            give mDone
+        }
+        finishFrame(errAt(top.stmt.line, "I can only set a field on an object or an item in a list, like: person.years = 30 or items[0] = 30."), false)
+        give mDone
+    }
+    if top.stage == 1 {
+        if target.type == "field" {
+            objSet(top.base, target.name, mResult.value)
+            finishFrame(mDone, false)
+            give mDone
+        }
+        let num = itemNumber(mResult.value, target.line)
+        if num.ok == false {
+            finishFrame(num, false)
+            give mDone
+        }
+        let idx = num.value
+        top.idx = idx
+        if top.base.kind == "list" {
+            if length(top.base.items) == 0 {
+                finishFrame(errAt(target.line, "This list has no items yet, so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...)."), false)
+                give mDone
+            }
+            if idx < 0 {
+                finishFrame(errAt(target.line, "This list has " + length(top.base.items) + " items, numbered 0 to " + (length(top.base.items) - 1) + ", so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...)."), false)
+                give mDone
+            }
+            if idx >= length(top.base.items) {
+                finishFrame(errAt(target.line, "This list has " + length(top.base.items) + " items, numbered 0 to " + (length(top.base.items) - 1) + ", so there is no item " + idx + " to set. To add an item at the end, use append — like: append(items, ...)."), false)
+                give mDone
+            }
+        } else {
+            if length(top.base.data) == 0 {
+                finishFrame(errAt(target.line, "This block of bytes has no bytes yet, so there is no byte " + idx + " to set. Make a bigger block with makebytes — like: makebytes(8)."), false)
+                give mDone
+            }
+            if idx < 0 {
+                finishFrame(errAt(target.line, "This block of bytes has " + length(top.base.data) + " bytes, numbered 0 to " + (length(top.base.data) - 1) + ", so there is no byte " + idx + " to set."), false)
+                give mDone
+            }
+            if idx >= length(top.base.data) {
+                finishFrame(errAt(target.line, "This block of bytes has " + length(top.base.data) + " bytes, numbered 0 to " + (length(top.base.data) - 1) + ", so there is no byte " + idx + " to set."), false)
+                give mDone
+            }
+        }
+        top.stage = 2
+        pushExpr(top.stmt.value, top.scope)
+        give mDone
+    }
+    let v = mResult.value
+    if top.base.kind == "list" {
+        top.base.items[top.idx] = v
+        finishFrame(mDone, false)
+        give mDone
+    }
+    if v.kind != "number" {
+        finishFrame(errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v) + "."), false)
+        give mDone
+    }
+    if isWholeNum(v.num) == false {
+        finishFrame(errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v) + "."), false)
+        give mDone
+    }
+    if v.num < 0 {
+        finishFrame(errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v) + "."), false)
+        give mDone
+    }
+    if v.num > 255 {
+        finishFrame(errAt(target.line, "A byte is a whole number from 0 to 255, but I was given " + described(v) + "."), false)
+        give mDone
+    }
+    top.base.data[top.idx] = v.num
+    finishFrame(mDone, false)
+    give mDone
+}
+
+// ---------- values, worked out one piece at a time ----------
+// An 'expr' frame looks at its node once: a node with pieces
+// turns into the frame that gathers them, with the first
+// piece set going above it. (A piece that needs no gathering
+// never becomes a frame at all — pushExpr hands it over at
+// once — so the leaf cases below are only a safety net.)
+// Each gathering frame waits for one piece at a time, so no
+// piece's work ever sits on the host's call stack.
+
+make stepExprStart(top) {
+    let e = top.e
+    if e.type == "number" {
+        finishFrame(okVal(vNumber(e.value)), false)
+        give mDone
+    }
+    if e.type == "text" {
+        finishFrame(okVal(vText(e.value)), false)
+        give mDone
+    }
+    if e.type == "boolean" {
+        finishFrame(okVal(vBool(e.flag)), false)
+        give mDone
+    }
+    if e.type == "variable" {
+        let r = scopeLookup(top.scope, e.name)
+        if r.found == false {
+            let message = "I don't know a variable called '" + e.name + "' yet. You can make one with: let " + e.name + " = ..."
+            let close = closestOf(e.name, scopeAllNames(top.scope))
+            if close.found {
+                message = message + " Did you mean '" + close.name + "'?"
+            }
+            finishFrame(errAt(e.line, message), false)
+            give mDone
+        }
+        finishFrame(okVal(r.value), false)
+        give mDone
+    }
+    if e.type == "floor" {
+        finishFrame(errAt(e.line, "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes."), false)
+        give mDone
+    }
+    if e.type == "negate" {
+        top.kind = "negate"
+        pushExpr(e.inner, top.scope)
+        give mDone
+    }
+    if e.type == "binary" {
+        top.kind = "binary"
+        top.stage = 0
+        top.saved = NOTHING
+        pushExpr(e.left, top.scope)
+        give mDone
+    }
+    if e.type == "field" {
+        top.kind = "getField"
+        pushExpr(e.base, top.scope)
+        give mDone
+    }
+    if e.type == "index" {
+        top.kind = "getIndex"
+        top.stage = 0
+        top.saved = NOTHING
+        pushExpr(e.base, top.scope)
+        give mDone
+    }
+    if e.type == "object" {
+        top.kind = "objlit"
+        top.i = 0
+        top.obj = vObject()
+        if length(e.names) == 0 {
+            finishFrame(okVal(top.obj), false)
+            give mDone
+        }
+        pushExpr(e.values[0], top.scope)
+        give mDone
+    }
+    if e.type == "list" {
+        top.kind = "listlit"
+        top.i = 0
+        top.items = []
+        if length(e.items) == 0 {
+            finishFrame(okVal(vList([])), false)
+            give mDone
+        }
+        pushExpr(e.items[0], top.scope)
+        give mDone
+    }
+    if e.type == "call" {
+        top.kind = "call"
+        top.name = e.name
+        top.argExprs = e.args
+        top.line = e.line
+        top.inExpr = true
+        top.stage = 0
+        top.values = []
+        top.nextArg = 0
+        top.def = NOTHING
+        let begun = callBegin(top)
+        if begun.ok == false {
+            finishFrame(begun, false)
+            give mDone
+        }
+        give mDone
+    }
+    finishFrame(okVal(NOTHING), false)
+    give mDone
+}
+
+make consumeBinary(top) {
+    if top.stage == 0 {
+        top.saved = mResult.value
+        top.stage = 1
+        pushExpr(top.e.right, top.scope)
+        give mDone
+    }
+    finishFrame(applyOp(top.e.op, top.saved, mResult.value, top.e.line), false)
+    give mDone
+}
+
+make consumeNegate(top) {
+    let v = mResult.value
+    if v.kind != "number" {
+        finishFrame(errAt(top.e.line, "I can only put a minus sign in front of a number, but here it was in front of " + described(v) + "."), false)
+        give mDone
+    }
+    finishFrame(okVal(vNumber(0 - v.num)), false)
+    give mDone
+}
+
+make consumeGetField(top) {
+    let b = mResult.value
+    if b.kind != "object" {
+        finishFrame(errAt(top.e.line, "I can't read the field '" + top.e.name + "' of " + described(b) + ", because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.name works."), false)
+        give mDone
+    }
+    let g = objGet(b, top.e.name)
+    if g.found == false {
+        finishFrame(missingField(b, top.e.name, top.e.line), false)
+        give mDone
+    }
+    finishFrame(okVal(g.value), false)
+    give mDone
+}
+
+make consumeGetIndex(top) {
+    if top.stage == 0 {
+        top.saved = mResult.value
+        top.stage = 1
+        pushExpr(top.e.index, top.scope)
+        give mDone
+    }
+    finishFrame(readIndex(top.saved, mResult.value, top.e.line), false)
+    give mDone
+}
+
+make consumeObjlit(top) {
+    objSet(top.obj, top.e.names[top.i], mResult.value)
+    top.i = top.i + 1
+    if top.i >= length(top.e.names) {
+        finishFrame(okVal(top.obj), false)
+        give mDone
+    }
+    pushExpr(top.e.values[top.i], top.scope)
+    give mDone
+}
+
+make consumeListlit(top) {
+    append(top.items, mResult.value)
+    top.i = top.i + 1
+    if top.i >= length(top.e.items) {
+        finishFrame(okVal(vList(top.items)), false)
+        give mDone
+    }
+    pushExpr(top.e.items[top.i], top.scope)
+    give mDone
+}
+
+// ---------- calls ----------
+// A call frame gathers its handed values one at a time
+// (stage 0), then either runs a built-in tool on them, or —
+// for a function the program made — checks the count and the
+// depth, and lays the function's body on the machine as a
+// block frame (stage 2) in a fresh scope whose parent is the
+// scope the function was made in. When the body finishes, the
+// frame turns its outcome into the call's value: a 'give'
+// hands its value across (see stepUnwind), a plain finish
+// hands back nothing, and an error travels on up.
+
+// Before any value is worked out: a built-in tool's name is
+// known at once, and an unknown name is refused at once —
+// the interpreter has always answered those before looking
+// at the call's values.
+make callBegin(frame) {
+    if isBuiltinName(frame.name) {
+        give mDone
+    }
+    let idx = nameIndex(gFnNames, frame.name)
+    if idx < 0 {
+        let message = "I don't know a function called '" + frame.name + "' yet. You can make one with: make " + frame.name + "(...) { ... }"
+        let candidates = copyList(gFnNames)
+        for b in builtinNamesList() {
+            append(candidates, b)
+        }
+        let close = closestOf(frame.name, candidates)
+        if close.found {
+            message = message + " Did you mean '" + close.name + "'?"
+        }
+        give errAt(frame.line, message)
+    }
+    frame.def = gFnDefs[idx]
+    give mDone
+}
+
+make stepCallStart(top) {
+    if top.stage == 0 {
+        if top.nextArg < length(top.argExprs) {
+            pushExpr(top.argExprs[top.nextArg], top.scope)
+            give mDone
+        }
+        dispatchCall(top)
+        give mDone
+    }
+    give mDone
+}
+
+make consumeCall(top) {
+    if top.stage == 0 {
+        append(top.values, mResult.value)
+        top.nextArg = top.nextArg + 1
+        mHasResult = false
+        give mDone
+    }
+    if top.stage == 2 {
+        gCallDepth = gCallDepth - 1
+        finishCall(top, okVal(NOTHING))
+        give mDone
+    }
+    give mDone
+}
+
+// Every handed value is in: run the tool, or lay the
+// function's body on the machine.
+make dispatchCall(top) {
+    if isBuiltinName(top.name) {
+        if length(top.values) != length(builtinParamsOf(top.name)) {
+            finishFrame(errAt(top.line, builtinCountText(top.name, length(top.values))), false)
+            give mDone
+        }
+        finishCall(top, runBuiltin(top.name, top.values, top.line))
+        give mDone
+    }
+    let def = top.def
+    if length(top.values) != length(def.params) {
+        finishFrame(errAt(top.line, "The function '" + top.name + "' takes " + takesText(def.params) + ", but it was given " + length(top.values) + ". Make the call match how the function was made: " + top.name + "(" + join(def.params, ", ") + ")."), false)
+        give mDone
+    }
+    if gCallDepth >= 500 {
+        finishFrame(errAt(top.line, "This call is more than five hundred functions deep and was stopped — it may never finish. A function that calls itself needs a way to stop, like an 'if' that gives an answer for the smallest case instead of calling again."), false)
+        give mDone
+    }
+    gCallDepth = gCallDepth + 1
+    let callScope = makeScope(def.home)
+    let i = 0
+    while i < length(def.params) {
+        scopeDeclare(callScope, def.params[i], top.values[i])
+        i = i + 1
+    }
+    top.stage = 2
+    pushBlock(def.body, callScope)
+    give mDone
+}
+
+// The call's outcome, with the one check that belongs to the
+// place the call was made: a call used as a value needs a
+// value back.
+make finishCall(top, r) {
+    if r.ok == false {
+        finishFrame(r, false)
+        give mDone
+    }
+    if top.inExpr {
+        if r.value.kind == "nothing" {
+            finishFrame(errAt(top.line, "The function '" + top.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + top.name + "', or call it on its own line instead."), false)
+            give mDone
+        }
+    }
+    finishFrame(r, false)
+    give mDone
+}
+
+
 
 // Checks that a value can pick an item: a whole number. Gives
 // back the number itself.
@@ -2135,114 +3159,6 @@ make missingField(obj, name, line) {
         message = message + " Did you mean '" + close.name + "'?"
     }
     give errAt(line, message)
-}
-
-make evalExpr(e, scope) {
-    if e.type == "number" {
-        give okVal(vNumber(e.value))
-    }
-    if e.type == "text" {
-        give okVal(vText(e.value))
-    }
-    if e.type == "boolean" {
-        give okVal(vBool(e.flag))
-    }
-    if e.type == "variable" {
-        let r = scopeLookup(scope, e.name)
-        if r.found == false {
-            let message = "I don't know a variable called '" + e.name + "' yet. You can make one with: let " + e.name + " = ..."
-            let close = closestOf(e.name, scopeAllNames(scope))
-            if close.found {
-                message = message + " Did you mean '" + close.name + "'?"
-            }
-            give errAt(e.line, message)
-        }
-        give okVal(r.value)
-    }
-    if e.type == "call" {
-        let r = callFunction(e.name, e.args, e.line, scope)
-        if r.ok == false {
-            give r
-        }
-        if r.value.kind == "nothing" {
-            give errAt(e.line, "The function '" + e.name + "' finished without giving a value back, so there is nothing to use here. Add a 'give' line inside '" + e.name + "', or call it on its own line instead.")
-        }
-        give r
-    }
-    if e.type == "object" {
-        let obj = vObject()
-        let i = 0
-        while i < length(e.names) {
-            let v = evalExpr(e.values[i], scope)
-            if v.ok == false {
-                give v
-            }
-            objSet(obj, e.names[i], v.value)
-            i = i + 1
-        }
-        give okVal(obj)
-    }
-    if e.type == "list" {
-        let items = []
-        for itemExpr in e.items {
-            let v = evalExpr(itemExpr, scope)
-            if v.ok == false {
-                give v
-            }
-            append(items, v.value)
-        }
-        give okVal(vList(items))
-    }
-    if e.type == "field" {
-        let b = evalExpr(e.base, scope)
-        if b.ok == false {
-            give b
-        }
-        if b.value.kind != "object" {
-            give errAt(e.line, "I can't read the field '" + e.name + "' of " + described(b.value) + ", because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person.name works.")
-        }
-        let g = objGet(b.value, e.name)
-        if g.found == false {
-            give missingField(b.value, e.name, e.line)
-        }
-        give okVal(g.value)
-    }
-    if e.type == "index" {
-        let b = evalExpr(e.base, scope)
-        if b.ok == false {
-            give b
-        }
-        let iv = evalExpr(e.index, scope)
-        if iv.ok == false {
-            give iv
-        }
-        give readIndex(b.value, iv.value, e.line)
-    }
-    if e.type == "floor" {
-        give errAt(e.line, "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.")
-    }
-    if e.type == "negate" {
-        let v = evalExpr(e.inner, scope)
-        if v.ok == false {
-            give v
-        }
-        if v.value.kind != "number" {
-            give errAt(e.line, "I can only put a minus sign in front of a number, but here it was in front of " + described(v.value) + ".")
-        }
-        give okVal(vNumber(0 - v.value.num))
-    }
-    if e.type == "binary" {
-        let l = evalExpr(e.left, scope)
-        if l.ok == false {
-            give l
-        }
-        let r = evalExpr(e.right, scope)
-        if r.ok == false {
-            give r
-        }
-        give applyOp(e.op, l.value, r.value, e.line)
-    }
-    give okVal(NOTHING)
 }
 
 // The operators, with the Swift interpreter's rules and words.
@@ -2371,80 +3287,6 @@ make takesText(params) {
         give "1 value (" + params[0] + ")"
     }
     give length(params) + " values (" + join(params, ", ") + ")"
-}
-
-// Works a call's handed values out, in order.
-make evalArgs(argExprs, scope) {
-    let values = []
-    for a in argExprs {
-        let v = evalExpr(a, scope)
-        if v.ok == false {
-            give v
-        }
-        append(values, v.value)
-    }
-    give okVal(values)
-}
-
-// Runs one call: a built-in tool first (every program has them),
-// then a function the program made — in the Swift interpreter's
-// order: the function must exist, then the handed values are
-// worked out, then their number is checked, then the depth
-// guard, then the body runs in a fresh scope inside its home.
-// Gives back the call's value, or NOTHING when a made function
-// finished without a 'give'.
-make callFunction(name, argExprs, line, scope) {
-    if isBuiltinName(name) {
-        let argsR = evalArgs(argExprs, scope)
-        if argsR.ok == false {
-            give argsR
-        }
-        let params = builtinParamsOf(name)
-        if length(argsR.value) != length(params) {
-            give errAt(line, builtinCountText(name, length(argsR.value)))
-        }
-        give runBuiltin(name, argsR.value, line)
-    }
-    let idx = nameIndex(gFnNames, name)
-    if idx < 0 {
-        let message = "I don't know a function called '" + name + "' yet. You can make one with: make " + name + "(...) { ... }"
-        let candidates = copyList(gFnNames)
-        for b in builtinNamesList() {
-            append(candidates, b)
-        }
-        let close = closestOf(name, candidates)
-        if close.found {
-            message = message + " Did you mean '" + close.name + "'?"
-        }
-        give errAt(line, message)
-    }
-    let def = gFnDefs[idx]
-    let argsR = evalArgs(argExprs, scope)
-    if argsR.ok == false {
-        give argsR
-    }
-    if length(argsR.value) != length(def.params) {
-        give errAt(line, "The function '" + name + "' takes " + takesText(def.params) + ", but it was given " + length(argsR.value) + ". Make the call match how the function was made: " + name + "(" + join(def.params, ", ") + ").")
-    }
-    if gCallDepth >= 500 {
-        give errAt(line, "This call is more than five hundred functions deep and was stopped — it may never finish. A function that calls itself needs a way to stop, like an 'if' that gives an answer for the smallest case instead of calling again.")
-    }
-    gCallDepth = gCallDepth + 1
-    let callScope = makeScope(def.home)
-    let i = 0
-    while i < length(def.params) {
-        scopeDeclare(callScope, def.params[i], argsR.value[i])
-        i = i + 1
-    }
-    let r = execBlock(def.body, callScope)
-    gCallDepth = gCallDepth - 1
-    if r.ok == false {
-        give r
-    }
-    if r.gave {
-        give okVal(r.value)
-    }
-    give okVal(NOTHING)
 }
 
 // ---------- the built-in tools ----------
@@ -3000,7 +3842,7 @@ if length(allArgs) == 0 {
                 sayerr("Line " + fl.line + ": This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.")
                 exitwith(1)
             } else {
-                let r = execBlock(parsed.value, makeScope(NOTHING))
+                let r = runProgram(parsed.value)
                 if r.ok == false {
                     sayerr(r.message)
                     exitwith(1)

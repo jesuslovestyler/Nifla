@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nifla Stone 8 proof, kept current by Stone 10: the
+# Nifla Stone 8 proof, kept current by Stones 10 and 14: the
 # interpreter written in Nifla, compiled with niflac, runs the
 # example suite — and its behavior must match the Swift
 # interpreter's expected behavior on every channel: the words
@@ -24,16 +24,22 @@
 # Swift interpreter reports it), and this script compares all
 # three channels.
 #
-# Two examples are NOT covered, honestly and by measurement:
-#   endless — each call the interpreted program makes costs
-#     several calls inside the self-host, so the host's own
-#     five-hundred-call guard (interpreted host) or the real
-#     processor stack (compiled host) gives out long before
-#     the interpreted program's own guard can speak.
-#   forever — each pass of the interpreted loop also spends
-#     passes of the host's own loops, so the host's
-#     million-pass guard speaks first, naming a line inside
-#     nifla-in-nifla.nifla instead of the program's line 3.
+# All thirty-six examples are covered. Two of them — endless
+# and forever — were excluded until Stone 14, honestly and by
+# measurement: a program's calls used to cost several of the
+# self-host's own calls each, so the host's depth guard (or
+# the native stack) gave out around depth eighty, and an
+# endless loop's passes spent the host's loop passes too, so
+# the host's million-pass guard spoke first, naming a line
+# inside the interpreter instead of the program's. Stone 14
+# rebuilt the self-host's run as a machine whose work travels
+# on a heap-held stack of frames, counted in the program's
+# own units, so both programs' own guards speak first, in
+# their own words, at their own lines — and both are compared
+# on all three channels like every other example. (forever
+# takes its time — some twenty seconds on this bench, most
+# of the thirty it is allowed: a million counted passes is
+# the work the example is.)
 cd "$(dirname "$0")"
 ./build.sh || exit 1
 
@@ -53,10 +59,6 @@ rm -f stone6-note.txt
 for f in examples/*.nifla; do
     name=$(basename "$f" .nifla)
     total=$((total + 1))
-    if [ "$name" = "endless" ] || [ "$name" = "forever" ]; then
-        echo "SKIP $name (not covered — see the note at the top of this script)"
-        continue
-    fi
     timeout 30 "$SH" "$f" > /tmp/nifla-selfhost-out.txt 2> /tmp/nifla-selfhost-err.txt
     status=$?
     if [ -f "examples/$name.error" ]; then
@@ -92,5 +94,5 @@ for f in examples/*.nifla; do
     fi
 done
 rm -f stone6-note.txt
-echo "Self-hosted suite: $pass passed, $fail failed (of $total examples; endless and forever not covered)"
+echo "Self-hosted suite: $pass passed, $fail failed (of $total examples)"
 [ "$fail" -eq 0 ]

@@ -501,6 +501,13 @@ tools, files, program arguments, and floor refusal.
   so the host's million-pass guard speaks first — again naming
   a line inside the self-host, not the program's line 3.
 
+Both of these stood from Stone 8 through Stone 13, and
+**Stone 14 closed them both** — the run was rebuilt as a
+machine on a heap-held stack of frames, and the two programs'
+own guards now speak first, in their own words, at their own
+lines. See Stone 14's section below; the words above are the
+record as it stood when this section was written.
+
 **Honest limits:**
 
 - There is **no static checker inside the self-host** — it checks
@@ -738,10 +745,11 @@ Honest limits of Stone 10:
   host's own loop guard (a million passes shared across the
   whole run), so a block near the hosted 16 MiB cap can't be
   made there; the hosted tools keep the full cap.
-- The two self-host exclusions from Stone 8 stand, for the
-  measured host-guard reasons recorded there: `endless` and
-  `forever` remain uncovered, and nothing in this stone was
-  bent to change that.
+- The two self-host exclusions from Stone 8 stood when this
+  section was written, for the measured host-guard reasons
+  recorded there, and nothing in this stone was bent to
+  change that. **Stone 14, later the same evening, closed
+  them** — see its section below.
 
 ## Stone 11 — first bare metal
 
@@ -1011,6 +1019,109 @@ Honest limits of Stone 13:
   e820; a loader that hands over no map leaves the total at
   0 and the heap empty, and the first `makebytes` stops the
   machine.
+
+## Stone 14 — the last two fall
+
+Laid on **November 14, 2026**, the same evening, third of
+the three. Since Stone 8, the self-hosted interpreter —
+Nifla written in Nifla, compiled by niflac — ran every
+example in the suite except two, and the two were the guard
+examples: `endless`, a function calling itself, and
+`forever`, a loop that never ends. Each is supposed to be
+stopped by the language's own kindness limits, speaking in
+the program's own words at the program's own line. The
+self-host never let them speak: it ran a program by calling
+itself, one host call inside another for every call of the
+program's (some six host calls for one of the program's, by
+measurement), so the host's own five-hundred-call guard —
+or, compiled, the real processor stack — gave out around
+depth eighty, long before the program's depth guard; and an
+endless loop's passes spent the host's loop passes on top of
+what starting up had already spent, so the host's
+million-pass guard spoke first, naming a line inside
+`nifla-in-nifla.nifla` instead of the program's line 3.
+
+**The run is a machine now.** The self-host's interpreter
+section was rebuilt on an explicit stack of **frames held
+in a plain list** — heap, not call stack: a frame for each
+block being run, each statement waiting on a value, each
+value being gathered piece by piece, and each call gathering
+its handed values or running its function's body. A driver
+takes one small step at a time — start a frame, hand a
+finished value to the frame waiting under it, or unwind:
+an error travels up the frames until an `attempt` frame
+catches it, and a `give` travels up until the call frame it
+leaves turns it into the call's value, stepping the depth
+count back down on every road out. A program's calls push
+frames now, never the host's stack, so the depth a program
+can reach is bounded by **its own five-hundred guard and by
+memory** — the way the Swift interpreter bounds it. The
+driver takes up to thirty-two steps per pass of its own
+loop, so the host's million-pass guard measures the
+machine's work in coarse units; a program's loop passes are
+counted by the same `tickLoop` as ever, in the program's own
+units and no one else's.
+
+Three honest frugalities keep the machine quick enough to
+be useful, none of which changes what anything means: a
+value that needs no gathering — a number, a piece of text,
+a true/false, a variable's contents — is handed over at
+once instead of taking a frame round-trip; a block with no
+statements in it is finished the moment it is laid down,
+since an empty block's outcome is always the same; and a
+**waiting loop** — a loop whose body holds no statements,
+which can change nothing and call nothing — runs its passes
+in a tight counting loop of its own, eight passes to a turn
+(the host's guard counts turns; the program's counts
+passes), with a `while`'s condition worked out once when it
+needs no gathering, since an empty body cannot change it.
+The moment a pass needs the machine, the ordinary road
+takes over in exactly the state the step-by-step road would
+have left.
+
+**The proof** is `./run-selfhost.sh`, which now runs **all
+thirty-six examples: 36 passed, 0 failed** — the exclusions
+are gone from the script, and `endless` and `forever` are
+compared on all three channels (standard output, standard
+error, parting number) like every other example. `endless`
+speaks its own words — "more than five hundred functions
+deep", at its line 4 — in well under a second. `forever`
+speaks its own — "ran more than a million times", at its
+line 3 — in about nineteen seconds on this bench, most of
+the thirty the harness allows it: a million counted passes
+is the work the example is. The Swift interpreter, the
+compiled runtime, and the checker were not touched, and no
+guard's number changed anywhere: the hosted suites stand
+where they stood (36/36 interpreted, 71/71 compiled, 6/6
+voice), and the bare proofs still pass.
+
+Honest limits of Stone 14:
+
+- **The machine is slower than the recursion it replaced**
+  for ordinary work — measured on this bench, a twenty-
+  thousand-pass counting loop takes about fifteen seconds
+  through the machine against about six through the old
+  recursive run. Each step is a journey through the compiled
+  host's dynamic runtime, and frames cost more than calls
+  did. Correctness was bought with speed, knowingly.
+- **The waiting road is narrow.** It covers loops whose
+  bodies hold no statements — and, for `while`, a condition
+  that needs no gathering. A million-pass loop whose body
+  does work, or whose condition has pieces, still runs at
+  machine-step speed (some fifty microseconds a step on
+  this bench), so a million such passes would take minutes
+  through the self-host. `repeat` with an empty body takes
+  the waiting road too; `for` does not, since each of its
+  passes needs a scope and an item of its own. The Swift
+  interpreter runs all of these natively and quickly; the
+  self-host's claim is that it *matches* the interpreter's
+  behavior, not its speed.
+- The machine's stack is a list, so a program's pending
+  work — deeply nested values, long chains of calls not yet
+  returned — is bounded by memory as well as by the guards,
+  the way any interpreter's stack is bounded by something.
+  The guards still speak first for the programs they exist
+  for, as the two examples now prove.
 
 ## License
 

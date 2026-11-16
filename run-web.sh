@@ -13,10 +13,10 @@
 #   - every hosted example in TUTORIAL.md (as in
 #     run-tutorial.sh).
 #
-# Floor examples must be refused with the interpreter's exact
-# floor refusal; bare-metal examples are compile-only on
-# every door and are noted, not run. Both differences are
-# printed in the proof output, never silently skipped.
+# Floor examples run on the interpreter's simulated floor
+# desk and are compared like the hosted examples (the desk's
+# own proof is run-web-floor.sh); bare-metal examples are
+# compile-only on every door and are noted, not run.
 #
 # Needs Node (any current version) — the interpreter itself
 # has no dependencies and runs the same in a browser.

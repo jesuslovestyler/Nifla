@@ -14,11 +14,14 @@
 // five hundred calls deep, sixteen megabytes in one block
 // of bytes.
 //
-// What this door does NOT run, honestly: floor code, bare
-// metal, guests and feathers, and the compiler. Those belong
-// to real metal and to niflac. A program that holds floor
-// code is refused in the same plain words the interpreter
-// has always used.
+// What this door does NOT run, honestly: bare metal,
+// guests and feathers, and the compiler. Those belong to
+// real metal and to niflac. Floor code runs here — on a
+// simulated desk that keeps the floor contract the Primer
+// tells (see "The floor desk" below): the instructions
+// Nifla's own books and tests use are carried out one by
+// one, and a block reaching past the desk is refused in
+// plain words naming the limit, before anything runs.
 //
 // Files: a web page has no disk, so `readfile`, `writefile`
 // and `readbytes` work on an in-memory paper-store the host
@@ -2757,10 +2760,8 @@ function kindSatisfies(kindWord, value) {
 // with its own closing line added).
 const NOTHING_NOTE = " Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there.";
 
-// The interpreter's refusal of floor code, in one place so
-// the entry point's scan and the block itself say the same
-// words.
-const FLOOR_REFUSAL = "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.";
+// Floor code runs on the floor desk — see its own section
+// below, after the interpreter.
 
 // One scope of variables. Blocks get their own scope, linked
 // to the scope around them; a variable made inside a block
@@ -3574,6 +3575,45 @@ class Interpreter {
     }
   }
 
+  // A floor block, run on the floor desk (see the desk's
+  // own note below): the arguments are handed over exactly
+  // as the compiled door hands them — whole numbers and at
+  // most one block of bytes, refused in the same plain words
+  // the runtime speaks when a hand is wrong — and what comes
+  // back is the number the block left as its main answer,
+  // or the list when it wrote extra answers.
+  runFloorBlock(expression, scope) {
+    const args = expression.args.map(arg => this.evaluate(arg, scope));
+    const numbers = [];
+    let bytesValue = null;
+    for (const arg of args) {
+      if (typeof arg === 'number') {
+        if (!Number.isInteger(arg) || Math.abs(arg) >= 1e15) {
+          throw new NiflaError(expression.line, 'A floor block can be handed only whole numbers, but it was handed ' + describedOf(arg) + '.');
+        }
+        numbers.push(BigInt(arg));
+      } else if (arg instanceof NBytes) {
+        if (bytesValue !== null) {
+          throw new NiflaError(expression.line, 'A floor block can be handed only one block of bytes, but it was handed two.');
+        }
+        bytesValue = arg;
+      } else {
+        throw new NiflaError(expression.line, 'A floor block can be handed numbers and one block of bytes, but it was given ' + describedOf(arg) + '.');
+      }
+    }
+    const program = assembledFloor(expression);
+    const desk = new FloorDesk(numbers, bytesValue ? bytesValue.data : null, expression.line, (text, toError) => {
+      if (toError) {
+        this.errorOutput += text;
+      } else {
+        this.output += text;
+      }
+    });
+    const result = desk.run(program);
+    if (result.extras.length === 0) return result.headline;
+    return new NList([result.headline].concat(result.extras));
+  }
+
   evaluate(expression, scope) {
     switch (expression.t) {
       case 'num': return expression.v;
@@ -3582,10 +3622,7 @@ class Interpreter {
       case 'nothing': return NOTHING;
 
       case 'floor': {
-        // A floor block that was reached without the entry
-        // point's scan catching it first (a scan bug, not a
-        // program's fault) — the same refusal either way.
-        throw new NiflaError(expression.line, FLOOR_REFUSAL);
+        return this.runFloorBlock(expression, scope);
       }
 
       case 'var': {
@@ -3731,111 +3768,884 @@ function valuesEqual(left, right) {
 // same order as the Swift entry point.)
 // ----------------------------------------------------------------
 
-function firstFloorLineInStmts(statements) {
+function collectFloorExprsInStmts(statements, out) {
   for (const statement of statements) {
-    const line = firstFloorLineInStmt(statement);
-    if (line !== null) return line;
+    collectFloorExprsInStmt(statement, out);
   }
-  return null;
 }
 
-function firstFloorLineInStmt(statement) {
+function collectFloorExprsInStmt(statement, out) {
   switch (statement.t) {
     case 'declare':
     case 'assign':
     case 'say':
     case 'give':
-      return firstFloorLineInExpr(statement.value);
-    case 'assignTarget': {
-      const inTarget = firstFloorLineInExpr(statement.target);
-      if (inTarget !== null) return inTarget;
-      return firstFloorLineInExpr(statement.value);
-    }
-    case 'if': {
-      const inCond = firstFloorLineInExpr(statement.cond);
-      if (inCond !== null) return inCond;
-      const inThen = firstFloorLineInStmts(statement.then);
-      if (inThen !== null) return inThen;
-      return statement.otherwise ? firstFloorLineInStmts(statement.otherwise) : null;
-    }
-    case 'while': {
-      const inCond = firstFloorLineInExpr(statement.cond);
-      if (inCond !== null) return inCond;
-      return firstFloorLineInStmts(statement.body);
-    }
-    case 'repeat': {
-      const inCount = firstFloorLineInExpr(statement.count);
-      if (inCount !== null) return inCount;
-      return firstFloorLineInStmts(statement.body);
-    }
-    case 'for': {
-      const inOver = firstFloorLineInExpr(statement.over);
-      if (inOver !== null) return inOver;
-      return firstFloorLineInStmts(statement.body);
-    }
+      collectFloorExprsInExpr(statement.value, out);
+      return;
+    case 'assignTarget':
+      collectFloorExprsInExpr(statement.target, out);
+      collectFloorExprsInExpr(statement.value, out);
+      return;
+    case 'if':
+      collectFloorExprsInExpr(statement.cond, out);
+      collectFloorExprsInStmts(statement.then, out);
+      if (statement.otherwise) collectFloorExprsInStmts(statement.otherwise, out);
+      return;
+    case 'while':
+      collectFloorExprsInExpr(statement.cond, out);
+      collectFloorExprsInStmts(statement.body, out);
+      return;
+    case 'repeat':
+      collectFloorExprsInExpr(statement.count, out);
+      collectFloorExprsInStmts(statement.body, out);
+      return;
+    case 'for':
+      collectFloorExprsInExpr(statement.over, out);
+      collectFloorExprsInStmts(statement.body, out);
+      return;
     case 'define':
-      return firstFloorLineInStmts(statement.body);
-    case 'attempt': {
-      const inBody = firstFloorLineInStmts(statement.body);
-      if (inBody !== null) return inBody;
-      return firstFloorLineInStmts(statement.recovery);
-    }
-    case 'doCall': {
+      collectFloorExprsInStmts(statement.body, out);
+      return;
+    case 'attempt':
+      collectFloorExprsInStmts(statement.body, out);
+      collectFloorExprsInStmts(statement.recovery, out);
+      return;
+    case 'doCall':
       for (const arg of statement.args) {
-        const inArg = firstFloorLineInExpr(arg);
-        if (inArg !== null) return inArg;
+        collectFloorExprsInExpr(arg, out);
       }
-      return null;
-    }
+      return;
     case 'doExpr':
-      return firstFloorLineInExpr(statement.expr);
+      collectFloorExprsInExpr(statement.expr, out);
+      return;
     default:
-      return null;
+      return;
   }
 }
 
-function firstFloorLineInExpr(expression) {
+function collectFloorExprsInExpr(expression, out) {
   switch (expression.t) {
     case 'floor':
-      return expression.line;
-    case 'call': {
+      out.push(expression);
+      return;
+    case 'call':
       for (const arg of expression.args) {
-        const inArg = firstFloorLineInExpr(arg);
-        if (inArg !== null) return inArg;
+        collectFloorExprsInExpr(arg, out);
       }
-      return null;
-    }
-    case 'object': {
+      return;
+    case 'object':
       for (const field of expression.fields) {
-        const inValue = firstFloorLineInExpr(field.value);
-        if (inValue !== null) return inValue;
+        collectFloorExprsInExpr(field.value, out);
       }
-      return null;
-    }
-    case 'list': {
+      return;
+    case 'list':
       for (const item of expression.items) {
-        const inItem = firstFloorLineInExpr(item);
-        if (inItem !== null) return inItem;
+        collectFloorExprsInExpr(item, out);
       }
-      return null;
-    }
+      return;
     case 'field':
-      return firstFloorLineInExpr(expression.base);
+      collectFloorExprsInExpr(expression.base, out);
+      return;
     case 'neg':
-      return firstFloorLineInExpr(expression.expr);
-    case 'index': {
-      const inBase = firstFloorLineInExpr(expression.base);
-      if (inBase !== null) return inBase;
-      return firstFloorLineInExpr(expression.index);
-    }
-    case 'bin': {
-      const inLeft = firstFloorLineInExpr(expression.left);
-      if (inLeft !== null) return inLeft;
-      return firstFloorLineInExpr(expression.right);
-    }
+      collectFloorExprsInExpr(expression.inner, out);
+      return;
+    case 'index':
+      collectFloorExprsInExpr(expression.base, out);
+      collectFloorExprsInExpr(expression.index, out);
+      return;
+    case 'bin':
+      collectFloorExprsInExpr(expression.left, out);
+      collectFloorExprsInExpr(expression.right, out);
+      return;
     default:
-      return null;
+      return;
   }
+}
+
+
+// ----------------------------------------------------------------
+// The floor desk: floor code, run on a simulated desk.
+//
+// The compiled door hands a floor block real registers and
+// real memory (the Primer's Part 4 tells the contract). This
+// door has no real processor to hand it to, so it keeps a
+// desk: a small, honest simulation of that same contract.
+// The desk holds the sixteen registers as 64-bit values, the
+// flags the jumps read, and four pieces of memory — the
+// numbers handed in, the one block of bytes (the very same
+// bytes the program holds, so what the block writes there
+// stays written), the answers area, and a stack. The block's
+// assembly text is read by a small assembler and carried out
+// instruction by instruction.
+//
+// The desk covers the instructions Nifla's own books and
+// tests use: moving (mov, lea, push, pop), arithmetic (add,
+// sub, imul, mul, div, idiv, inc, dec, neg, not), logic and
+// comparing (xor, and, or, cmp, test), shifts (shl, shr,
+// sar), the jumps (jmp and the condition family), nop and
+// its kin, and the write call (syscall number 1, to the
+// program's own output and error channels). A block using
+// anything else is refused before it runs — before anything
+// in the program runs — in plain words naming the
+// instruction, the same honesty the compiled door's checker
+// keeps when it refuses what it can prove wrong before a
+// run. The desk's other limits are named the same way when
+// a block reaches them: memory outside the desk, a division
+// by zero, and a runaway block (ten million instructions is
+// the desk's patience, so a web page stays alive). Registers
+// the contract does not name start at zero and the stack
+// starts empty: the desk is the same every run, so a learner
+// sees the same thing twice.
+// ----------------------------------------------------------------
+
+// A coverage refusal: the block uses something the desk does
+// not cover. Carries the whole plain-words message; the
+// caller wraps it with the block's line.
+class DeskRefusal extends Error {}
+
+function deskUncovered(detail) {
+  return new DeskRefusal('This floor block uses ' + detail + ", which the browser's floor desk does not cover. The desk covers the instructions Nifla's own books and tests use — moving, adding, subtracting, multiplying, dividing, comparing, jumping, and the write call. To run this block, build the program with niflac and run the program it makes.");
+}
+
+function deskUnreadable(detail) {
+  return new DeskRefusal("The browser's floor desk cannot read this floor block: " + detail + '. The desk reads assembly the way the compiled door\'s assembler does, in the instructions Nifla\'s own books and tests use. To run this block, build the program with niflac and run the program it makes.');
+}
+
+const DESK_STEP_LIMIT = 10000000;
+const DESK_NUMBERS_AT = 0x10000000n;
+const DESK_BYTES_AT = 0x20000000n;
+const DESK_RESULTS_AT = 0x30000000n;
+const DESK_STACK_AT = 0x40000000n;
+const DESK_STACK_SIZE = 65536;
+
+// Register parts: every name a block can use, mapped to its
+// register (0–15, in the order rax rbx rcx rdx rsi rdi rbp
+// rsp r8…r15), its width in bytes, and whether it is the
+// high byte of the low word (ah, bh, ch, dh).
+const REGISTER_PARTS = (() => {
+  const parts = {};
+  const base = [
+    ['rax', 'eax', 'ax', 'al', 'ah'], ['rbx', 'ebx', 'bx', 'bl', 'bh'],
+    ['rcx', 'ecx', 'cx', 'cl', 'ch'], ['rdx', 'edx', 'dx', 'dl', 'dh'],
+    ['rsi', 'esi', 'si', 'sil', null], ['rdi', 'edi', 'di', 'dil', null],
+    ['rbp', 'ebp', 'bp', 'bpl', null], ['rsp', 'esp', 'sp', 'spl', null]
+  ];
+  base.forEach((names, i) => {
+    parts[names[0]] = { reg: i, size: 8, high: false };
+    parts[names[1]] = { reg: i, size: 4, high: false };
+    parts[names[2]] = { reg: i, size: 2, high: false };
+    parts[names[3]] = { reg: i, size: 1, high: false };
+    if (names[4]) parts[names[4]] = { reg: i, size: 1, high: true };
+  });
+  for (let i = 8; i < 16; i++) {
+    parts['r' + i] = { reg: i, size: 8, high: false };
+    parts['r' + i + 'd'] = { reg: i, size: 4, high: false };
+    parts['r' + i + 'w'] = { reg: i, size: 2, high: false };
+    parts['r' + i + 'b'] = { reg: i, size: 1, high: false };
+  }
+  return parts;
+})();
+
+function deskMask(size) {
+  return (1n << BigInt(size * 8)) - 1n;
+}
+
+function deskSigned(value, size) {
+  const bits = BigInt(size * 8);
+  const sign = 1n << (bits - 1n);
+  const masked = value & deskMask(size);
+  return (masked & sign) !== 0n ? masked - (1n << bits) : masked;
+}
+
+// Split an operand list on the commas that stand outside
+// memory brackets.
+function splitFloorOperands(text) {
+  const out = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of text) {
+    if (ch === '[') depth++;
+    if (ch === ']') depth--;
+    if (ch === ',' && depth === 0) {
+      out.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) out.push(current);
+  return out;
+}
+
+function parseFloorOperand(rawText) {
+  let text = rawText.trim();
+  let memSize = null;
+  const qualifier = text.match(/^(byte|word|dword|qword)\s+ptr\s+/i);
+  if (qualifier) {
+    memSize = { byte: 1, word: 2, dword: 4, qword: 8 }[qualifier[1].toLowerCase()];
+    text = text.slice(qualifier[0].length).trim();
+  }
+  const part = REGISTER_PARTS[text.toLowerCase()];
+  if (part) return { kind: 'reg', reg: part.reg, size: part.size, high: part.high };
+  if (text.startsWith('[') && text.endsWith(']')) {
+    const inner = text.slice(1, -1).replace(/\s+/g, '');
+    const terms = inner.match(/[+-]?[^+-]+/g) || [];
+    let base = null;
+    let index = null;
+    let scale = 1;
+    let disp = 0n;
+    for (const rawTerm of terms) {
+      let term = rawTerm;
+      let sign = 1n;
+      if (term.startsWith('+')) {
+        term = term.slice(1);
+      } else if (term.startsWith('-')) {
+        sign = -1n;
+        term = term.slice(1);
+      }
+      const star = term.split('*');
+      if (star.length === 2) {
+        let regName = null;
+        let scaleText = null;
+        const first = REGISTER_PARTS[star[0].toLowerCase()];
+        const second = REGISTER_PARTS[star[1].toLowerCase()];
+        if (first && first.size === 8) { regName = star[0]; scaleText = star[1]; }
+        else if (second && second.size === 8) { regName = star[1]; scaleText = star[0]; }
+        else throw deskUnreadable("an address the desk cannot read: '[" + inner + "]'");
+        const s = Number(scaleText);
+        if (![1, 2, 4, 8].includes(s) || sign < 0n || index !== null) {
+          throw deskUnreadable("an address the desk cannot read: '[" + inner + "]'");
+        }
+        index = REGISTER_PARTS[regName.toLowerCase()].reg;
+        scale = s;
+      } else if (REGISTER_PARTS[term.toLowerCase()] && REGISTER_PARTS[term.toLowerCase()].size === 8) {
+        const reg = REGISTER_PARTS[term.toLowerCase()].reg;
+        if (base === null) base = reg;
+        else if (index === null) { index = reg; scale = 1; }
+        else throw deskUnreadable("an address the desk cannot read: '[" + inner + "]'");
+      } else if (/^(\d+|0x[0-9a-fA-F]+)$/.test(term)) {
+        disp += sign * BigInt(term);
+      } else {
+        throw deskUnreadable("an address the desk cannot read: '[" + inner + "]'");
+      }
+    }
+    return { kind: 'mem', size: memSize, base, index, scale, disp };
+  }
+  if (/^[+-]?(\d+|0x[0-9a-fA-F]+)$/.test(text)) {
+    let digits = text;
+    let negative = false;
+    if (digits.startsWith('+')) digits = digits.slice(1);
+    else if (digits.startsWith('-')) { negative = true; digits = digits.slice(1); }
+    const value = BigInt(digits);
+    return { kind: 'imm', value: negative ? -value : value };
+  }
+  if (/^[A-Za-z_.$][\w.$]*$/.test(text) || /^\d+[bf]$/.test(text)) {
+    return { kind: 'label', name: text.toLowerCase() };
+  }
+  throw deskUnreadable("words the desk cannot read: '" + rawText.trim() + "'");
+}
+
+const DESK_JUMPS = ['jmp', 'je', 'jz', 'jne', 'jnz', 'ja', 'jae', 'jb', 'jbe',
+  'jg', 'jge', 'jl', 'jle', 'js', 'jns', 'jo', 'jno'];
+
+// Read a block's assembly text into instructions the desk
+// can carry out, resolving its labels. Anything the desk
+// does not cover is refused here, in plain words.
+function assembleFloorBlock(asmText) {
+  const instructions = [];
+  const namedLabels = new Map();
+  const numericLabels = [];
+  for (const rawLine of asmText.split('\n')) {
+    let line = rawLine;
+    const hashAt = line.indexOf('#');
+    if (hashAt >= 0) line = line.slice(0, hashAt);
+    const slashesAt = line.indexOf('//');
+    if (slashesAt >= 0) line = line.slice(0, slashesAt);
+    for (let statement of line.split(';')) {
+      statement = statement.trim();
+      if (!statement) continue;
+      let labelMatch;
+      while ((labelMatch = statement.match(/^([A-Za-z_.$][\w.$]*|\d+):\s*/))) {
+        const name = labelMatch[1].toLowerCase();
+        if (/^\d+$/.test(name)) {
+          numericLabels.push({ num: name, at: instructions.length });
+        } else {
+          if (namedLabels.has(name)) {
+            throw deskUnreadable("the label '" + name + "' set down twice");
+          }
+          namedLabels.set(name, instructions.length);
+        }
+        statement = statement.slice(labelMatch[0].length).trim();
+        if (!statement) break;
+      }
+      if (!statement) continue;
+      const spaceAt = statement.search(/\s/);
+      const mnemonic = (spaceAt < 0 ? statement : statement.slice(0, spaceAt)).toLowerCase();
+      const operandText = spaceAt < 0 ? '' : statement.slice(spaceAt + 1).trim();
+      const operands = operandText ? splitFloorOperands(operandText).map(parseFloorOperand) : [];
+      instructions.push({ op: mnemonic, operands });
+    }
+  }
+  for (const instruction of instructions) {
+    if (DESK_JUMPS.includes(instruction.op)) {
+      if (instruction.operands.length !== 1 || instruction.operands[0].kind !== 'label') {
+        throw deskUnreadable("a '" + instruction.op + "' whose target the desk cannot read");
+      }
+      const name = instruction.operands[0].name;
+      const numeric = name.match(/^(\d+)([bf])$/);
+      if (numeric) {
+        const at = instructions.indexOf(instruction);
+        const same = numericLabels.filter(entry => entry.num === numeric[1]);
+        if (numeric[2] === 'b') {
+          const before = same.filter(entry => entry.at <= at);
+          if (before.length === 0) {
+            throw deskUnreadable("a jump back to label '" + numeric[1] + "' that was never set down before it");
+          }
+          instruction.target = before[before.length - 1].at;
+        } else {
+          const after = same.filter(entry => entry.at > at);
+          if (after.length === 0) {
+            throw deskUnreadable("a jump forward to label '" + numeric[1] + "' that is never set down after it");
+          }
+          instruction.target = after[0].at;
+        }
+      } else {
+        if (!namedLabels.has(name)) {
+          throw deskUnreadable("a jump to the label '" + name + "', which this block never sets down");
+        }
+        instruction.target = namedLabels.get(name);
+      }
+    }
+  }
+  for (const instruction of instructions) validateFloorInstruction(instruction);
+  return instructions;
+}
+
+// The working width of an instruction, from its operands —
+// and the shape rules the desk holds every instruction to.
+function floorOperandSize(instruction, operands, needsMemoryWidth) {
+  let size = null;
+  for (const operand of operands) {
+    if (operand.kind === 'reg') {
+      if (size !== null && size !== operand.size) {
+        throw deskUncovered("a '" + instruction.op + "' whose two sides are different widths");
+      }
+      size = operand.size;
+    } else if (operand.kind === 'mem' && operand.size !== null) {
+      if (size !== null && size !== operand.size) {
+        throw deskUncovered("a '" + instruction.op + "' whose two sides are different widths");
+      }
+      size = operand.size;
+    }
+  }
+  if (size === null && needsMemoryWidth) {
+    throw deskUncovered("a '" + instruction.op + "' that works on memory without saying how wide — byte ptr, word ptr, dword ptr, or qword ptr");
+  }
+  return size;
+}
+
+function validateFloorInstruction(instruction) {
+  const ops = instruction.operands;
+  const op = instruction.op;
+  const twoOperandAlu = ['mov', 'add', 'sub', 'xor', 'and', 'or', 'cmp', 'test'];
+  if (twoOperandAlu.includes(op)) {
+    if (ops.length !== 2) throw deskUncovered("a '" + op + "' with " + ops.length + ' side' + (ops.length === 1 ? '' : 's'));
+    const [dst, src] = ops;
+    if (dst.kind !== 'reg' && dst.kind !== 'mem') throw deskUncovered("a '" + op + "' with nowhere to put its answer");
+    if (src.kind !== 'reg' && src.kind !== 'mem' && src.kind !== 'imm') throw deskUncovered("a '" + op + "' whose second side the desk cannot read");
+    if (dst.kind === 'mem' && src.kind === 'mem') throw deskUncovered("a '" + op + "' that goes from memory to memory");
+    if (op === 'mov' && dst.kind === 'mem' && src.kind === 'imm' && dst.size === null) {
+      throw deskUncovered("a 'mov' that puts a number into memory without saying how wide — byte ptr, word ptr, dword ptr, or qword ptr");
+    }
+    instruction.size = floorOperandSize(instruction, ops, false) || 8;
+    return;
+  }
+  if (op === 'lea') {
+    if (ops.length !== 2 || ops[0].kind !== 'reg' || ops[1].kind !== 'mem') {
+      throw deskUncovered("a 'lea' that is not a register taking an address");
+    }
+    instruction.size = ops[0].size;
+    return;
+  }
+  if (op === 'imul') {
+    if (ops.length === 1) {
+      if (ops[0].kind !== 'reg' && ops[0].kind !== 'mem') throw deskUncovered("an 'imul' with nothing to multiply");
+      instruction.size = floorOperandSize(instruction, ops, true);
+      return;
+    }
+    if (ops.length === 2 || ops.length === 3) {
+      if (ops[0].kind !== 'reg') throw deskUncovered("an 'imul' with nowhere to put its answer");
+      if (ops[1].kind !== 'reg' && ops[1].kind !== 'mem' && ops[1].kind !== 'imm') throw deskUncovered("an 'imul' whose second side the desk cannot read");
+      if (ops.length === 3 && ops[2].kind !== 'imm') throw deskUncovered("an 'imul' whose third side is not a number");
+      if (ops.length === 2) floorOperandSize(instruction, ops, false);
+      instruction.size = ops[0].size;
+      return;
+    }
+    throw deskUncovered("an 'imul' with " + ops.length + ' sides');
+  }
+  if (op === 'mul' || op === 'div' || op === 'idiv') {
+    if (ops.length !== 1 || (ops[0].kind !== 'reg' && ops[0].kind !== 'mem')) {
+      throw deskUncovered("a '" + op + "' that is not dividing or multiplying by one thing");
+    }
+    instruction.size = floorOperandSize(instruction, ops, true);
+    return;
+  }
+  if (op === 'inc' || op === 'dec' || op === 'neg' || op === 'not') {
+    if (ops.length !== 1 || (ops[0].kind !== 'reg' && ops[0].kind !== 'mem')) {
+      throw deskUncovered("a '" + op + "' with nothing to work on");
+    }
+    instruction.size = floorOperandSize(instruction, ops, true);
+    return;
+  }
+  if (op === 'push') {
+    if (ops.length !== 1 || ops[0].kind === 'label') throw deskUncovered("a 'push' of something the desk cannot push");
+    if (ops[0].kind === 'reg' && ops[0].size !== 8) throw deskUncovered("a 'push' of a part of a register");
+    instruction.size = 8;
+    return;
+  }
+  if (op === 'pop') {
+    if (ops.length !== 1 || (ops[0].kind !== 'reg' && ops[0].kind !== 'mem')) throw deskUncovered("a 'pop' with nowhere to land");
+    if (ops[0].kind === 'reg' && ops[0].size !== 8) throw deskUncovered("a 'pop' into a part of a register");
+    instruction.size = 8;
+    return;
+  }
+  if (op === 'shl' || op === 'shr' || op === 'sar') {
+    if (ops.length !== 2 || (ops[0].kind !== 'reg' && ops[0].kind !== 'mem')) {
+      throw deskUncovered("a '" + op + "' that is not shifting one thing by a count");
+    }
+    const count = ops[1];
+    const isCl = count.kind === 'reg' && count.reg === 2 && count.size === 1 && !count.high;
+    if (count.kind !== 'imm' && !isCl) throw deskUncovered("a '" + op + "' whose count is not a number or cl");
+    instruction.size = floorOperandSize(instruction, [ops[0]], true);
+    return;
+  }
+  if (DESK_JUMPS.includes(op)) return;
+  if (op === 'nop' || op === 'cld' || op === 'std' || op === 'syscall') {
+    if (ops.length !== 0) throw deskUncovered("a '" + op + "' with words after it");
+    return;
+  }
+  throw deskUncovered("the instruction '" + op + "'");
+}
+
+// The desk itself: registers, flags, and the four pieces of
+// memory, carrying out one assembled block.
+class FloorDesk {
+  constructor(numbers, bytesData, line, writeOut) {
+    this.line = line;
+    this.writeOut = writeOut;
+    this.regs = new Array(16).fill(0n);
+    this.flags = { zf: false, sf: false, cf: false, of: false };
+    const numbersBytes = new Uint8Array(numbers.length * 8);
+    numbers.forEach((value, i) => {
+      let x = value & 0xffffffffffffffffn;
+      for (let b = 0; b < 8; b++) {
+        numbersBytes[i * 8 + b] = Number(x & 0xffn);
+        x >>= 8n;
+      }
+    });
+    this.regions = [
+      { at: DESK_NUMBERS_AT, data: numbersBytes },
+      { at: DESK_RESULTS_AT, data: new Uint8Array(64) },
+      { at: DESK_STACK_AT, data: new Uint8Array(DESK_STACK_SIZE) }
+    ];
+    if (bytesData) this.regions.push({ at: DESK_BYTES_AT, data: bytesData });
+    // The contract, as the Primer tells it: r10 and r11 hand
+    // over the numbers, rbx and r12 the one block of bytes,
+    // r13 the answers area, r14 the count of extra answers
+    // (none yet). With no bytes handed in, rbx is 0, as the
+    // compiled door's wrapper leaves it.
+    this.regs[10] = DESK_NUMBERS_AT;
+    this.regs[11] = BigInt(numbers.length);
+    this.regs[1] = bytesData ? DESK_BYTES_AT : 0n;
+    this.regs[12] = BigInt(bytesData ? bytesData.length : 0);
+    this.regs[13] = DESK_RESULTS_AT;
+    this.regs[14] = 0n;
+    this.regs[7] = DESK_STACK_AT + BigInt(DESK_STACK_SIZE);
+  }
+
+  locate(address, size) {
+    for (const region of this.regions) {
+      if (address >= region.at && address + BigInt(size) <= region.at + BigInt(region.data.length)) {
+        return { data: region.data, offset: Number(address - region.at) };
+      }
+    }
+    return null;
+  }
+
+  outsideFault(address) {
+    return new NiflaError(this.line, 'This floor block reached for memory outside its desk — the address ' + address + ' is not part of the numbers handed in, the block of bytes, the answers area, or its stack. On real metal that reach would land wherever it pointed; the desk stops it here so the mistake can be seen.');
+  }
+
+  readMem(address, size) {
+    const place = this.locate(address, size);
+    if (!place) throw this.outsideFault(address);
+    let value = 0n;
+    for (let i = size - 1; i >= 0; i--) {
+      value = (value << 8n) | BigInt(place.data[place.offset + i]);
+    }
+    return value;
+  }
+
+  writeMem(address, size, value) {
+    const place = this.locate(address, size);
+    if (!place) throw this.outsideFault(address);
+    let x = value & deskMask(size);
+    for (let i = 0; i < size; i++) {
+      place.data[place.offset + i] = Number(x & 0xffn);
+      x >>= 8n;
+    }
+  }
+
+  getReg(part) {
+    const value = this.regs[part.reg];
+    if (part.size === 8) return value;
+    if (part.size === 4) return value & 0xffffffffn;
+    if (part.size === 2) return value & 0xffffn;
+    if (part.high) return (value >> 8n) & 0xffn;
+    return value & 0xffn;
+  }
+
+  setReg(part, value) {
+    const masked = value & deskMask(part.size);
+    if (part.size === 8 || part.size === 4) {
+      // A four-byte write clears the top half, as the
+      // processor does; an eight-byte write is the whole.
+      this.regs[part.reg] = masked;
+    } else if (part.size === 2) {
+      this.regs[part.reg] = (this.regs[part.reg] & ~0xffffn) | masked;
+    } else if (part.high) {
+      this.regs[part.reg] = (this.regs[part.reg] & ~0xff00n) | (masked << 8n);
+    } else {
+      this.regs[part.reg] = (this.regs[part.reg] & ~0xffn) | masked;
+    }
+  }
+
+  addressOf(operand) {
+    let address = operand.disp;
+    if (operand.base !== null) address += this.regs[operand.base];
+    if (operand.index !== null) address += this.regs[operand.index] * BigInt(operand.scale);
+    return address;
+  }
+
+  readOperand(operand, size) {
+    if (operand.kind === 'reg') return this.getReg(operand);
+    if (operand.kind === 'imm') return operand.value & deskMask(size);
+    return this.readMem(this.addressOf(operand), size);
+  }
+
+  writeOperand(operand, size, value) {
+    if (operand.kind === 'reg') {
+      this.setReg(operand, value);
+      return;
+    }
+    this.writeMem(this.addressOf(operand), size, value);
+  }
+
+  setZN(result, size) {
+    const masked = result & deskMask(size);
+    this.flags.zf = masked === 0n;
+    this.flags.sf = ((masked >> BigInt(size * 8 - 1)) & 1n) === 1n;
+  }
+
+  addFlags(a, b, size) {
+    const result = a + b;
+    const masked = result & deskMask(size);
+    this.flags.cf = result > deskMask(size);
+    const signA = ((a >> BigInt(size * 8 - 1)) & 1n) === 1n;
+    const signB = ((b >> BigInt(size * 8 - 1)) & 1n) === 1n;
+    const signR = ((masked >> BigInt(size * 8 - 1)) & 1n) === 1n;
+    this.flags.of = signA === signB && signR !== signA;
+    this.setZN(result, size);
+    return masked;
+  }
+
+  subFlags(a, b, size) {
+    const result = a - b;
+    const masked = result & deskMask(size);
+    this.flags.cf = a < b;
+    const signA = ((a >> BigInt(size * 8 - 1)) & 1n) === 1n;
+    const signB = ((b >> BigInt(size * 8 - 1)) & 1n) === 1n;
+    const signR = ((masked >> BigInt(size * 8 - 1)) & 1n) === 1n;
+    this.flags.of = signA !== signB && signR !== signA;
+    this.setZN(result, size);
+    return masked;
+  }
+
+  run(instructions) {
+    let pc = 0;
+    let steps = 0;
+    while (pc < instructions.length) {
+      steps++;
+      if (steps > DESK_STEP_LIMIT) {
+        throw new NiflaError(this.line, 'This floor block ran past ten million instructions without stopping, so the desk stopped it. On real metal it would keep going; in a web page it has to stop so the page stays alive. The block may be in a loop that never ends.');
+      }
+      pc = this.execute(instructions[pc], pc);
+    }
+    const headline = Number(deskSigned(this.regs[0], 8));
+    let extraCount = this.regs[14];
+    if (extraCount > 8n) extraCount = 8n;
+    if (extraCount < 0n) extraCount = 0n;
+    const extras = [];
+    for (let i = 0; i < Number(extraCount); i++) {
+      extras.push(Number(deskSigned(this.readMem(DESK_RESULTS_AT + BigInt(i * 8), 8), 8)));
+    }
+    return { headline, extras };
+  }
+
+  jumpTaken(op) {
+    const f = this.flags;
+    switch (op) {
+      case 'jmp': return true;
+      case 'je': case 'jz': return f.zf;
+      case 'jne': case 'jnz': return !f.zf;
+      case 'ja': return !f.cf && !f.zf;
+      case 'jae': return !f.cf;
+      case 'jb': return f.cf;
+      case 'jbe': return f.cf || f.zf;
+      case 'jg': return !f.zf && f.sf === f.of;
+      case 'jge': return f.sf === f.of;
+      case 'jl': return f.sf !== f.of;
+      case 'jle': return f.zf || f.sf !== f.of;
+      case 'js': return f.sf;
+      case 'jns': return !f.sf;
+      case 'jo': return f.of;
+      case 'jno': return !f.of;
+      default: return false;
+    }
+  }
+
+  execute(instruction, pc) {
+    const op = instruction.op;
+    const ops = instruction.operands;
+    const size = instruction.size || 8;
+    const next = pc + 1;
+    if (DESK_JUMPS.includes(op)) {
+      return this.jumpTaken(op) ? instruction.target : next;
+    }
+    switch (op) {
+      case 'nop': case 'cld': case 'std':
+        return next;
+      case 'mov': {
+        this.writeOperand(ops[0], size, this.readOperand(ops[1], size));
+        return next;
+      }
+      case 'lea': {
+        this.setReg(ops[0], this.addressOf(ops[1]));
+        return next;
+      }
+      case 'add': case 'sub': case 'xor': case 'and': case 'or': case 'cmp': case 'test': {
+        const a = this.readOperand(ops[0], size);
+        const b = this.readOperand(ops[1], size);
+        let result;
+        if (op === 'add') result = this.addFlags(a, b, size);
+        else if (op === 'sub' || op === 'cmp') result = this.subFlags(a, b, size);
+        else {
+          if (op === 'xor') result = a ^ b;
+          else if (op === 'and' || op === 'test') result = a & b;
+          else result = a | b;
+          this.flags.cf = false;
+          this.flags.of = false;
+          this.setZN(result, size);
+        }
+        if (op !== 'cmp' && op !== 'test') this.writeOperand(ops[0], size, result);
+        return next;
+      }
+      case 'inc': case 'dec': {
+        const a = this.readOperand(ops[0], size);
+        const savedCF = this.flags.cf;
+        const result = op === 'inc' ? this.addFlags(a, 1n, size) : this.subFlags(a, 1n, size);
+        this.flags.cf = savedCF;
+        if (op === 'inc') this.flags.of = result === (1n << BigInt(size * 8 - 1));
+        else this.flags.of = a === (1n << BigInt(size * 8 - 1));
+        this.writeOperand(ops[0], size, result);
+        return next;
+      }
+      case 'neg': {
+        const a = this.readOperand(ops[0], size);
+        const result = (-a) & deskMask(size);
+        this.flags.cf = a !== 0n;
+        this.flags.of = a === (1n << BigInt(size * 8 - 1));
+        this.setZN(result, size);
+        this.writeOperand(ops[0], size, result);
+        return next;
+      }
+      case 'not': {
+        const a = this.readOperand(ops[0], size);
+        this.writeOperand(ops[0], size, ~a & deskMask(size));
+        return next;
+      }
+      case 'imul': {
+        const acc = { reg: 0, size, high: false };
+        const accHigh = { reg: 3, size, high: false };
+        if (ops.length === 1) {
+          const b = deskSigned(this.readOperand(ops[0], size), size);
+          const a = deskSigned(this.getReg(acc), size);
+          const product = a * b;
+          const low = product & deskMask(size);
+          const high = (product >> BigInt(size * 8)) & deskMask(size);
+          this.setReg(acc, low);
+          this.setReg(accHigh, high);
+          const fits = deskSigned(low, size) === product;
+          this.flags.cf = !fits;
+          this.flags.of = !fits;
+          return next;
+        }
+        const product = ops.length === 2
+          ? deskSigned(this.readOperand(ops[0], size), size) * deskSigned(this.readOperand(ops[1], size), size)
+          : deskSigned(this.readOperand(ops[1], size), size) * ops[2].value;
+        const truncated = product & deskMask(size);
+        const fits = deskSigned(truncated, size) === product;
+        this.flags.cf = !fits;
+        this.flags.of = !fits;
+        this.writeOperand(ops[0], size, truncated);
+        return next;
+      }
+      case 'mul': {
+        const acc = { reg: 0, size, high: false };
+        const accHigh = { reg: 3, size, high: false };
+        const b = this.readOperand(ops[0], size);
+        const a = this.getReg(acc);
+        const product = a * b;
+        const low = product & deskMask(size);
+        const high = (product >> BigInt(size * 8)) & deskMask(size);
+        this.setReg(acc, low);
+        this.setReg(accHigh, high);
+        this.flags.cf = high !== 0n;
+        this.flags.of = high !== 0n;
+        return next;
+      }
+      case 'div': case 'idiv': {
+        const acc = { reg: 0, size, high: false };
+        const accHigh = { reg: 3, size, high: false };
+        const bits = BigInt(size * 8);
+        const rawDivisor = this.readOperand(ops[0], size);
+        const dividendBits = (this.getReg(accHigh) << bits) | this.getReg(acc);
+        if (op === 'div') {
+          if (rawDivisor === 0n) {
+            throw new NiflaError(this.line, 'This floor block divided by zero. On real metal the processor faults at that instruction and the program stops.');
+          }
+          const quotient = dividendBits / rawDivisor;
+          const remainder = dividendBits % rawDivisor;
+          if (quotient > deskMask(size)) {
+            throw new NiflaError(this.line, "This floor block's division made an answer too big to hold. On real metal the processor faults at that instruction and the program stops.");
+          }
+          this.setReg(acc, quotient);
+          this.setReg(accHigh, remainder);
+          return next;
+        }
+        const divisor = deskSigned(rawDivisor, size);
+        if (divisor === 0n) {
+          throw new NiflaError(this.line, 'This floor block divided by zero. On real metal the processor faults at that instruction and the program stops.');
+        }
+        const dividend = deskSigned(dividendBits, size * 2);
+        const quotient = dividend / divisor;
+        const remainder = dividend % divisor;
+        const maxSigned = (1n << (bits - 1n)) - 1n;
+        const minSigned = -(1n << (bits - 1n));
+        if (quotient > maxSigned || quotient < minSigned) {
+          throw new NiflaError(this.line, "This floor block's division made an answer too big to hold. On real metal the processor faults at that instruction and the program stops.");
+        }
+        this.setReg(acc, quotient & deskMask(size));
+        this.setReg(accHigh, remainder & deskMask(size));
+        return next;
+      }
+      case 'push': {
+        const value = ops[0].kind === 'imm' ? ops[0].value & deskMask(8) : this.readOperand(ops[0], 8);
+        const rsp = this.regs[7] - 8n;
+        this.writeMem(rsp, 8, value);
+        this.regs[7] = rsp;
+        return next;
+      }
+      case 'pop': {
+        const value = this.readMem(this.regs[7], 8);
+        this.regs[7] += 8n;
+        this.writeOperand(ops[0], 8, value);
+        return next;
+      }
+      case 'shl': case 'shr': case 'sar': {
+        const a = this.readOperand(ops[0], size);
+        let count;
+        if (ops[1].kind === 'imm') count = Number(ops[1].value & 63n);
+        else count = Number(this.getReg({ reg: 2, size: 1, high: false }) & 63n);
+        count = count & (size === 8 ? 63 : 31);
+        if (count === 0) return next;
+        const bits = size * 8;
+        let result;
+        if (op === 'shl') {
+          this.flags.cf = ((a >> BigInt(bits - count)) & 1n) === 1n;
+          result = (a << BigInt(count)) & deskMask(size);
+          if (count === 1) this.flags.of = this.flags.cf !== (((result >> BigInt(bits - 1)) & 1n) === 1n);
+        } else if (op === 'shr') {
+          this.flags.cf = ((a >> BigInt(count - 1)) & 1n) === 1n;
+          result = a >> BigInt(count);
+          if (count === 1) this.flags.of = ((a >> BigInt(bits - 1)) & 1n) === 1n;
+        } else {
+          this.flags.cf = ((a >> BigInt(count - 1)) & 1n) === 1n;
+          result = deskSigned(a, size) >> BigInt(count);
+          result = result & deskMask(size);
+          if (count === 1) this.flags.of = false;
+        }
+        this.setZN(result, size);
+        this.writeOperand(ops[0], size, result);
+        return next;
+      }
+      case 'syscall': {
+        const call = this.regs[0];
+        if (call !== 1n) {
+          throw new NiflaError(this.line, 'This floor block asked the processor for call number ' + call + ". The desk covers only the write call (number 1) — the one a block uses to say something. A real machine's system answers the other calls; this desk is not one.");
+        }
+        const fd = this.regs[5];
+        const buffer = this.regs[4];
+        const count = this.regs[3];
+        if (fd === 1n || fd === 2n) {
+          if (count > 16777216n) throw this.outsideFault(buffer);
+          const bytes = new Uint8Array(Number(count));
+          for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = Number(this.readMem(buffer + BigInt(i), 1));
+          }
+          const text = new TextDecoder('utf-8').decode(bytes);
+          this.writeOut(text, fd === 2n);
+          this.regs[0] = count;
+        } else {
+          // A write to a channel the program does not hold:
+          // the real call answers with its bad-channel
+          // number, -9, and nothing is written.
+          this.regs[0] = (-9n) & deskMask(8);
+        }
+        // The write call spends rcx and r11, as the
+        // processor does.
+        this.regs[2] = 0n;
+        this.regs[11] = 0n;
+        return next;
+      }
+      default:
+        // validateFloorInstruction refused everything the
+        // desk does not cover before the block ran, so this
+        // is unreachable; the refusal stands guard anyway.
+        throw deskUncovered("the instruction '" + op + "'");
+    }
+  }
+}
+
+// Assembled blocks, remembered per program node so the
+// entry point's coverage proof and the run itself read the
+// same instructions.
+const floorAssemblyCache = new WeakMap();
+
+function assembledFloor(expression) {
+  let program = floorAssemblyCache.get(expression);
+  if (!program) {
+    try {
+      program = assembleFloorBlock(expression.asm);
+    } catch (error) {
+      if (error instanceof DeskRefusal) {
+        throw new NiflaError(expression.line, error.message);
+      }
+      throw error;
+    }
+    floorAssemblyCache.set(expression, program);
+  }
+  return program;
 }
 
 // ----------------------------------------------------------------
@@ -3846,8 +4656,8 @@ function firstFloorLineInExpr(expression) {
 //
 // See the note at the top of this file for the full
 // description. The run mirrors the Swift entry point exactly:
-// read the program, check it before anything runs, refuse
-// floor code, then run it.
+// read the program, check it before anything runs, prove
+// every floor block is one the desk covers, then run it.
 // ----------------------------------------------------------------
 
 function runNifla(source, options) {
@@ -3872,9 +4682,10 @@ function runNifla(source, options) {
     const tokens = new Lexer(source).tokenize();
     const program = new Parser(tokens).parseProgram();
     new Checker(program).check(program);
-    const floorLine = firstFloorLineInStmts(program);
-    if (floorLine !== null) {
-      throw new NiflaError(floorLine, FLOOR_REFUSAL);
+    const floorExprs = [];
+    collectFloorExprsInStmts(program, floorExprs);
+    for (const floorExpr of floorExprs) {
+      assembledFloor(floorExpr);
     }
     interpreter = new Interpreter(store, args);
     interpreter.run(program);

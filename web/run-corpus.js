@@ -16,17 +16,18 @@
 //     Tutorial's each get a fresh one (the Swift proof gives
 //     each run its own fresh folder).
 //
-// Two documented platform differences, printed as notes, not
-// silently skipped:
+// One documented platform difference, printed as a note,
+// not silently skipped:
 //
-//   - ```nifla-floor examples: the Swift proof compiles and
-//     runs them; this door runs the hosted language only, so
-//     the check here is that the interpreter refuses them
-//     with its exact floor refusal, at a line, before running.
 //   - ```nifla-bare and ```nifla-bare-guest examples are
 //     compile-only on every door (the Swift proof compiles
 //     them and runs them on bare metal elsewhere); they are
 //     counted and noted, not run.
+//
+// ```nifla-floor examples run here on the floor desk (see
+// nifla.js) and are compared like the hosted examples. The
+// desk's own proof — the floor suites and the blocks it
+// honestly refuses — is run-web-floor.sh.
 
 'use strict';
 
@@ -35,7 +36,6 @@ const path = require('path');
 const Nifla = require('./nifla.js');
 
 const ROOT = path.join(__dirname, '..');
-const FLOOR_REFUSAL = "This is floor code — raw instructions for the processor — and the interpreter can't run it. Floor code runs only in a compiled program: build this program with niflac and run the program it makes.";
 
 let totalFailures = 0;
 
@@ -118,7 +118,6 @@ function runBook(bookFile, sharedStore) {
   let ran = 0;
   let failed = 0;
   let seen = 0;
-  let floorRefused = 0;
   let compileOnly = 0;
   let failuresBefore = totalFailures;
   let store = {};
@@ -155,23 +154,6 @@ function runBook(bookFile, sharedStore) {
     let wantCode = 0;
     const exitMatch = /exit=(\d+)/.exec(info);
     if (exitMatch) wantCode = parseInt(exitMatch[1], 10);
-    if (info === 'nifla-floor') {
-      // This door runs the hosted language only: the example
-      // must be refused with the floor refusal, before
-      // anything runs.
-      const result = Nifla.run(body, { args: ['Ada', 'Byron'], files: {} });
-      const refusal = /^Line \d+: /.exec(result.errorOutput);
-      if (result.exitCode === 1 && result.output === '' && refusal &&
-          result.errorOutput === refusal[0] + FLOOR_REFUSAL + '\n') {
-        console.log('PASS ' + label + ' [refused: floor code, as this door requires]');
-        floorRefused += 1;
-      } else {
-        reportFailure(label + ' [expected the floor refusal]',
-          '--- actual (exit ' + result.exitCode + ') ---\n' + result.output + result.errorOutput);
-      }
-      i += 2;
-      continue;
-    }
     const result = Nifla.run(body, {
       args: ['Ada', 'Byron'],
       files: sharedStore ? store : {},
@@ -198,8 +180,7 @@ function runBook(bookFile, sharedStore) {
   }
   const failures = totalFailures - failuresBefore;
   console.log(bookFile + ' examples: ' + ran + ' executed and passed, ' +
-    failed + ' executed and failed, ' +
-    floorRefused + ' floor refused as required, ' + compileOnly +
+    failed + ' executed and failed, ' + compileOnly +
     ' bare compile-only (noted), ' + failures + ' failure(s)');
   return ran;
 }

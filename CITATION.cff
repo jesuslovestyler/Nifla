@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+authors:
+  - family-names: "Kovalevich"
+    given-names: "Tyler Austin James"
+title: "Nifla"
+type: software
+repository-code: "https://github.com/jesuslovestyler/Nifla"
+url: "https://github.com/jesuslovestyler/Nifla"
+license: "Unlicense"
+abstract: "A programming language anyone can learn, that runs from a web page to bare metal and an operating system."

@@ -2001,6 +2001,20 @@ and `sayerr` written as a statement where it is a tool
 call. The book now says both rightly, and the proof holds
 it to them.)
 
+The language has a course now, beside the book:
+`TUTORIAL.md`, in this repository — eleven lessons that
+teach programming itself in Nifla, one new idea at a
+time, with a worked exercise after nearly every idea and
+one program (a giving ledger) growing through the whole
+course to a capstone. Its promise, in its own opening
+words: write it like JavaScript, run it with Swift's
+strength, in the same language an operating system is
+written in. A standing proof, `run-tutorial.sh`, holds
+every example and every worked answer in it true —
+interpreted and compiled, each run in a fresh folder so
+its file lessons start in an empty room — beside this
+book's own proof in the repo's test flow.
+
 ## Stone 23 — the ARM door (November 15, 2026)
 
 The bare subset speaks a second machine now. The

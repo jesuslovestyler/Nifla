@@ -328,6 +328,7 @@ let builtinTools: [String: BuiltinDef] = [
     "bitxor": BuiltinDef(params: ["first", "second"], example: "bitxor(12, 10)"),
     "astext": BuiltinDef(params: ["bytes"], example: "astext(block)"),
     "wholediv": BuiltinDef(params: ["first", "second"], example: "wholediv(17, 5)"),
+    "leftover": BuiltinDef(params: ["first", "second"], example: "leftover(17, 5)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -495,6 +496,28 @@ func wholeQuotient(_ a: Double, _ b: Double) -> Double {
         quotient += count
     }
     return quotient
+}
+
+// Stone 31: what a dividing leaves, the 'leftover'
+// tool's work — the rest of the divided number after
+// the divisor has been taken out of it 'wholediv'
+// times. It is counted by the same doubling steps as
+// the quotient: what remains when the last chunk is
+// taken away. The sign is the divided number's, the
+// way Swift's whole numbers leave it, so the two
+// always add back up: wholediv(n, d) * d + leftover
+// (n, d) is n. Until this stone the leftover was
+// counted in the open, as n - wholediv(n, d) * d.
+func wholeRest(_ a: Double, _ b: Double) -> Double {
+    var rest = a
+    while rest >= b {
+        var chunk = b
+        while chunk + chunk <= rest {
+            chunk += chunk
+        }
+        rest -= chunk
+    }
+    return rest
 }
 
 // The place an item-setting line will write to: what a list
@@ -1265,6 +1288,26 @@ final class Machine {
                 return .number(0)
             }
             return .number((first < 0) != (second < 0) ? -quotient : quotient)
+
+        case "leftover":
+            // Stone 31: what a dividing leaves — the
+            // rest of the divided number after the
+            // divisor has been taken out of it
+            // 'wholediv' times, carrying the divided
+            // number's sign. Counted in the open until
+            // this stone, as n - wholediv(n, d) * d —
+            // the self-made feather checker counts it
+            // so at every limb of its reckoning.
+            let first = try wholeDivNumber(args[0], tool: name, role: "a whole number to divide", line: line)
+            let second = try wholeDivNumber(args[1], tool: name, role: "a whole number to divide by", line: line)
+            if second == 0 {
+                throw NiflaError(line: line, message: "I can't divide by zero. Dividing needs a second number that isn't zero.")
+            }
+            let rest = wholeRest(abs(first), abs(second))
+            if rest == 0 {
+                return .number(0)
+            }
+            return .number(first < 0 ? -rest : rest)
 
         case "writefile":
             guard case .text(let path) = args[0] else {

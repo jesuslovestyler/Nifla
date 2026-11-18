@@ -2537,6 +2537,50 @@ still counted in the open — `n - wholediv(n, d) * d`
 every digit of its counts. The quotient has a word;
 the leftover has none. It is the next stone's work.
 
+## Stone 31 — `leftover`, a word for what a dividing leaves
+
+Stone 30's ledger named the leftover of a dividing,
+counted in the open — `n - wholediv(n, d) * d` — at
+every limb of the self-made checker's reckoning and
+every digit of its counts. `leftover(first, second)`
+is that word: the rest of the divided number after
+the divisor has been taken out of it `wholediv`
+times, counted by the same doubling steps, carrying
+the divided number's sign the way Swift's whole
+numbers leave it, so quotient and leftover always
+add back up to the number that was divided. It asks
+the same of its numbers as `wholediv` does — whole,
+no bigger in size than 2^53, the second not zero —
+and its problems speak the same words, the checker's
+refusals (a proven wrong kind, a provably zero
+divisor) included. It stands in every mirror:
+interpreter, compiled runtime, the checker's rules,
+the self-host (delegating to the host's `leftover`,
+failures re-said at the program's line), and the web
+interpreter; bare metal refuses it like the other
+hosted tools. The self-made checker now calls it at
+every place it counted a leftover in the open, and
+the two checkers still agree on every card. With
+this stone the checker stands on the toolbox's own
+words for all its work.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The leftover counted in the open. The division
+  pair is complete: `wholediv` for the quotient,
+  `leftover` for what it leaves — the classic pair
+  the Tutorial's floor lesson names.
+
+**Remaining, named:** the language still has no
+word for rounding a fraction to a whole number.
+The whole-number tools refuse fractions, and
+finding the whole number at or below one means
+reading its spoken form apart — the self-host does
+exactly that, by hand, to speak its rounding
+messages. It is the next stone's work.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

@@ -148,6 +148,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "bitxor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
     "astext": BuiltinRule(result: .text, needs: [([.bytes], "a block of bytes to read as text")]),
     "wholediv": BuiltinRule(result: .number, needs: [([.number], "a whole number to divide"), ([.number], "a whole number to divide by")]),
+    "leftover": BuiltinRule(result: .number, needs: [([.number], "a whole number to divide"), ([.number], "a whole number to divide by")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each
@@ -807,8 +808,9 @@ final class Checker {
         try checkBuiltinRanges(name: name, args: args, env: env, line: line)
         // Stone 30: a 'wholediv' whose divisor the checker
         // can prove is zero is a division by zero, refused
-        // in the same words as '/' (Stone 18).
-        if name == "wholediv" {
+        // in the same words as '/' (Stone 18). Stone 31's
+        // 'leftover' is a dividing too, checked the same.
+        if name == "wholediv" || name == "leftover" {
             try checkDivisor(op: "/", right: args[1], env: env, line: line)
         }
         if name == "append" || name == "insertat" || name == "removeat" {

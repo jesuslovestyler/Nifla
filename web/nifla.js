@@ -1115,6 +1115,7 @@ const BUILTIN_TOOLS = {
   bitxor: { params: ['first', 'second'], example: 'bitxor(12, 10)' },
   astext: { params: ['bytes'], example: 'astext(block)' },
   wholediv: { params: ['first', 'second'], example: 'wholediv(17, 5)' },
+  leftover: { params: ['first', 'second'], example: 'leftover(17, 5)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1273,6 +1274,28 @@ function wholeQuotient(a, b) {
   return quotient;
 }
 
+// Stone 31: what a dividing leaves, the 'leftover'
+// tool's work — the rest of the divided number after
+// the divisor has been taken out of it 'wholediv'
+// times. It is counted by the same doubling steps as
+// the quotient: what remains when the last chunk is
+// taken away. The sign is the divided number's, the
+// way Swift's whole numbers leave it, so the two
+// always add back up: wholediv(n, d) * d + leftover
+// (n, d) is n. Until this stone the leftover was
+// counted in the open, as n - wholediv(n, d) * d.
+function wholeRest(a, b) {
+  let rest = a;
+  while (rest >= b) {
+    let chunk = b;
+    while (chunk + chunk <= rest) {
+      chunk += chunk;
+    }
+    rest -= chunk;
+  }
+  return rest;
+}
+
 function takesText(params) {
   if (params.length === 0) return 'no values';
   if (params.length === 1) return '1 value (' + params[0] + ')';
@@ -1386,6 +1409,7 @@ const BUILTIN_RULES = {
   bitxor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
   astext: { result: 'text', needs: [{ kinds: ['bytes'], need: 'a block of bytes to read as text' }] },
   wholediv: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
+  leftover: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
 };
 
 // The checker's picture of the scopes: a stack of blocks,
@@ -2047,8 +2071,9 @@ class Checker {
     this.checkBuiltinRanges(name, args, env, line);
     // Stone 30: a 'wholediv' whose divisor the checker
     // can prove is zero is a division by zero, refused
-    // in the same words as '/'.
-    if (name === 'wholediv') {
+    // in the same words as '/'. Stone 31's 'leftover'
+    // is a dividing too, checked the same.
+    if (name === 'wholediv' || name === 'leftover') {
       this.checkDivisor('/', args[1], env, line);
     }
     if (name === 'append' || name === 'insertat' || name === 'removeat') {
@@ -3599,6 +3624,23 @@ class Interpreter {
         const quotient = wholeQuotient(Math.abs(first), Math.abs(second));
         if (quotient === 0) return 0;
         return (first < 0) !== (second < 0) ? -quotient : quotient;
+      }
+
+      case 'leftover': {
+        // Stone 31: what a dividing leaves — the
+        // rest of the divided number after the
+        // divisor has been taken out of it
+        // 'wholediv' times, carrying the divided
+        // number's sign. Counted in the open until
+        // this stone, as n - wholediv(n, d) * d.
+        const first = wholeDivNumber(args[0], name, 'a whole number to divide', line);
+        const second = wholeDivNumber(args[1], name, 'a whole number to divide by', line);
+        if (second === 0) {
+          throw new NiflaError(line, "I can't divide by zero. Dividing needs a second number that isn't zero.");
+        }
+        const rest = wholeRest(Math.abs(first), Math.abs(second));
+        if (rest === 0) return 0;
+        return first < 0 ? -rest : rest;
       }
 
       case 'writefile': {

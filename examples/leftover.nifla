@@ -1,0 +1,41 @@
+// Stone 31: 'leftover' gives what a dividing leaves —
+// the rest of the divided number after the divisor
+// has been taken out of it 'wholediv' times. Until
+// this stone the leftover was counted in the open, as
+// the number less the quotient times the divisor; the
+// self-made feather checker counts it so at every
+// limb of its reckoning. The leftover carries the
+// divided number's sign, the way Swift's whole
+// numbers leave it, and quotient and leftover always
+// add back up to the number that was divided.
+say leftover(17, 5)
+say leftover(20, 5)
+say leftover(3, 7)
+say leftover(-7, 2)
+say leftover(7, -2)
+say leftover(-7, -2)
+say leftover(1000000, 7)
+say wholediv(1000000, 7) * 7 + leftover(1000000, 7)
+attempt {
+    let n = leftover(7, 2.5)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+make anything(x) {
+    give x
+}
+attempt {
+    let n = leftover(anything("six"), 2)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+attempt {
+    let d = asnumber("0")
+    let n = leftover(10, d)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+say leftover(42, 1)

@@ -1,0 +1,5 @@
+// Stone 31: a 'leftover' by a provably zero divisor —
+// the checker tracks the variable's number and refuses
+// before the program runs, in '/' own words (Stone 18).
+let zero = 0
+say leftover(10, zero)

@@ -46,11 +46,13 @@
 //     and the multiplication is done limb by limb — every
 //     product and carry stays small enough to be exact.
 //     The reckoning's whole-number quotients are
-//     wholediv's (Stone 30) — until that stone they were
-//     a hand-built helper's work, reading the whole part
-//     off a division's spoken form, the way a byte's XOR
-//     was hand-built until Stone 27 gave the toolbox
-//     bitxor; fnvstep calls it directly.
+//     wholediv's (Stone 30) and its leftovers are
+//     leftover's (Stone 31) — until those stones the
+//     quotient was a hand-built helper's work, reading
+//     the whole part off a division's spoken form, and
+//     the leftover was counted in the open, the way a
+//     byte's XOR was hand-built until Stone 27 gave
+//     the toolbox bitxor; fnvstep calls them directly.
 
 // One step of the FNV-1a-64 reckoning: h is the hash as
 // four 16-bit limbs, little-endian ([l0, l1, l2, l3]),
@@ -60,19 +62,19 @@
 // whose own limbs are 435, 0, 256, 0, so only two
 // multiplications per limb are needed.
 make fnvstep(h, b) {
-    let low = h[0] - 256 * wholediv(h[0], 256)
+    let low = leftover(h[0], 256)
     let h0 = h[0] - low + bitxor(low, b)
     let r0 = h0 * 435
     let c0 = wholediv(r0, 65536)
-    let l0 = r0 - c0 * 65536
+    let l0 = leftover(r0, 65536)
     let r1 = h[1] * 435 + c0
     let c1 = wholediv(r1, 65536)
-    let l1 = r1 - c1 * 65536
+    let l1 = leftover(r1, 65536)
     let r2 = h[2] * 435 + h0 * 256 + c1
     let c2 = wholediv(r2, 65536)
-    let l2 = r2 - c2 * 65536
+    let l2 = leftover(r2, 65536)
     let r3 = h[3] * 435 + h[1] * 256 + c2
-    let l3 = r3 - wholediv(r3, 65536) * 65536
+    let l3 = leftover(r3, 65536)
     give [l0, l1, l2, l3]
 }
 
@@ -85,11 +87,11 @@ make hexof(h) {
     while li >= 0 {
         let l = h[li]
         let d1 = wholediv(l, 4096)
-        l = l - d1 * 4096
+        l = leftover(l, 4096)
         let d2 = wholediv(l, 256)
-        l = l - d2 * 256
+        l = leftover(l, 256)
         let d3 = wholediv(l, 16)
-        let d4 = l - d3 * 16
+        let d4 = leftover(l, 16)
         out = out + part(digits, d1, 1) + part(digits, d2, 1) + part(digits, d3, 1) + part(digits, d4, 1)
         li = li - 1
     }
@@ -100,9 +102,9 @@ make hexof(h) {
 // letters are gathered into limbs for the comparison.
 make shiftadd(h, digit) {
     let l3 = h[3] * 16 + wholediv(h[2], 4096)
-    let l2 = (h[2] - 4096 * wholediv(h[2], 4096)) * 16 + wholediv(h[1], 4096)
-    let l1 = (h[1] - 4096 * wholediv(h[1], 4096)) * 16 + wholediv(h[0], 4096)
-    let l0 = (h[0] - 4096 * wholediv(h[0], 4096)) * 16 + digit
+    let l2 = leftover(h[2], 4096) * 16 + wholediv(h[1], 4096)
+    let l1 = leftover(h[1], 4096) * 16 + wholediv(h[0], 4096)
+    let l0 = leftover(h[0], 4096) * 16 + digit
     give [l0, l1, l2, l3]
 }
 
@@ -149,7 +151,7 @@ make digitsof(n) {
     let m = n
     while m > 0 {
         let q = wholediv(m, 10)
-        out = part("0123456789", m - q * 10, 1) + out
+        out = part("0123456789", leftover(m, 10), 1) + out
         m = q
     }
     give out

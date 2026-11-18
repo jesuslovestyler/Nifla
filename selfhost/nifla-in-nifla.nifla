@@ -3585,9 +3585,9 @@ make takesText(params) {
 // stones; 'makebytes' and the bytes it makes are mirrored here
 // with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"], ["bytes"], ["first", "second"]]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)", "astext(block)", "wholediv(17, 5)"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv", "leftover"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"], ["bytes"], ["first", "second"], ["first", "second"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)", "astext(block)", "wholediv(17, 5)", "leftover(17, 5)"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -3880,6 +3880,24 @@ make runBuiltin(name, args, line) {
         let value = 0
         attempt {
             value = wholediv(args[0].num, args[1].num)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vNumber(value))
+    }
+    if name == "leftover" {
+        if args[0].kind != "number" {
+            give errAt(line, "'leftover' needs a whole number to divide, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'leftover' needs a whole number to divide by, but it was given " + described(args[1]) + ".")
+        }
+        // Stone 31: the host's leftover, as 'wholediv'
+        // above — a failure is caught and re-said with
+        // this program's line.
+        let value = 0
+        attempt {
+            value = leftover(args[0].num, args[1].num)
         } if it fails {
             give errAt(line, problem)
         }

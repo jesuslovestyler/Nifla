@@ -839,6 +839,40 @@ whole part off a division's spoken form by hand, in
 a helper it calls `floordiv`. Programs written today
 can simply call `wholediv`.)
 
+### `leftover` — what a dividing leaves
+
+`leftover(first, second)` gives what is left of the
+first number after the second has been taken out of
+it `wholediv` times — the remainder of the same
+dividing, counted by the same steps. It carries the
+divided number's sign, the way Swift's whole numbers
+leave it, and the two always add back up:
+`wholediv(n, d) * d + leftover(n, d)` is `n`.
+
+```nifla
+say leftover(17, 5)
+say leftover(20, 5)
+say leftover(-7, 2)
+say wholediv(17, 5) * 5 + leftover(17, 5)
+```
+
+```expected
+2
+0
+-1
+17
+```
+
+It asks the same of its numbers as `wholediv` does
+— whole, within the exact reach, the second not
+zero — and its problems speak the same words, the
+checker's refusals included.
+
+(Stone 31. Until this stone the leftover was counted
+in the open, as `n - wholediv(n, d) * d` — the
+self-made feather checker counts it so at every limb
+of its reckoning and every digit of its counts.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

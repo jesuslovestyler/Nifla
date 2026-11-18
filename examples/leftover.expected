@@ -1,0 +1,12 @@
+2
+0
+3
+-1
+1
+-1
+1
+1000000
+Caught: 'leftover' works on whole numbers — it is the dividing that drops the fraction, not the numbers handed to it — but it was given 2.5. Use a whole number, like 2 or 3.
+Caught: 'leftover' needs a whole number to divide, but it was given the text "six".
+Caught: I can't divide by zero. Dividing needs a second number that isn't zero.
+0

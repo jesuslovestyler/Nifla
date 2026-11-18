@@ -1,0 +1,1 @@
+Line 6: 'leftover' needs a whole number to divide, but it was given some text. I caught this before the program ran, so nothing ran.

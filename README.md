@@ -2436,6 +2436,53 @@ checker's hand-built `floordiv` also stands: the
 language has no single word for a whole-number
 quotient.
 
+## Stone 29 — the feather checkers agree on every card
+
+Stone 25's ledger closed with two rendering edges,
+verdicts unaffected: on a card whose name or needs
+line holds bytes outside the printable characters,
+the hosted checker printed the decoder's reading —
+replacement marks and all — while the self-made
+checker, building its letters one by one, let the
+unclean bytes fall away; and a stated byte count past
+the language numbers' exact reach (2^53) was reckoned
+inexactly by the self-made checker, where the hosted
+checker reads a machine whole number, exact to
+9223372036854775807, and refuses a bigger one. Stone
+28 laid the missing word (`astext`), and this stone
+teaches the self-made checker to stand on it: a card
+line's bytes are decoded whole, the way the hosted
+checker decodes them, and the stated count is carried
+as its digits — printed as they stand, compared
+against the program's own count as digits, and
+refused in the hosted checker's words past the
+machine whole number's reach. Stone 27's `bitxor`
+also takes the place of the checker's hand-built
+`xorbyte`. The self-made corpus grows the five cards
+that carry the edges — a name in UTF-8 letters, a
+name holding bytes that are not letters, stated
+counts past each reach, a count with leading zeros —
+and the two checkers answer every one identically,
+line for line and exit code for exit code, the OS's
+welcome feather among them. No language changed in
+this stone; the suites stand where Stone 28 left
+them, and the self-made proof is the stronger for
+the new cards.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The two feather-checker rendering edges from
+  Stone 25's ledger. The self-made checker and the
+  hosted checker now agree on every card the corpus
+  carries, rendered lines and stated counts alike.
+
+**Remaining, named:** the self-made checker's
+hand-built `floordiv` stands: the language has no
+single word for a whole-number quotient. It is the
+next stone's work.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

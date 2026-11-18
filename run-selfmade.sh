@@ -6,11 +6,16 @@
 # niflac into a standalone program, then runs it and the
 # hosted feathercheck across the whole feather corpus —
 # a true feather, one with a byte flipped in its program,
-# one with a damaged card, the OS's own welcome feather,
-# a missing file, and a wrongly-made call — and requires
-# their answers to be identical: every line of standard
-# output (and of the usage line on standard error), and
-# every exit code.
+# one with a damaged card, the two rendering edges from
+# Stone 25's ledger as cards of their own (a name written
+# in UTF-8 letters; a name holding bytes that are not
+# letters; a stated count past the language's exact
+# reach; a stated count past the machine whole number's
+# reach; a stated count with leading zeros), the OS's
+# own welcome feather, a missing file, and a wrongly-made
+# call — and requires their answers to be identical:
+# every line of standard output (and of the usage line
+# on standard error), and every exit code.
 #
 # Prints PASS or FAIL.
 
@@ -40,8 +45,24 @@ text = data.decode("latin1")
 i = text.index("checksum: ") + len("checksum: ")
 damaged = text[:i] + text[i + 1:]
 open(work + "/guest-damaged.feather", "wb").write(damaged.encode("latin1"))
+# Stone 29: the two rendering edges from Stone 25's
+# ledger, as cards. The name line's bytes are swapped
+# (the checksum covers the program, not the card's
+# words), and the 'bytes:' line is restated.
+parts = bytes(data).split(b"\n", 2)
+head, rest = parts[0] + b"\n", parts[2]
+open(work + "/guest-utf8.feather", "wb").write(head + "name: nifla-güest".encode("utf-8") + b"\n" + rest)
+open(work + "/guest-unclean.feather", "wb").write(head + b"name: nifla-g\xff\xc3est" + b"\n" + rest)
+def restated(n):
+    out = bytearray(data)
+    i = out.index(b"bytes: ") + len(b"bytes: ")
+    j = out.index(b"\n", i)
+    return bytes(out[:i]) + n + bytes(out[j:])
+open(work + "/guest-bigcount.feather", "wb").write(restated(b"9007199254740993"))
+open(work + "/guest-hugecount.feather", "wb").write(restated(b"9223372036854775808"))
+open(work + "/guest-zerocount.feather", "wb").write(restated(b"007"))
 PYEOF
-CASES="guest.feather guest-flipped.feather guest-damaged.feather not-there.feather"
+CASES="guest.feather guest-flipped.feather guest-damaged.feather guest-utf8.feather guest-unclean.feather guest-bigcount.feather guest-hugecount.feather guest-zerocount.feather not-there.feather"
 if [ -f ../cardnull-os-2/src/welcome-feather.nifla ]; then
     ./niflac --bare --guest --feather ../cardnull-os-2/src/welcome-feather.nifla -o "$WORK/welcome.feather" >/dev/null \
         || fail "the OS welcome feather did not build"

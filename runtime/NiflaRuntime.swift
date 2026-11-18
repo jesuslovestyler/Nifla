@@ -322,6 +322,7 @@ let builtinTools: [String: BuiltinDef] = [
     "sorted": BuiltinDef(params: ["list"], example: "sorted(items)"),
     "fieldnames": BuiltinDef(params: ["object"], example: "fieldnames(person)"),
     "removefield": BuiltinDef(params: ["object", "name"], example: "removefield(person, \"town\")"),
+    "asnumber": BuiltinDef(params: ["text"], example: "asnumber(\"620\")"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -334,6 +335,62 @@ func builtinCountMessage(name: String, def: BuiltinDef, given: Int) -> String {
     default: takes = "\(def.params.count) values (\(def.params.joined(separator: ", ")))"
     }
     return "The tool '\(name)' takes \(takes), but it was given \(given). Call it like: \(def.example)."
+}
+
+// Stone 26: reading a number out of text, the 'asnumber'
+// tool's work. The accepted writing is plain: a '-' first
+// when the number is below zero, then digits, then — if a
+// fraction is wanted — one '.' and more digits. Nothing
+// else: no spaces, no '+', no exponent letters. The value
+// is built digit by digit in the language's own numbers,
+// the same steps in every mirror, so every door reads the
+// same text to the same number. Text that isn't written
+// that way, and a number too big for the language's
+// numbers to hold, come back as nil — the tool turns that
+// into a problem 'attempt' can catch.
+func readNumberText(_ text: String) -> Double? {
+    // A character counts as a digit only when it is exactly
+    // one of the ten plain digit characters — one scalar,
+    // nothing riding on it.
+    func digit(_ ch: Character) -> Double? {
+        guard ch.unicodeScalars.count == 1, let scalar = ch.unicodeScalars.first,
+              scalar.value >= 48, scalar.value <= 57 else { return nil }
+        return Double(scalar.value - 48)
+    }
+    let chars = Array(text)
+    var i = 0
+    var negative = false
+    if i < chars.count && chars[i] == "-" {
+        negative = true
+        i += 1
+    }
+    var whole = 0.0
+    var wholeDigits = 0
+    while i < chars.count, let d = digit(chars[i]) {
+        whole = whole * 10 + d
+        wholeDigits += 1
+        i += 1
+    }
+    guard wholeDigits > 0 else { return nil }
+    var value = whole
+    if i < chars.count && chars[i] == "." {
+        i += 1
+        var fraction = 0.0
+        var scale = 1.0
+        var fractionDigits = 0
+        while i < chars.count, let d = digit(chars[i]) {
+            fraction = fraction * 10 + d
+            scale *= 10
+            fractionDigits += 1
+            i += 1
+        }
+        guard fractionDigits > 0 else { return nil }
+        value = whole + fraction / scale
+    }
+    guard i == chars.count else { return nil }
+    let signed = negative ? -value : value
+    guard signed.isFinite else { return nil }
+    return signed == 0 ? 0 : signed
 }
 
 // The place an item-setting line will write to: what a list
@@ -1034,6 +1091,20 @@ final class Machine {
             let block = NiflaBytes(count: data.count)
             block.data = [UInt8](data)
             return .bytes(block)
+
+        case "asnumber":
+            // Stone 26: a number read out of text — the
+            // toolbox's answer to the one honest gap the
+            // Tutorial names. Text that isn't a number
+            // written plainly is a problem, and 'attempt'
+            // can catch it, like a file that isn't there.
+            guard case .text(let text) = args[0] else {
+                throw NiflaError(line: line, message: "'asnumber' needs some text to read a number from, but it was given \(args[0].described).")
+            }
+            guard let value = readNumberText(text) else {
+                throw NiflaError(line: line, message: "'\(text)' is not a number 'asnumber' can read. A number is written with digits, a '-' first when it is below zero, and at most one '.' with digits after it — like 620 or -3.5.")
+            }
+            return .number(value)
 
         case "writefile":
             guard case .text(let path) = args[0] else {

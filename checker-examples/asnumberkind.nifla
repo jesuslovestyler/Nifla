@@ -1,0 +1,5 @@
+// A checker example: 'asnumber' reads a number out of
+// some text — and this hands it a number, plain to see
+// from the 'let' line. The checker stops it first.
+let cents = 620
+say asnumber(cents)

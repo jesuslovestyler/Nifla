@@ -1102,6 +1102,7 @@ const BUILTIN_TOOLS = {
   sorted: { params: ['list'], example: 'sorted(items)' },
   fieldnames: { params: ['object'], example: 'fieldnames(person)' },
   removefield: { params: ['object', 'name'], example: 'removefield(person, "town")' },
+  asnumber: { params: ['text'], example: 'asnumber("620")' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1113,6 +1114,52 @@ function builtinCountMessage(name, def, given) {
   else if (def.params.length === 1) takes = '1 value (' + def.params[0] + ')';
   else takes = def.params.length + ' values (' + def.params.join(', ') + ')';
   return "The tool '" + name + "' takes " + takes + ', but it was given ' + given + '. Call it like: ' + def.example + '.';
+}
+
+// Stone 26: reading a number out of text, the 'asnumber'
+// tool's work — the same steps as the Swift mirrors, so
+// every door reads the same text to the same number. The
+// accepted writing is plain: a '-' first when the number
+// is below zero, then digits, then — if a fraction is
+// wanted — one '.' and more digits. Anything else, and a
+// number too big to hold, come back as null.
+function readNumberText(text) {
+  const chars = graphemes(text);
+  const digit = (ch) => (ch.length === 1 && ch >= '0' && ch <= '9' ? ch.charCodeAt(0) - 48 : null);
+  let i = 0;
+  let negative = false;
+  if (i < chars.length && chars[i] === '-') { negative = true; i += 1; }
+  let whole = 0;
+  let wholeDigits = 0;
+  while (i < chars.length) {
+    const d = digit(chars[i]);
+    if (d === null) break;
+    whole = whole * 10 + d;
+    wholeDigits += 1;
+    i += 1;
+  }
+  if (wholeDigits === 0) return null;
+  let value = whole;
+  if (i < chars.length && chars[i] === '.') {
+    i += 1;
+    let fraction = 0;
+    let scale = 1;
+    let fractionDigits = 0;
+    while (i < chars.length) {
+      const d = digit(chars[i]);
+      if (d === null) break;
+      fraction = fraction * 10 + d;
+      scale *= 10;
+      fractionDigits += 1;
+      i += 1;
+    }
+    if (fractionDigits === 0) return null;
+    value = whole + fraction / scale;
+  }
+  if (i !== chars.length) return null;
+  const signed = negative ? -value : value;
+  if (!Number.isFinite(signed)) return null;
+  return signed === 0 ? 0 : signed;
 }
 
 function takesText(params) {
@@ -1222,6 +1269,7 @@ const BUILTIN_RULES = {
   sorted: { result: 'list', needs: [{ kinds: ['list'], need: 'a list to sort' }] },
   fieldnames: { result: 'list', needs: [{ kinds: ['object'], need: 'an object to list the field names of' }] },
   removefield: { result: 'unknown', needs: [{ kinds: ['object'], need: 'an object to take a field from' }, { kinds: ['text'], need: 'the name of a field, as text' }] },
+  asnumber: { result: 'number', needs: [{ kinds: ['text'], need: 'some text to read a number from' }] },
 };
 
 // The checker's picture of the scopes: a stack of blocks,
@@ -3369,6 +3417,20 @@ class Interpreter {
         const block = new NBytes(bytes.length);
         block.data.set(bytes);
         return block;
+      }
+
+      case 'asnumber': {
+        // Stone 26: a number read out of text. Text that
+        // isn't a number written plainly is a problem,
+        // and 'attempt' can catch it.
+        if (typeof args[0] !== 'string') {
+          throw new NiflaError(line, "'asnumber' needs some text to read a number from, but it was given " + describedOf(args[0]) + '.');
+        }
+        const value = readNumberText(args[0]);
+        if (value === null) {
+          throw new NiflaError(line, "'" + args[0] + "' is not a number 'asnumber' can read. A number is written with digits, a '-' first when it is below zero, and at most one '.' with digits after it — like 620 or -3.5.");
+        }
+        return value;
       }
 
       case 'writefile': {

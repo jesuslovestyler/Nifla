@@ -3585,9 +3585,9 @@ make takesText(params) {
 // stones; 'makebytes' and the bytes it makes are mirrored here
 // with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"]]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -3776,6 +3776,22 @@ make runBuiltin(name, args, line) {
             i = i + 1
         }
         give okVal(vBytes(data))
+    }
+    if name == "asnumber" {
+        if args[0].kind != "text" {
+            give errAt(line, "'asnumber' needs some text to read a number from, but it was given " + described(args[0]) + ".")
+        }
+        // Stone 26: the host's asnumber reads the number
+        // out of the text; its failure is caught and
+        // re-said with this program's line, as readfile's
+        // is above.
+        let value = 0
+        attempt {
+            value = asnumber(args[0].text)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vNumber(value))
     }
     if name == "writefile" {
         if args[0].kind != "text" {

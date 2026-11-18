@@ -1,0 +1,17 @@
+// Stone 26: 'asnumber' reads a number out of text — the
+// toolbox's answer to the one honest gap the Tutorial
+// names. Text comes back from files as characters; this
+// turns "620" into the number 620, so it can be added
+// to, not just spoken. Text that isn't a number written
+// plainly is a problem, and 'attempt' can catch it.
+say asnumber("620")
+say asnumber("500") + 5
+say asnumber("-3.5")
+say asnumber("0")
+attempt {
+    let n = asnumber("one hundred")
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+say asnumber("42") * 2

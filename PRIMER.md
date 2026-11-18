@@ -651,6 +651,52 @@ say block[5]
 109
 ```
 
+### `asnumber` — a number out of text
+
+`asnumber(text)` reads a number out of some text — the
+other side of `readfile`'s coin: a file holds text, so
+the number a program wrote comes back as characters,
+and this turns the characters back into the number.
+The accepted writing is plain: a `-` first when the
+number is below zero, then digits, then — if a fraction
+is wanted — one `.` and more digits. Nothing else: no
+spaces, no `+`, no exponent letters.
+
+```nifla
+say asnumber("620")
+say asnumber("500") + 5
+say asnumber("-3.5")
+```
+
+```expected
+620
+505
+-3.5
+```
+
+Text that isn't a number written that way is a
+*problem*, in the Part 1 sense — `attempt` can catch
+it, like a file that isn't there:
+
+```nifla
+attempt {
+    let n = asnumber("one hundred")
+    say n
+} if it fails {
+    say "Not a number: " + problem
+}
+```
+
+```expected
+Not a number: 'one hundred' is not a number 'asnumber' can read. A number is written with digits, a '-' first when it is below zero, and at most one '.' with digits after it — like 620 or -3.5.
+```
+
+(Stone 26. Until this stone the language had no such
+tool — the Tutorial's capstone still teaches reading
+digits by hand, with `part` and `find`, because the
+building is the lesson; programs written today can
+simply call `asnumber`.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

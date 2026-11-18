@@ -1,0 +1,4 @@
+// 'asnumber' handed text that isn't a number, with no
+// 'attempt' standing guard — the problem stops the
+// program, in plain words.
+say asnumber("abc")

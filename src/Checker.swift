@@ -142,6 +142,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "sorted": BuiltinRule(result: .list, needs: [([.list], "a list to sort")]),
     "fieldnames": BuiltinRule(result: .list, needs: [([.object], "an object to list the field names of")]),
     "removefield": BuiltinRule(result: .unknown, needs: [([.object], "an object to take a field from"), ([.text], "the name of a field, as text")]),
+    "asnumber": BuiltinRule(result: .number, needs: [([.text], "some text to read a number from")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each

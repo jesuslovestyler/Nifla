@@ -2289,6 +2289,64 @@ code. They are.
   number. No real feather is within reach of the
   difference.
 
+## Stone 26 — a number out of text: `asnumber` (November 18, 2026)
+
+The Tutorial's one honest gap closes. Until this stone
+the toolbox could turn a number into text (by joining it
+to text) but never text back into a number: a file holds
+text, so a number a program wrote down came back as
+characters, and reading it again meant walking the
+characters by hand — the capstone teaches exactly that
+walk, with a `digits` helper built from `part` and
+`find`, because until now there was no other way.
+
+**`asnumber(text)`** reads a number out of some text.
+The accepted writing is plain: a `-` first when the
+number is below zero, then digits, then — if a fraction
+is wanted — one `.` and more digits. Nothing else: no
+spaces, no `+`, no exponent letters. Text that isn't a
+number written that way is a *problem*, in the language's
+standing sense — `attempt` catches it, the way it catches
+a file that isn't there — and says so in plain words:
+
+```text
+'one hundred' is not a number 'asnumber' can read. A
+number is written with digits, a '-' first when it is
+below zero, and at most one '.' with digits after it —
+like 620 or -3.5.
+```
+
+The reading is done digit by digit in the language's
+own numbers, the same steps in every mirror, so every
+door reads the same text to the same number; a number
+too big for the language's numbers to hold is refused
+with the same problem rather than silently thinned.
+The tool stands in every mirror — the interpreter, the
+compiled runtime, the checker's rules (a proven wrong
+kind handed to it is refused before the run, like any
+tool), the self-host, and the web interpreter — and on
+bare metal it is refused like the other hosted tools,
+there being no text taken apart there. The Primer gains
+its section; the Tutorial's capstone keeps `digits`
+(the building is the lesson) and gains a note naming
+the tool. Two suite examples and one checker example
+carry the proof: the interpreted suite is 44, the
+compiled suite 129, the self-hosted suite 44, and the
+web corpus reads all of them byte for byte.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The toolbox can read a number back out of text
+  (`asnumber`) — the Tutorial's named gap, and the
+  loose end its Lesson 6 left for the capstone.
+
+**Remaining, named:** the two feather-checker rendering
+edges from Stone 25's ledger stand as they were —
+verdicts unaffected, and no honest feather carries the
+cards they differ on.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

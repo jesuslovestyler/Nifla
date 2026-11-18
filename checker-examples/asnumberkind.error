@@ -1,0 +1,1 @@
+Line 5: 'asnumber' needs some text to read a number from, but it was given a number. I caught this before the program ran, so nothing ran.

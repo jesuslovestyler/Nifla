@@ -2469,6 +2469,16 @@ what a capstone is for: discovering that the pieces
 you already own compose into the thing you thought
 you couldn't do.
 
+*Since this book was first written, the toolbox has
+grown the tool this step reaches for: `asnumber(text)`
+reads a number straight out of text — `asnumber("620")`
+is the number 620 — and text that isn't a number
+written plainly becomes a problem `attempt` can catch
+(Stone 26). The capstone keeps `digits`, because
+building it taught you the pieces compose; a program
+you write today may call `asnumber` and skip the
+walking.*
+
 **Your turn.** Use `digits` to read "500" and say it
 with 5 added — the answer must be the number 505, not
 the text "5005".

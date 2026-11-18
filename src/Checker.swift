@@ -146,6 +146,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "bitand": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
     "bitor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
     "bitxor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
+    "astext": BuiltinRule(result: .text, needs: [([.bytes], "a block of bytes to read as text")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each

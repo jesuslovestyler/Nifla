@@ -1,0 +1,6 @@
+// A checker example: 'astext' reads a block of
+// bytes as text — and this hands it some text,
+// plain to see from the 'let' line. The checker
+// stops it first.
+let words = "Shalom"
+say astext(words)

@@ -2391,6 +2391,51 @@ edges from Stone 25's ledger stand as they were —
 verdicts unaffected, and no honest feather carries the
 cards they differ on.
 
+## Stone 28 — the text of a block of bytes: `astext`
+
+Stone 25 gave the toolbox `readbytes`, and the
+self-made feather checker has held its cards as bytes
+ever since — building each line's letters one by one
+out of a table of the printable characters, and
+letting any byte outside that table fall out of what
+it prints. The hosted checker reads the same lines
+with the machine's text decoder, replacement marks
+and all, so on a card whose name holds such a byte
+the two checkers print different lines (Stone 25's
+ledger named the edge). The missing word was the road
+back from bytes to text, and Stone 28 lays it:
+`astext(bytes)` reads a block of bytes as UTF-8 text,
+and a run of bytes that is not a letter stands in the
+text as the replacement mark — never dropped, never
+guessed at. It stands in every mirror like the tools
+before it; the checker refuses a proven wrong kind
+before the run; the self-host packs its byte list
+into a block the host's `astext` can read, the mirror
+of `readbytes`' unpacking; and bare metal refuses it
+like the other hosted tools. The Primer gains its
+section; two suite examples and one checker example
+carry the proof: the interpreted suite is 48, the
+compiled suite 137, the self-hosted suite 48, and the
+web corpus reads all of them byte for byte.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The toolbox can speak a block of bytes as text
+  (`astext`) — the word the self-made feather
+  checker's letter-by-letter craft named.
+
+**Remaining, named:** the feather checkers' two
+rendering edges from Stone 25's ledger stand as they
+were — the self-made checker does not call `astext`
+yet, and its stated byte counts are still reckoned in
+the language's numbers; both are the next stone's
+work, now that the word exists. The self-made
+checker's hand-built `floordiv` also stands: the
+language has no single word for a whole-number
+quotient.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

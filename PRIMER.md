@@ -651,6 +651,38 @@ say block[5]
 109
 ```
 
+### `astext` — the text of a block of bytes
+
+`astext(bytes)` reads a block of bytes as text — the
+road back from `readbytes`' side of the house. The
+bytes are read as UTF-8, the writing that text is
+kept in. A run of bytes that is not a letter stands
+in the text as the replacement mark �, the way every
+reader shows it — never dropped, never guessed at:
+
+```nifla
+writefile("note.txt", "Shalom")
+let block = readbytes("note.txt")
+say astext(block)
+let marks = makebytes(3)
+marks[0] = 72
+marks[1] = 255
+marks[2] = 105
+say astext(marks)
+```
+
+```expected
+Shalom
+H�i
+```
+
+(Stone 28. Until this stone no word could speak a
+block of bytes as text — a tool holding bytes, like
+the self-made feather checker over a card, had to
+build its letters one by one out of the printable
+characters, and let whatever it could not build fall
+away.)
+
 ### `asnumber` — a number out of text
 
 `asnumber(text)` reads a number out of some text — the

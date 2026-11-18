@@ -1,0 +1,24 @@
+// Stone 28: 'astext' reads a block of bytes as text —
+// the bytes' letters, spoken. writefile lays a note,
+// readbytes brings its bytes back whole, and astext
+// reads them: the road from bytes to text that no
+// word could walk before, since 'readfile' reads a
+// file as text directly and honestly refuses bytes
+// that are not text. A run of bytes that is not a
+// letter stands in the text as the replacement mark,
+// the way every reader shows it — never dropped,
+// never guessed at. (The test runs tidy the note
+// files away when they finish.)
+let written = writefile("stone28-note.txt", "Shalom!")
+say written
+let block = readbytes("stone28-note.txt")
+say astext(block)
+let utf = writefile("stone28-utf.txt", "café")
+say utf
+say astext(readbytes("stone28-utf.txt"))
+let marks = makebytes(3)
+marks[0] = 72
+marks[1] = 255
+marks[2] = 105
+say astext(marks)
+say length(astext(makebytes(0)))

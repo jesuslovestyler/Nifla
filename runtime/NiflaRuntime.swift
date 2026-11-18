@@ -326,6 +326,7 @@ let builtinTools: [String: BuiltinDef] = [
     "bitand": BuiltinDef(params: ["first", "second"], example: "bitand(12, 10)"),
     "bitor": BuiltinDef(params: ["first", "second"], example: "bitor(12, 10)"),
     "bitxor": BuiltinDef(params: ["first", "second"], example: "bitxor(12, 10)"),
+    "astext": BuiltinDef(params: ["bytes"], example: "astext(block)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -1175,6 +1176,26 @@ final class Machine {
             default:
                 return .number(combineBits(first, second) { $0 != $1 })
             }
+
+        case "astext":
+            // Stone 28: the text of a block of bytes —
+            // the road back from bytes to text. 'readfile'
+            // reads a file as text and honestly refuses
+            // bytes that are not text; 'readbytes' holds
+            // any bytes whole, and until this stone no
+            // word could speak them as text, so a tool
+            // holding bytes (the feather checker over a
+            // card) had to build its letters one by one
+            // and drop whatever it could not build.
+            // The bytes are read as UTF-8, the writing
+            // text is kept in; a run of bytes that is not
+            // a letter stands in the text as the
+            // replacement mark, the way every reader
+            // shows it — never dropped, never guessed at.
+            guard case .bytes(let block) = args[0] else {
+                throw NiflaError(line: line, message: "'astext' needs a block of bytes to read as text, but it was given \(args[0].described).")
+            }
+            return .text(String(decoding: block.data, as: UTF8.self))
 
         case "writefile":
             guard case .text(let path) = args[0] else {

@@ -1,0 +1,1 @@
+Line 6: 'astext' needs a block of bytes to read as text, but it was given some text. I caught this before the program ran, so nothing ran.

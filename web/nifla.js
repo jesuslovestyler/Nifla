@@ -216,6 +216,13 @@ function utf8DecodeStrict(bytes) {
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
+// Stone 28: reading bytes as text, the way 'astext' does —
+// a run of bytes that is not a letter stands in the text
+// as the replacement mark, never dropped, never guessed.
+function utf8Decode(bytes) {
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
 // ----------------------------------------------------------------
 // Edit distance between two words, for spelling suggestions.
 // ----------------------------------------------------------------
@@ -1106,6 +1113,7 @@ const BUILTIN_TOOLS = {
   bitand: { params: ['first', 'second'], example: 'bitand(12, 10)' },
   bitor: { params: ['first', 'second'], example: 'bitor(12, 10)' },
   bitxor: { params: ['first', 'second'], example: 'bitxor(12, 10)' },
+  astext: { params: ['bytes'], example: 'astext(block)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1325,6 +1333,7 @@ const BUILTIN_RULES = {
   bitand: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
   bitor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
   bitxor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
+  astext: { result: 'text', needs: [{ kinds: ['bytes'], need: 'a block of bytes to read as text' }] },
 };
 
 // The checker's picture of the scopes: a stack of blocks,
@@ -3502,6 +3511,19 @@ class Interpreter {
         if (name === 'bitand') return combineBits(first, second, (x, y) => x && y);
         if (name === 'bitor') return combineBits(first, second, (x, y) => x || y);
         return combineBits(first, second, (x, y) => x !== y);
+      }
+
+      case 'astext': {
+        // Stone 28: the text of a block of bytes — the
+        // road back from bytes to text. The bytes are
+        // read as UTF-8; a run of bytes that is not a
+        // letter stands in the text as the replacement
+        // mark, the way every reader shows it — never
+        // dropped, never guessed at.
+        if (!(args[0] instanceof NBytes)) {
+          throw new NiflaError(line, "'astext' needs a block of bytes to read as text, but it was given " + describedOf(args[0]) + '.');
+        }
+        return utf8Decode(args[0].data);
       }
 
       case 'writefile': {

@@ -1,0 +1,30 @@
+// Stone 32: 'rounddown' and 'roundup' round a number
+// to a whole number — the whole number at or below
+// it, and the whole number at or above it. Until this
+// stone the language had no rounding word: the
+// whole-number tools refuse fractions, and finding
+// the whole number at or below one meant reading its
+// spoken form apart — the self-host does exactly
+// that, by hand, to speak its rounding messages.
+// Whole numbers come back unchanged, and a negative
+// number rounds away from the fraction it carries:
+// rounddown(-2.5) is -3, and roundup(-2.5) is -2.
+say rounddown(3.5)
+say roundup(3.5)
+say rounddown(3.2)
+say roundup(3.2)
+say rounddown(-2.5)
+say roundup(-2.5)
+say rounddown(7)
+say roundup(7)
+say rounddown(0.5) + roundup(0.5)
+make anything(x) {
+    give x
+}
+attempt {
+    let n = rounddown(anything("six"))
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+say roundup(41.1)

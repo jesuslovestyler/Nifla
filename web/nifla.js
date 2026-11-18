@@ -1116,6 +1116,8 @@ const BUILTIN_TOOLS = {
   astext: { params: ['bytes'], example: 'astext(block)' },
   wholediv: { params: ['first', 'second'], example: 'wholediv(17, 5)' },
   leftover: { params: ['first', 'second'], example: 'leftover(17, 5)' },
+  rounddown: { params: ['value'], example: 'rounddown(3.5)' },
+  roundup: { params: ['value'], example: 'roundup(3.5)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1410,6 +1412,8 @@ const BUILTIN_RULES = {
   astext: { result: 'text', needs: [{ kinds: ['bytes'], need: 'a block of bytes to read as text' }] },
   wholediv: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
   leftover: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
+  rounddown: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to round' }] },
+  roundup: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to round' }] },
 };
 
 // The checker's picture of the scopes: a stack of blocks,
@@ -3641,6 +3645,22 @@ class Interpreter {
         const rest = wholeRest(Math.abs(first), Math.abs(second));
         if (rest === 0) return 0;
         return first < 0 ? -rest : rest;
+      }
+
+      case 'rounddown':
+      case 'roundup': {
+        // Stone 32: rounding a number to a whole
+        // number — the whole number at or below it
+        // (rounddown) or at or above it (roundup).
+        // Until this stone the language had no
+        // rounding word at all: the whole-number
+        // tools refuse fractions, and finding the
+        // whole number at or below one meant
+        // reading its spoken form apart.
+        if (typeof args[0] !== 'number') {
+          throw new NiflaError(line, "'" + name + "' needs a number to round, but it was given " + describedOf(args[0]) + '.');
+        }
+        return name === 'rounddown' ? Math.floor(args[0]) : Math.ceil(args[0]);
       }
 
       case 'writefile': {

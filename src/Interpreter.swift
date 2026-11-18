@@ -334,6 +334,8 @@ let builtinTools: [String: BuiltinDef] = [
     "astext": BuiltinDef(params: ["bytes"], example: "astext(block)"),
     "wholediv": BuiltinDef(params: ["first", "second"], example: "wholediv(17, 5)"),
     "leftover": BuiltinDef(params: ["first", "second"], example: "leftover(17, 5)"),
+    "rounddown": BuiltinDef(params: ["value"], example: "rounddown(3.5)"),
+    "roundup": BuiltinDef(params: ["value"], example: "roundup(3.5)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -1249,6 +1251,26 @@ final class Interpreter {
                 return .number(0)
             }
             return .number(first < 0 ? -rest : rest)
+
+        case "rounddown", "roundup":
+            // Stone 32: rounding a number to a whole
+            // number — the whole number at or below it
+            // (rounddown) or at or above it (roundup).
+            // Until this stone the language had no
+            // rounding word at all: the whole-number
+            // tools refuse fractions, and finding the
+            // whole number at or below one meant
+            // reading its spoken form apart — the
+            // self-host does exactly that, by hand, to
+            // speak its rounding messages. A whole
+            // number comes back unchanged, and past the
+            // exact reach every number is already
+            // whole, so the rounding is honest at
+            // every size the language holds.
+            guard case .number(let number) = args[0] else {
+                throw NiflaError(line: line, message: "'\(name)' needs a number to round, but it was given \(args[0].described).")
+            }
+            return .number(name == "rounddown" ? number.rounded(.down) : number.rounded(.up))
 
         case "writefile":
             guard case .text(let path) = args[0] else {

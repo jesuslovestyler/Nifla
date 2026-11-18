@@ -149,6 +149,8 @@ private let builtinRules: [String: BuiltinRule] = [
     "astext": BuiltinRule(result: .text, needs: [([.bytes], "a block of bytes to read as text")]),
     "wholediv": BuiltinRule(result: .number, needs: [([.number], "a whole number to divide"), ([.number], "a whole number to divide by")]),
     "leftover": BuiltinRule(result: .number, needs: [([.number], "a whole number to divide"), ([.number], "a whole number to divide by")]),
+    "rounddown": BuiltinRule(result: .number, needs: [([.number], "a number to round")]),
+    "roundup": BuiltinRule(result: .number, needs: [([.number], "a number to round")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each

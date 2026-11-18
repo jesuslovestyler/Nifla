@@ -2581,6 +2581,59 @@ reading its spoken form apart — the self-host does
 exactly that, by hand, to speak its rounding
 messages. It is the next stone's work.
 
+## Stone 32 — `rounddown` and `roundup`, the rounding words
+
+Stone 31's ledger named the last of the gaps this
+chain set out to close: the language had no word
+for rounding a fraction to a whole number. The
+whole-number tools refuse fractions, and finding
+the whole number at or below one meant reading its
+spoken form apart — the self-host does exactly
+that, by hand, to speak its rounding messages.
+`rounddown(value)` gives the whole number at or
+below a number, and `roundup(value)` the whole
+number at or above it. A whole number comes back
+unchanged; a negative number rounds away from the
+fraction it carries, so `rounddown(-2.5)` is -3 and
+`roundup(-2.5)` is -2; and past the exact reach
+every number is already whole, so the rounding is
+honest at every size the language holds. A value
+that is not a number is a problem `attempt` can
+catch, and the checker refuses a proven wrong kind
+before the run. They stand in every mirror:
+interpreter, compiled runtime, the checker's rules,
+the self-host (calling the host's words, which
+cannot fail on a number), and the web interpreter;
+bare metal refuses them like the other hosted
+tools. The self-host keeps its spoken-form helpers
+as they stand — they are the interpreter's own
+craft, proven as they are, like its lexer's own
+digit reading beside `asnumber`.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The rounding gap. With it, every toolbox gap the
+  self-made tools' craft named across Stones
+  25–31 stands closed: a number out of text
+  (`asnumber`, Stone 26), the bit words (`bitand`,
+  `bitor`, `bitxor`, Stone 27), text out of bytes
+  (`astext`, Stone 28), the checkers' agreement on
+  every card (Stone 29), the quotient (`wholediv`,
+  Stone 30), the leftover (`leftover`, Stone 31),
+  and the rounding words (this stone).
+
+**Remaining, named:** the standing frontiers
+recorded in their own stones, unchanged by this
+chain — bare metal's small toolbox and its absence
+of `nothing` (a standing-apart, with its reason,
+from Stone 19's ledger), and the ARM door's guests
+and feathers, which wait on the operating system's
+ARM edition and the Raspian bar that gates it. No
+toolbox gap named by the language's own tools
+remains open.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

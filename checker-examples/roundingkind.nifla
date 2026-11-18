@@ -1,0 +1,6 @@
+// A checker example: 'rounddown' rounds a
+// number — and this hands it some text, plain to
+// see from the 'let' line. The checker stops it
+// first.
+let label = "twelve"
+say rounddown(label)

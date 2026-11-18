@@ -873,6 +873,36 @@ in the open, as `n - wholediv(n, d) * d` — the
 self-made feather checker counts it so at every limb
 of its reckoning and every digit of its counts.)
 
+### `rounddown`, `roundup` — rounding to a whole number
+
+`rounddown(value)` gives the whole number at or
+below a number, and `roundup(value)` the whole
+number at or above it. A whole number comes back
+unchanged; a negative number rounds away from the
+fraction it carries, so `rounddown(-2.5)` is -3 and
+`roundup(-2.5)` is -2:
+
+```nifla
+say rounddown(3.5)
+say roundup(3.5)
+say rounddown(-2.5)
+say roundup(-2.5)
+```
+
+```expected
+3
+4
+-3
+-2
+```
+
+(Stone 32. Until this stone the language had no
+rounding word at all: the whole-number tools refuse
+fractions, and finding the whole number at or below
+one meant reading its spoken form apart — the
+self-host does exactly that, by hand, to speak its
+rounding messages.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

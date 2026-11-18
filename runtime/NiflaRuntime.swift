@@ -323,6 +323,9 @@ let builtinTools: [String: BuiltinDef] = [
     "fieldnames": BuiltinDef(params: ["object"], example: "fieldnames(person)"),
     "removefield": BuiltinDef(params: ["object", "name"], example: "removefield(person, \"town\")"),
     "asnumber": BuiltinDef(params: ["text"], example: "asnumber(\"620\")"),
+    "bitand": BuiltinDef(params: ["first", "second"], example: "bitand(12, 10)"),
+    "bitor": BuiltinDef(params: ["first", "second"], example: "bitor(12, 10)"),
+    "bitxor": BuiltinDef(params: ["first", "second"], example: "bitxor(12, 10)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -391,6 +394,55 @@ func readNumberText(_ text: String) -> Double? {
     let signed = negative ? -value : value
     guard signed.isFinite else { return nil }
     return signed == 0 ? 0 : signed
+}
+
+// Stone 27: working with bits, the 'bitand', 'bitor', and
+// 'bitxor' tools' shared work. A bit tool can only count
+// the bits of a whole number from zero up, no bigger than
+// the language's numbers hold exactly — 2^53, the reach
+// the feather reckoning already trusts. Anything else is
+// a problem 'attempt' can catch, said in plain words:
+// a fraction has no bits to count, bits below zero have
+// no plain counting, and past the exact reach the bits
+// could not be counted honestly.
+func bitToolNumber(_ value: Value, tool: String, line: Int) throws -> Double {
+    guard case .number(let number) = value else {
+        throw NiflaError(line: line, message: "'\(tool)' needs a whole number to work on, but it was given \(value.described).")
+    }
+    if number != number.rounded() {
+        throw NiflaError(line: line, message: "'\(tool)' works on whole numbers — bits are counted in whole numbers — but it was given \(formatNumber(number)). Use a whole number, like \(formatNumber(number.rounded(.down))) or \(formatNumber(number.rounded(.up))).")
+    }
+    if number < 0 {
+        throw NiflaError(line: line, message: "'\(tool)' works on whole numbers from zero up — bits below zero have no plain counting — but it was given \(formatNumber(number)).")
+    }
+    if number > 9007199254740992 {
+        throw NiflaError(line: line, message: "'\(tool)' works on whole numbers up to 9007199254740992, as far as the language's numbers stay exact, but it was given a bigger one.")
+    }
+    return number
+}
+
+// The bits themselves, counted the same way in every
+// mirror: place by place from the ones place up, each
+// number halved as its bit is read — the very steps the
+// self-made feather checker's 'xorbyte' walks by hand.
+// 'keep' says whether a place stands in the answer,
+// given the two numbers' bits at that place.
+func combineBits(_ a: Double, _ b: Double, _ keep: (Bool, Bool) -> Bool) -> Double {
+    var x = a
+    var y = b
+    var place = 1.0
+    var out = 0.0
+    while x > 0 || y > 0 {
+        let xBit = x.truncatingRemainder(dividingBy: 2)
+        let yBit = y.truncatingRemainder(dividingBy: 2)
+        if keep(xBit == 1, yBit == 1) {
+            out += place
+        }
+        x = (x - xBit) / 2
+        y = (y - yBit) / 2
+        place *= 2
+    }
+    return out
 }
 
 // The place an item-setting line will write to: what a list
@@ -1105,6 +1157,24 @@ final class Machine {
                 throw NiflaError(line: line, message: "'\(text)' is not a number 'asnumber' can read. A number is written with digits, a '-' first when it is below zero, and at most one '.' with digits after it — like 620 or -3.5.")
             }
             return .number(value)
+
+        case "bitand", "bitor", "bitxor":
+            // Stone 27: the bit tools — a bit stands in
+            // the answer when it stands in both numbers
+            // (bitand), in either one (bitor), or in one
+            // but not the other (bitxor). The work the
+            // self-made feather checker does by hand in
+            // its 'xorbyte', given single words at last.
+            let first = try bitToolNumber(args[0], tool: name, line: line)
+            let second = try bitToolNumber(args[1], tool: name, line: line)
+            switch name {
+            case "bitand":
+                return .number(combineBits(first, second) { $0 && $1 })
+            case "bitor":
+                return .number(combineBits(first, second) { $0 || $1 })
+            default:
+                return .number(combineBits(first, second) { $0 != $1 })
+            }
 
         case "writefile":
             guard case .text(let path) = args[0] else {

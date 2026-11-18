@@ -1,0 +1,1 @@
+Line 4: 'bitxor' works on whole numbers — bits are counted in whole numbers — but it was given 2.5. Use a whole number, like 2 or 3.

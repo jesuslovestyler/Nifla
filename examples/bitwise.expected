@@ -1,0 +1,13 @@
+8
+14
+6
+255
+0
+255
+0
+65535
+255
+0
+Caught: 'bitand' works on whole numbers — bits are counted in whole numbers — but it was given 3.5. Use a whole number, like 3 or 4.
+Caught: 'bitxor' needs a whole number to work on, but it was given the text "six".
+42

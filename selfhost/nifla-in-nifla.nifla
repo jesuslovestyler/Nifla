@@ -3585,9 +3585,9 @@ make takesText(params) {
 // stones; 'makebytes' and the bytes it makes are mirrored here
 // with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"]]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -3788,6 +3788,60 @@ make runBuiltin(name, args, line) {
         let value = 0
         attempt {
             value = asnumber(args[0].text)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vNumber(value))
+    }
+    if name == "bitand" {
+        if args[0].kind != "number" {
+            give errAt(line, "'bitand' needs a whole number to work on, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'bitand' needs a whole number to work on, but it was given " + described(args[1]) + ".")
+        }
+        // Stone 27: the host's bit tools count the bits;
+        // a failure (a fraction, a negative, a number too
+        // big to count exactly) is caught and re-said
+        // with this program's line, as asnumber's is
+        // above.
+        let value = 0
+        attempt {
+            value = bitand(args[0].num, args[1].num)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vNumber(value))
+    }
+    if name == "bitor" {
+        if args[0].kind != "number" {
+            give errAt(line, "'bitor' needs a whole number to work on, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'bitor' needs a whole number to work on, but it was given " + described(args[1]) + ".")
+        }
+        // Stone 27: the host's bit tools, as 'bitand'
+        // above.
+        let value = 0
+        attempt {
+            value = bitor(args[0].num, args[1].num)
+        } if it fails {
+            give errAt(line, problem)
+        }
+        give okVal(vNumber(value))
+    }
+    if name == "bitxor" {
+        if args[0].kind != "number" {
+            give errAt(line, "'bitxor' needs a whole number to work on, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'bitxor' needs a whole number to work on, but it was given " + described(args[1]) + ".")
+        }
+        // Stone 27: the host's bit tools, as 'bitand'
+        // above.
+        let value = 0
+        attempt {
+            value = bitxor(args[0].num, args[1].num)
         } if it fails {
             give errAt(line, problem)
         }

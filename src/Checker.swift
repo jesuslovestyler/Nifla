@@ -143,6 +143,9 @@ private let builtinRules: [String: BuiltinRule] = [
     "fieldnames": BuiltinRule(result: .list, needs: [([.object], "an object to list the field names of")]),
     "removefield": BuiltinRule(result: .unknown, needs: [([.object], "an object to take a field from"), ([.text], "the name of a field, as text")]),
     "asnumber": BuiltinRule(result: .number, needs: [([.text], "some text to read a number from")]),
+    "bitand": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
+    "bitor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
+    "bitxor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each

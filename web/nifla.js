@@ -1103,6 +1103,9 @@ const BUILTIN_TOOLS = {
   fieldnames: { params: ['object'], example: 'fieldnames(person)' },
   removefield: { params: ['object', 'name'], example: 'removefield(person, "town")' },
   asnumber: { params: ['text'], example: 'asnumber("620")' },
+  bitand: { params: ['first', 'second'], example: 'bitand(12, 10)' },
+  bitor: { params: ['first', 'second'], example: 'bitor(12, 10)' },
+  bitxor: { params: ['first', 'second'], example: 'bitxor(12, 10)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1160,6 +1163,55 @@ function readNumberText(text) {
   const signed = negative ? -value : value;
   if (!Number.isFinite(signed)) return null;
   return signed === 0 ? 0 : signed;
+}
+
+// Stone 27: working with bits, the 'bitand', 'bitor', and
+// 'bitxor' tools' shared work. A bit tool can only count
+// the bits of a whole number from zero up, no bigger than
+// the language's numbers hold exactly — 2^53, the reach
+// the feather reckoning already trusts. Anything else is
+// a problem 'attempt' can catch, said in plain words:
+// a fraction has no bits to count, bits below zero have
+// no plain counting, and past the exact reach the bits
+// could not be counted honestly.
+function bitToolNumber(value, tool, line) {
+  if (typeof value !== 'number') {
+    throw new NiflaError(line, "'" + tool + "' needs a whole number to work on, but it was given " + describedOf(value) + '.');
+  }
+  if (value !== Math.round(value)) {
+    throw new NiflaError(line, "'" + tool + "' works on whole numbers — bits are counted in whole numbers — but it was given " + formatNumber(value) + '. Use a whole number, like ' + formatNumber(Math.floor(value)) + ' or ' + formatNumber(Math.ceil(value)) + '.');
+  }
+  if (value < 0) {
+    throw new NiflaError(line, "'" + tool + "' works on whole numbers from zero up — bits below zero have no plain counting — but it was given " + formatNumber(value) + '.');
+  }
+  if (value > 9007199254740992) {
+    throw new NiflaError(line, "'" + tool + "' works on whole numbers up to 9007199254740992, as far as the language's numbers stay exact, but it was given a bigger one.");
+  }
+  return value;
+}
+
+// The bits themselves, counted the same way in every
+// mirror: place by place from the ones place up, each
+// number halved as its bit is read — the very steps the
+// self-made feather checker's 'xorbyte' walks by hand.
+// 'keep' says whether a place stands in the answer,
+// given the two numbers' bits at that place.
+function combineBits(a, b, keep) {
+  let x = a;
+  let y = b;
+  let place = 1;
+  let out = 0;
+  while (x > 0 || y > 0) {
+    const xBit = x % 2;
+    const yBit = y % 2;
+    if (keep(xBit === 1, yBit === 1)) {
+      out += place;
+    }
+    x = (x - xBit) / 2;
+    y = (y - yBit) / 2;
+    place *= 2;
+  }
+  return out;
 }
 
 function takesText(params) {
@@ -1270,6 +1322,9 @@ const BUILTIN_RULES = {
   fieldnames: { result: 'list', needs: [{ kinds: ['object'], need: 'an object to list the field names of' }] },
   removefield: { result: 'unknown', needs: [{ kinds: ['object'], need: 'an object to take a field from' }, { kinds: ['text'], need: 'the name of a field, as text' }] },
   asnumber: { result: 'number', needs: [{ kinds: ['text'], need: 'some text to read a number from' }] },
+  bitand: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
+  bitor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
+  bitxor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
 };
 
 // The checker's picture of the scopes: a stack of blocks,
@@ -3431,6 +3486,22 @@ class Interpreter {
           throw new NiflaError(line, "'" + args[0] + "' is not a number 'asnumber' can read. A number is written with digits, a '-' first when it is below zero, and at most one '.' with digits after it — like 620 or -3.5.");
         }
         return value;
+      }
+
+      case 'bitand':
+      case 'bitor':
+      case 'bitxor': {
+        // Stone 27: the bit tools — a bit stands in
+        // the answer when it stands in both numbers
+        // (bitand), in either one (bitor), or in one
+        // but not the other (bitxor). The work the
+        // self-made feather checker does by hand in
+        // its 'xorbyte', given single words at last.
+        const first = bitToolNumber(args[0], name, line);
+        const second = bitToolNumber(args[1], name, line);
+        if (name === 'bitand') return combineBits(first, second, (x, y) => x && y);
+        if (name === 'bitor') return combineBits(first, second, (x, y) => x || y);
+        return combineBits(first, second, (x, y) => x !== y);
       }
 
       case 'writefile': {

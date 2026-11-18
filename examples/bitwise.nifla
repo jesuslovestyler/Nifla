@@ -1,0 +1,33 @@
+// Stone 27: 'bitand', 'bitor', and 'bitxor' work on
+// the bits of two whole numbers. A bit stands in the
+// answer when it stands in both numbers (bitand), in
+// either one (bitor), or in one but not the other
+// (bitxor). The self-made feather checker works a
+// byte's XOR out bit by bit by hand, in its 'xorbyte';
+// the toolbox has the single words now.
+say bitand(12, 10)
+say bitor(12, 10)
+say bitxor(12, 10)
+say bitxor(170, 85)
+say bitand(170, 85)
+say bitor(170, 85)
+say bitxor(255, 255)
+say bitxor(65280, 255)
+say bitand(65535, 255)
+say bitor(0, 0)
+attempt {
+    let n = bitand(3.5, 2)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+make anything(x) {
+    give x
+}
+attempt {
+    let n = bitxor(anything("six"), 2)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+say bitxor(42, 0)

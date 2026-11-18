@@ -697,6 +697,55 @@ digits by hand, with `part` and `find`, because the
 building is the lesson; programs written today can
 simply call `asnumber`.)
 
+### `bitand`, `bitor`, `bitxor` — working with bits
+
+`bitand(first, second)`, `bitor(first, second)`, and
+`bitxor(first, second)` look at two whole numbers bit
+by bit — a number's bits are the ones and zeros it is
+counted in, place by place, the way 12 is 1100: an
+eight, a four, no two, no one. A bit stands in the
+answer when it stands in both numbers (`bitand`), in
+either one (`bitor`), or in one but not the other
+(`bitxor`):
+
+```nifla
+say bitand(12, 10)
+say bitor(12, 10)
+say bitxor(12, 10)
+```
+
+```expected
+8
+14
+6
+```
+
+The tools work on whole numbers from zero up, as far
+as the language's numbers stay exact — the same reach
+the feather reckoning trusts. A fraction, a negative
+number, or a bigger one is a *problem*, in the Part 1
+sense — `attempt` can catch it:
+
+```nifla
+attempt {
+    let n = bitand(3.5, 2)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+```
+
+```expected
+Caught: 'bitand' works on whole numbers — bits are counted in whole numbers — but it was given 3.5. Use a whole number, like 3 or 4.
+```
+
+(Stone 27. Until this stone the language had no word
+for this work: the self-made feather checker of
+Stone 25 works a byte's XOR out bit by bit by hand,
+in a helper it calls `xorbyte`. Programs written
+today can simply call `bitxor` — and `bitand` and
+`bitor` beside it.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

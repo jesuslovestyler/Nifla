@@ -2347,6 +2347,50 @@ edges from Stone 25's ledger stand as they were —
 verdicts unaffected, and no honest feather carries the
 cards they differ on.
 
+## Stone 27 — the bit tools: `bitand`, `bitor`, `bitxor`
+
+The self-made feather checker of Stone 25 proves a
+feather's reckoning by working a byte's XOR out bit by
+bit, in a helper it calls `xorbyte` — halving each
+number as it reads its bits, because the language had
+no word for the work. Stone 27 gives the toolbox the
+words: `bitand(first, second)`, `bitor(first, second)`,
+and `bitxor(first, second)` look at two whole numbers
+bit by bit, and a bit stands in the answer when it
+stands in both numbers, in either one, or in one but
+not the other. The steps are the same in every mirror
+— place by place from the ones place up, each number
+halved as its bit is read, the very steps `xorbyte`
+walks — never each machine's own bit tricks, whose
+reach differs from mirror to mirror; the count runs
+as far as the language's numbers stay exact, the 2^53
+reach the feather reckoning already trusts. A
+fraction, a negative number, or a bigger one is a
+problem `attempt` can catch, said in plain words, and
+the checker refuses a proven wrong kind before the
+run, as it does for every tool. Bare metal refuses
+the three like the other hosted tools — there are no
+lists or objects there for them to work on. The Primer
+gains their section; two suite examples and one
+checker example carry the proof: the interpreted
+suite is 46, the compiled suite 133, the self-hosted
+suite 46, and the web corpus reads all of them byte
+for byte.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The toolbox can work with bits (`bitand`, `bitor`,
+  `bitxor`) — the work the self-made feather checker's
+  hand-built `xorbyte` named, stone by stone since
+  Stone 25.
+
+**Remaining, named:** the two feather-checker rendering
+edges from Stone 25's ledger stand as they were —
+verdicts unaffected, and no honest feather carries the
+cards they differ on.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

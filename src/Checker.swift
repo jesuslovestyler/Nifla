@@ -147,6 +147,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "bitor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
     "bitxor": BuiltinRule(result: .number, needs: [([.number], "a whole number to work on"), ([.number], "a whole number to work on")]),
     "astext": BuiltinRule(result: .text, needs: [([.bytes], "a block of bytes to read as text")]),
+    "wholediv": BuiltinRule(result: .number, needs: [([.number], "a whole number to divide"), ([.number], "a whole number to divide by")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each
@@ -804,6 +805,12 @@ final class Checker {
         // Stone 18: the ranges the checker can prove, and the
         // facts the list tools change.
         try checkBuiltinRanges(name: name, args: args, env: env, line: line)
+        // Stone 30: a 'wholediv' whose divisor the checker
+        // can prove is zero is a division by zero, refused
+        // in the same words as '/' (Stone 18).
+        if name == "wholediv" {
+            try checkDivisor(op: "/", right: args[1], env: env, line: line)
+        }
         if name == "append" || name == "insertat" || name == "removeat" {
             if case .variable(let listName, _) = args[0] {
                 env.forgetFacts(about: listName)
@@ -1277,7 +1284,9 @@ final class Checker {
     }
 
     // A division whose second number the checker can prove is
-    // zero. (Nifla has no modulo sign; '/' is the only divisor.)
+    // zero. (Nifla has no modulo sign; '/' is the only divisor
+    // sign, and Stone 30's 'wholediv' is checked through here
+    // too — its divisor is a division's second number.)
     private func checkDivisor(op: String, right: Expr, env: StaticEnv, line: Int) throws {
         guard op == "/" else { return }
         if let value = constNumber(right, in: env), value == 0 {

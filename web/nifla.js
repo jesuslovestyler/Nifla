@@ -1114,6 +1114,7 @@ const BUILTIN_TOOLS = {
   bitor: { params: ['first', 'second'], example: 'bitor(12, 10)' },
   bitxor: { params: ['first', 'second'], example: 'bitxor(12, 10)' },
   astext: { params: ['bytes'], example: 'astext(block)' },
+  wholediv: { params: ['first', 'second'], example: 'wholediv(17, 5)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1220,6 +1221,56 @@ function combineBits(a, b, keep) {
     place *= 2;
   }
   return out;
+}
+
+// Stone 30: dividing into whole numbers, the 'wholediv'
+// tool's work. '/' gives the true quotient with its
+// fraction; 'wholediv' gives the whole part alone, the
+// fraction dropped toward zero — the way Swift's whole
+// numbers divide, so wholediv(-7, 2) is -3. The numbers
+// handed to it must themselves be whole, no bigger in
+// size than the language's numbers hold exactly — 2^53,
+// the reach the feather reckoning already trusts. A
+// fraction, or a bigger one, is a problem 'attempt' can
+// catch, said in plain words; dividing by zero is the
+// same problem '/' raises, in the same words.
+function wholeDivNumber(value, tool, role, line) {
+  if (typeof value !== 'number') {
+    throw new NiflaError(line, "'" + tool + "' needs " + role + ', but it was given ' + describedOf(value) + '.');
+  }
+  if (value !== Math.round(value)) {
+    throw new NiflaError(line, "'" + tool + "' works on whole numbers — it is the dividing that drops the fraction, not the numbers handed to it — but it was given " + formatNumber(value) + '. Use a whole number, like ' + formatNumber(Math.floor(value)) + ' or ' + formatNumber(Math.ceil(value)) + '.');
+  }
+  if (value > 9007199254740992 || value < -9007199254740992) {
+    throw new NiflaError(line, "'" + tool + "' works on whole numbers up to 9007199254740992 in size, as far as the language's numbers stay exact, but it was given a bigger one.");
+  }
+  return value;
+}
+
+// The quotient itself, counted the same way in every
+// mirror: by doubling chunks of the divisor, the way a
+// person divides on paper — take the biggest doubled
+// chunk that still fits, take it away, and count how
+// many it stood for — so every step is whole-number
+// work the language's numbers hold exactly, and no
+// mirror's own division can round the answer its own
+// way. 'a' is the size of the number divided (zero or
+// more) and 'b' the size of the number it is divided
+// by (one or more); the sign is the caller's to restore.
+function wholeQuotient(a, b) {
+  let rest = a;
+  let quotient = 0;
+  while (rest >= b) {
+    let chunk = b;
+    let count = 1;
+    while (chunk + chunk <= rest) {
+      chunk += chunk;
+      count += count;
+    }
+    rest -= chunk;
+    quotient += count;
+  }
+  return quotient;
 }
 
 function takesText(params) {
@@ -1334,6 +1385,7 @@ const BUILTIN_RULES = {
   bitor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
   bitxor: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to work on' }, { kinds: ['number'], need: 'a whole number to work on' }] },
   astext: { result: 'text', needs: [{ kinds: ['bytes'], need: 'a block of bytes to read as text' }] },
+  wholediv: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
 };
 
 // The checker's picture of the scopes: a stack of blocks,
@@ -1993,6 +2045,12 @@ class Checker {
     // The ranges the checker can prove, and the facts the
     // list tools change.
     this.checkBuiltinRanges(name, args, env, line);
+    // Stone 30: a 'wholediv' whose divisor the checker
+    // can prove is zero is a division by zero, refused
+    // in the same words as '/'.
+    if (name === 'wholediv') {
+      this.checkDivisor('/', args[1], env, line);
+    }
     if (name === 'append' || name === 'insertat' || name === 'removeat') {
       if (args[0].t === 'var') {
         env.forgetFacts(args[0].name);
@@ -3526,6 +3584,23 @@ class Interpreter {
         return utf8Decode(args[0].data);
       }
 
+      case 'wholediv': {
+        // Stone 30: dividing into whole numbers —
+        // the whole part of the quotient, the
+        // fraction dropped toward zero. The work
+        // the self-made feather checker does by
+        // hand in its 'floordiv', given a single
+        // word at last.
+        const first = wholeDivNumber(args[0], name, 'a whole number to divide', line);
+        const second = wholeDivNumber(args[1], name, 'a whole number to divide by', line);
+        if (second === 0) {
+          throw new NiflaError(line, "I can't divide by zero. Dividing needs a second number that isn't zero.");
+        }
+        const quotient = wholeQuotient(Math.abs(first), Math.abs(second));
+        if (quotient === 0) return 0;
+        return (first < 0) !== (second < 0) ? -quotient : quotient;
+      }
+
       case 'writefile': {
         if (typeof args[0] !== 'string') {
           throw new NiflaError(line, "'writefile' needs the name of a file, as text, but it was given " + describedOf(args[0]) + '.');
@@ -3831,7 +3906,15 @@ class Interpreter {
       }
 
       case 'neg': {
-        const value = this.evaluate(expression.expr, scope);
+        // Stone 30: the parser calls the wrapped value
+        // 'inner' — as the checker, the constant reckoning,
+        // and the floor collector all read it — and this
+        // case once read 'expr', so any program that put a
+        // minus sign in front of a value stopped the web
+        // interpreter outright. Stone 30's examples are the
+        // first in the corpus to divide a negative number,
+        // and they found it.
+        const value = this.evaluate(expression.inner, scope);
         if (typeof value !== 'number') {
           throw new NiflaError(expression.line, 'I can only put a minus sign in front of a number, but here it was in front of ' + describedOf(value) + '.');
         }

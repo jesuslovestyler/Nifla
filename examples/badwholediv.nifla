@@ -1,0 +1,4 @@
+// 'wholediv' handed a fraction, with no 'attempt'
+// standing guard — the problem stops the program,
+// in plain words.
+say wholediv(10, 2.5)

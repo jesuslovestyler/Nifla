@@ -2483,6 +2483,60 @@ hand-built `floordiv` stands: the language has no
 single word for a whole-number quotient. It is the
 next stone's work.
 
+## Stone 30 — `wholediv`, a word for a whole-number quotient
+
+Stone 29's ledger named the last hand-built helper
+in the self-made feather checker: `floordiv`, which
+read a whole-number quotient off a division's spoken
+form, because `/` gives the true quotient with its
+fraction and the language had no rounding word.
+`wholediv(first, second)` is that word. It gives the
+whole part of the quotient, the fraction dropped
+toward zero — the way Swift's whole numbers divide,
+so `wholediv(-7, 2)` is -3 — counted in every mirror
+by doubling chunks of the divisor, whole-number
+steps the language's numbers hold exactly, so no
+mirror's own division can round the answer its own
+way. What is left over stays countable in the open:
+`n - wholediv(n, d) * d`. The numbers handed to it
+must themselves be whole, no bigger in size than
+2^53; a fraction or a bigger one is a problem
+`attempt` can catch, the checker refuses a proven
+wrong kind — and a provably zero divisor, in `/`'s
+own words — before the run, and dividing by zero at
+the run speaks `/`'s words too. It stands in every
+mirror: interpreter, compiled runtime, the checker's
+rules, the self-host (delegating to the host's
+`wholediv`, failures re-said at the program's line),
+and the web interpreter; bare metal refuses it like
+the other hosted tools. The self-made checker calls
+it where `floordiv` stood, and the two checkers
+still agree on every card. The stone's examples
+also found — and this stone fixes — a standing
+fault in the web interpreter: its minus-sign case
+read a field the parser never sets, so any program
+that put a minus sign in front of a value stopped
+that door outright. No corpus program had ever done
+it until `wholediv`'s examples divided a negative
+number; the case now reads the field every other
+mirror reads.
+
+### The gap ledger, updated
+
+**Closed by this stone:**
+
+- The self-made checker's hand-built `floordiv`.
+  The checker now stands on the toolbox's own words
+  for nearly all its work: `readbytes` and `astext`
+  for its cards, `bitxor` for its reckoning,
+  `wholediv` for its quotients.
+
+**Remaining, named:** the leftover of a dividing is
+still counted in the open — `n - wholediv(n, d) * d`
+— at every limb of the checker's reckoning and
+every digit of its counts. The quotient has a word;
+the leftover has none. It is the next stone's work.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

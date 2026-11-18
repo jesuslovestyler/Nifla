@@ -778,6 +778,67 @@ in a helper it calls `xorbyte`. Programs written
 today can simply call `bitxor` — and `bitand` and
 `bitor` beside it.)
 
+### `wholediv` — dividing into whole numbers
+
+`wholediv(first, second)` divides two whole numbers
+and gives back the whole part of the quotient — the
+fraction dropped, toward zero, the way Swift's whole
+numbers divide. Where `/` gives the true quotient
+with its fraction (17 / 5 is 3.4), `wholediv` gives
+the count of whole times the second number fits into
+the first:
+
+```nifla
+say wholediv(17, 5)
+say wholediv(20, 5)
+say wholediv(3, 7)
+say wholediv(-7, 2)
+```
+
+```expected
+3
+4
+0
+-3
+```
+
+What is left over after a dividing is the first
+number less the quotient times the second, counted
+in the open: `17 - wholediv(17, 5) * 5` is 2.
+
+The numbers handed to it must themselves be whole —
+it is the dividing that drops the fraction, not the
+numbers handed to it — and no bigger in size than
+the language's numbers hold exactly, the same reach
+the bit tools and the feather reckoning trust. A
+fraction, or a bigger one, is a *problem*, in the
+Part 1 sense — `attempt` can catch it:
+
+```nifla
+attempt {
+    let n = wholediv(7, 2.5)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+```
+
+```expected
+Caught: 'wholediv' works on whole numbers — it is the dividing that drops the fraction, not the numbers handed to it — but it was given 2.5. Use a whole number, like 2 or 3.
+```
+
+Dividing by zero is the same problem `/` raises, in
+the same words — and a divisor the checker can prove
+is zero is refused before the program runs, the way
+`/`'s is.
+
+(Stone 30. Until this stone the language had no
+single word for a whole-number quotient: the
+self-made feather checker of Stone 25 reads the
+whole part off a division's spoken form by hand, in
+a helper it calls `floordiv`. Programs written today
+can simply call `wholediv`.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

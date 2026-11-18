@@ -45,38 +45,12 @@
 //     the hash is carried as four limbs of 16 bits each
 //     and the multiplication is done limb by limb — every
 //     product and carry stays small enough to be exact.
-//     One small helper does work the language has no
-//     single word for: floordiv reads a whole-number
-//     quotient off a division's spoken form. (A byte's
-//     XOR was the other such helper until Stone 27 gave
-//     the toolbox bitxor; fnvstep calls it directly.)
-
-// The whole-number quotient of n divided by d, for whole
-// n >= 0 and d > 0. '/' gives the true quotient with its
-// fraction, and the language has no rounding tool, so
-// the whole part is read off the quotient's spoken form:
-// for n >= d the quotient is at least 1 and speaks
-// plainly (never in the e-notation small fractions use);
-// for n < d the answer is 0, said directly.
-make floordiv(n, d) {
-    if n < d {
-        give 0
-    }
-    let q = n / d
-    let t = "" + q
-    let dot = find(t, ".")
-    if dot == -1 {
-        give q
-    }
-    let whole = part(t, 0, dot)
-    let v = 0
-    let i = 0
-    while i < length(whole) {
-        v = v * 10 + find("0123456789", part(whole, i, 1))
-        i = i + 1
-    }
-    give v
-}
+//     The reckoning's whole-number quotients are
+//     wholediv's (Stone 30) — until that stone they were
+//     a hand-built helper's work, reading the whole part
+//     off a division's spoken form, the way a byte's XOR
+//     was hand-built until Stone 27 gave the toolbox
+//     bitxor; fnvstep calls it directly.
 
 // One step of the FNV-1a-64 reckoning: h is the hash as
 // four 16-bit limbs, little-endian ([l0, l1, l2, l3]),
@@ -86,19 +60,19 @@ make floordiv(n, d) {
 // whose own limbs are 435, 0, 256, 0, so only two
 // multiplications per limb are needed.
 make fnvstep(h, b) {
-    let low = h[0] - 256 * floordiv(h[0], 256)
+    let low = h[0] - 256 * wholediv(h[0], 256)
     let h0 = h[0] - low + bitxor(low, b)
     let r0 = h0 * 435
-    let c0 = floordiv(r0, 65536)
+    let c0 = wholediv(r0, 65536)
     let l0 = r0 - c0 * 65536
     let r1 = h[1] * 435 + c0
-    let c1 = floordiv(r1, 65536)
+    let c1 = wholediv(r1, 65536)
     let l1 = r1 - c1 * 65536
     let r2 = h[2] * 435 + h0 * 256 + c1
-    let c2 = floordiv(r2, 65536)
+    let c2 = wholediv(r2, 65536)
     let l2 = r2 - c2 * 65536
     let r3 = h[3] * 435 + h[1] * 256 + c2
-    let l3 = r3 - floordiv(r3, 65536) * 65536
+    let l3 = r3 - wholediv(r3, 65536) * 65536
     give [l0, l1, l2, l3]
 }
 
@@ -110,11 +84,11 @@ make hexof(h) {
     let li = 3
     while li >= 0 {
         let l = h[li]
-        let d1 = floordiv(l, 4096)
+        let d1 = wholediv(l, 4096)
         l = l - d1 * 4096
-        let d2 = floordiv(l, 256)
+        let d2 = wholediv(l, 256)
         l = l - d2 * 256
-        let d3 = floordiv(l, 16)
+        let d3 = wholediv(l, 16)
         let d4 = l - d3 * 16
         out = out + part(digits, d1, 1) + part(digits, d2, 1) + part(digits, d3, 1) + part(digits, d4, 1)
         li = li - 1
@@ -125,10 +99,10 @@ make hexof(h) {
 // h * 16 + digit, limb by limb — how a stated checksum's
 // letters are gathered into limbs for the comparison.
 make shiftadd(h, digit) {
-    let l3 = h[3] * 16 + floordiv(h[2], 4096)
-    let l2 = (h[2] - 4096 * floordiv(h[2], 4096)) * 16 + floordiv(h[1], 4096)
-    let l1 = (h[1] - 4096 * floordiv(h[1], 4096)) * 16 + floordiv(h[0], 4096)
-    let l0 = (h[0] - 4096 * floordiv(h[0], 4096)) * 16 + digit
+    let l3 = h[3] * 16 + wholediv(h[2], 4096)
+    let l2 = (h[2] - 4096 * wholediv(h[2], 4096)) * 16 + wholediv(h[1], 4096)
+    let l1 = (h[1] - 4096 * wholediv(h[1], 4096)) * 16 + wholediv(h[0], 4096)
+    let l0 = (h[0] - 4096 * wholediv(h[0], 4096)) * 16 + digit
     give [l0, l1, l2, l3]
 }
 
@@ -174,7 +148,7 @@ make digitsof(n) {
     let out = ""
     let m = n
     while m > 0 {
-        let q = floordiv(m, 10)
+        let q = wholediv(m, 10)
         out = part("0123456789", m - q * 10, 1) + out
         m = q
     }

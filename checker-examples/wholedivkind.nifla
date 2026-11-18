@@ -1,0 +1,6 @@
+// A checker example: 'wholediv' divides whole
+// numbers — and this hands it some text, plain to
+// see from the 'let' line. The checker stops it
+// first.
+let label = "twelve"
+say wholediv(label, 5)

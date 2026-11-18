@@ -1,0 +1,42 @@
+// Stone 30: 'wholediv' divides into whole numbers —
+// the whole part of the quotient, the fraction dropped
+// toward zero, where '/' gives the true quotient with
+// its fraction. The self-made feather checker reads a
+// whole-number quotient off a division's spoken form
+// by hand, in its 'floordiv'; the toolbox has the
+// single word now. What is left over after a dividing
+// is the number less the quotient times the divisor,
+// counted in the open.
+say wholediv(17, 5)
+say 17 - wholediv(17, 5) * 5
+say wholediv(20, 5)
+say wholediv(3, 7)
+say wholediv(0, 5)
+say wholediv(-7, 2)
+say wholediv(7, -2)
+say wholediv(-7, -2)
+say wholediv(1000000, 7)
+say 1000000 - wholediv(1000000, 7) * 7
+attempt {
+    let n = wholediv(7, 2.5)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+make anything(x) {
+    give x
+}
+attempt {
+    let n = wholediv(anything("six"), 2)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+attempt {
+    let d = asnumber("0")
+    let n = wholediv(10, d)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}
+say wholediv(42, 1)

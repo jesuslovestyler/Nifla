@@ -327,6 +327,7 @@ let builtinTools: [String: BuiltinDef] = [
     "bitor": BuiltinDef(params: ["first", "second"], example: "bitor(12, 10)"),
     "bitxor": BuiltinDef(params: ["first", "second"], example: "bitxor(12, 10)"),
     "astext": BuiltinDef(params: ["bytes"], example: "astext(block)"),
+    "wholediv": BuiltinDef(params: ["first", "second"], example: "wholediv(17, 5)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -444,6 +445,56 @@ func combineBits(_ a: Double, _ b: Double, _ keep: (Bool, Bool) -> Bool) -> Doub
         place *= 2
     }
     return out
+}
+
+// Stone 30: dividing into whole numbers, the 'wholediv'
+// tool's work. '/' gives the true quotient with its
+// fraction; 'wholediv' gives the whole part alone, the
+// fraction dropped toward zero — the way Swift's whole
+// numbers divide, so wholediv(-7, 2) is -3. The numbers
+// handed to it must themselves be whole, no bigger in
+// size than the language's numbers hold exactly — 2^53,
+// the reach the feather reckoning already trusts. A
+// fraction, or a bigger one, is a problem 'attempt' can
+// catch, said in plain words; dividing by zero is the
+// same problem '/' raises, in the same words.
+func wholeDivNumber(_ value: Value, tool: String, role: String, line: Int) throws -> Double {
+    guard case .number(let number) = value else {
+        throw NiflaError(line: line, message: "'\(tool)' needs \(role), but it was given \(value.described).")
+    }
+    if number != number.rounded() {
+        throw NiflaError(line: line, message: "'\(tool)' works on whole numbers — it is the dividing that drops the fraction, not the numbers handed to it — but it was given \(formatNumber(number)). Use a whole number, like \(formatNumber(number.rounded(.down))) or \(formatNumber(number.rounded(.up))).")
+    }
+    if number > 9007199254740992 || number < -9007199254740992 {
+        throw NiflaError(line: line, message: "'\(tool)' works on whole numbers up to 9007199254740992 in size, as far as the language's numbers stay exact, but it was given a bigger one.")
+    }
+    return number
+}
+
+// The quotient itself, counted the same way in every
+// mirror: by doubling chunks of the divisor, the way a
+// person divides on paper — take the biggest doubled
+// chunk that still fits, take it away, and count how
+// many it stood for — so every step is whole-number
+// work the language's numbers hold exactly, and no
+// mirror's own division can round the answer its own
+// way. 'a' is the size of the number divided (zero or
+// more) and 'b' the size of the number it is divided
+// by (one or more); the sign is the caller's to restore.
+func wholeQuotient(_ a: Double, _ b: Double) -> Double {
+    var rest = a
+    var quotient = 0.0
+    while rest >= b {
+        var chunk = b
+        var count = 1.0
+        while chunk + chunk <= rest {
+            chunk += chunk
+            count += count
+        }
+        rest -= chunk
+        quotient += count
+    }
+    return quotient
 }
 
 // The place an item-setting line will write to: what a list
@@ -1196,6 +1247,24 @@ final class Machine {
                 throw NiflaError(line: line, message: "'astext' needs a block of bytes to read as text, but it was given \(args[0].described).")
             }
             return .text(String(decoding: block.data, as: UTF8.self))
+
+        case "wholediv":
+            // Stone 30: dividing into whole numbers —
+            // the whole part of the quotient, the
+            // fraction dropped toward zero. The work
+            // the self-made feather checker does by
+            // hand in its 'floordiv', given a single
+            // word at last.
+            let first = try wholeDivNumber(args[0], tool: name, role: "a whole number to divide", line: line)
+            let second = try wholeDivNumber(args[1], tool: name, role: "a whole number to divide by", line: line)
+            if second == 0 {
+                throw NiflaError(line: line, message: "I can't divide by zero. Dividing needs a second number that isn't zero.")
+            }
+            let quotient = wholeQuotient(abs(first), abs(second))
+            if quotient == 0 {
+                return .number(0)
+            }
+            return .number((first < 0) != (second < 0) ? -quotient : quotient)
 
         case "writefile":
             guard case .text(let path) = args[0] else {

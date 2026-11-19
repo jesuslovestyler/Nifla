@@ -2822,6 +2822,55 @@ self-hosted 60/60, primer and tutorial books true,
 web corpus byte for byte, feather, feathercheck,
 selfmade, web-floor and every bare proof green.
 
+## Stone 38 — `wholediv` comes to bare metal
+
+With `leftover` standing on bare metal, its other
+half was the one division word still missing there.
+Stone 30 gave the hosted doors `wholediv`; a bare
+program that used the word — any program written
+for a hosted door, carried to metal unchanged —
+was refused it, though the thing it names is the
+only division bare metal has ever done. Bare
+numbers are whole by nature: the machine's division
+never had a fraction to drop.
+
+Both bare compilers now take the word, and it names
+exactly that division: the quotient dropped toward
+zero by the dividing itself, a divisor of zero
+stopping the machine behind the same guard bare
+division itself keeps. With this stone, every
+number word of Stones 26–32 that bare metal can
+honestly hold stands on bare metal — the choosing
+pair and the size word arrived with their stones,
+the bit words and division's two words in this
+chain's wake. What remains apart stands with its
+reasons: the rounding words, which would have
+nothing to round in a world of whole numbers;
+`astext`, not yet brought across — how its
+replacement marks for bytes that are not letters
+should read in bare metal's byte-true text is its
+own small question; and `asnumber`, whose answer
+is a maybe — and bare metal has no `nothing` to
+give back for a text that is not a number, the
+standing-apart from Stone 19. How a bare
+`asnumber` should answer such a text is a
+question for the language's maker, not a step to
+take quietly; it is recorded here as the chain's
+one open question, and the feather door's hand
+parser stands until it is answered.
+
+Proofs: no suite count changes — the word was
+proved on the hosted doors at Stone 30. The bare
+tools proof gains its fifth line ("wholediv 3 -3"
+— the quotient dropped toward zero, on the
+emulated screen), the tools program speaks every
+line on the ARM machine too, and the primer's
+wholediv section gains a bare example. Interpreted
+60/60, compiled 159/159, voice 6/6, self-hosted
+60/60, primer and tutorial books true, web corpus
+byte for byte, feather, feathercheck, selfmade,
+web-floor and every bare proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

@@ -203,6 +203,7 @@ struct BareTranslatorARM {
             if name == "smallest" || name == "largest" { return .number }
             if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
             if name == "leftover" { return .number }
+            if name == "wholediv" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1395,6 +1396,22 @@ struct BareTranslatorARM {
             emit("    cbz x2, __halt_trap")
             emit("    sdiv x3, x0, x2")
             emit("    msub x0, x3, x2, x0")
+            return
+        }
+        if name == "wholediv" {
+            // Stone 38: the machine's own division,
+            // which is whole by nature — the quotient
+            // is the answer, dropped toward zero by the
+            // dividing itself. A divisor of zero stops
+            // the machine, the same guard bare division
+            // itself keeps.
+            emitExpr(args[0])
+            emit("    str x0, [sp, #-16]!")
+            emitExpr(args[1])
+            emit("    mov x2, x0")
+            emit("    ldr x0, [sp], #16")
+            emit("    cbz x2, __halt_trap")
+            emit("    sdiv x0, x0, x2")
             return
         }
         if name == "makebytes" {

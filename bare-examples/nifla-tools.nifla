@@ -15,8 +15,13 @@
 // subtracting the quotient times the divisor at every
 // face it draws; the line below also shows the
 // remainder carrying the divided number's sign.
+// Stone 38 brought 'wholediv' — on bare metal the
+// word names the machine's own division, which never
+// had a fraction to drop; its line shows the quotient
+// dropped toward zero for a negative number too.
 say "absolute " + absolute(0 - 7)
 say "smallest " + smallest(9, 4) + " largest " + largest(9, 4)
 say "bits " + bitand(12, 10) + " " + bitor(12, 10) + " " + bitxor(12, 10)
 say "leftover " + leftover(17, 5) + " " + leftover(0 - 17, 5)
+say "wholediv " + wholediv(17, 5) + " " + wholediv(0 - 17, 5)
 say "Bare tools"

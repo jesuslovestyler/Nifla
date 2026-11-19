@@ -857,6 +857,20 @@ whole part off a division's spoken form by hand, in
 a helper it calls `floordiv`. Programs written today
 can simply call `wholediv`.)
 
+(Stone 38. The word stands on bare metal too, where
+it names the machine's own division — bare numbers
+are whole by nature, so there is no fraction to
+drop, and the quotient is dropped toward zero by
+the dividing itself, as on every door. A program
+written with `wholediv` for a hosted door compiles
+for bare metal unchanged; a divisor of zero stops
+the bare machine, the same guard bare division
+itself keeps.)
+
+```nifla-bare
+say wholediv(17, 5)
+```
+
 ### `leftover` — what a dividing leaves
 
 `leftover(first, second)` gives what is left of the

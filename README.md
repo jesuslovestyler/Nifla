@@ -2871,6 +2871,76 @@ wholediv section gains a bare example. Interpreted
 byte for byte, feather, feathercheck, selfmade,
 web-floor and every bare proof green.
 
+## Stone 39 — `asnumber` comes to bare metal: the open question answered
+
+Stone 38's ledger closed with one question left
+for the language's maker. Stone 26 gave the hosted
+doors `asnumber`, whose answer for a text that is
+not a number is `nothing` — a bad text is data the
+program must handle, not a fault — and bare metal
+has no `nothing`: every bare value is a machine
+word with one shape (Stone 19's standing-apart).
+So a bare `asnumber` could not give the hosted
+answer, and the stone was not taken quietly. The
+maker's word came on November 19, 2026 — "do
+everything for Nifla" — and with it the answer:
+**the machine halts.** Not a sentinel number: the
+feather door's own hand parser answers −1, but
+"-1" is itself a readable number, so a sentinel
+can lie; and not leaving the word off bare, which
+would keep the feather door parsing by hand
+forever. Halting is bare metal's standing way of
+refusing — division by zero, a pick outside a
+block, a negative bit operand all stop the
+machine — and a text that is not a number joins
+that family on this door.
+
+Both bare compilers now take the word (validator,
+kind, and emission), and each door's runtime
+carries a reader that walks the text's bytes. The
+writing read is the hosted one — a `-` first when
+the number is below zero, then digits, then at
+most one `.` with digits after it — as far as
+bare numbers honestly reach, and the reach is
+named plainly: bare numbers are whole, so a
+fraction's digits must all be zero for the text
+to name a bare number ("3.0" reads as 3, exactly;
+"3.5" names a number bare metal cannot hold, and
+the machine stops rather than thin it silently);
+the magnitude must fit the machine word, up to
+9223372036854775807, or one more below zero —
+both ends proved by booting them, and one past
+the top proved to stop the machine. An empty
+text, a lone '-', letters, spaces: the machine
+stops. Within that reach every door answers
+alike, and a program written with `asnumber` for
+a hosted door compiles for bare metal unchanged.
+
+With this stone the ledger Stone 38 left stands
+answered in full: every word of Stones 26–32 that
+bare metal can honestly hold now stands there.
+What remains apart keeps its reasons — the
+rounding words (nothing to round among whole
+numbers) and `astext` (its replacement marks
+still need a bare answer of their own).
+
+Proofs: no suite count changes — the word was
+proved on the hosted doors at Stone 26. The bare
+tools proof gains its sixth line ("asnumber 620
+-42 3" — a plain reading, a number below zero,
+and the all-zero fraction read exactly), spoken
+on the ARM machine too; and a new halt proof
+boots a program that reads "one hundred": the
+first line stands on the screen and over the
+serial line, and the next word is never said, on
+either machine. The primer's `asnumber` section
+gains the bare note and a bare example.
+Interpreted 60/60, compiled 159/159, voice 6/6,
+self-hosted 60/60, primer and tutorial books
+true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

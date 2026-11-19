@@ -735,6 +735,28 @@ digits by hand, with `part` and `find`, because the
 building is the lesson; programs written today can
 simply call `asnumber`.)
 
+(Stone 39. The word stands on bare metal too, where
+it reads the same writing — a `-` first, digits, at
+most one `.` — as far as bare numbers reach. They
+are whole, so a fraction's digits must all be zero
+for the text to name a bare number: `3.0` reads as
+3, exactly, and `3.5` names a number bare metal
+cannot hold. The magnitude must fit the machine
+word, up to 9223372036854775807, or one more below
+zero. A text that is not such a number stops the
+machine: the hosted doors answer it with the
+problem above, which `attempt` can catch, but bare
+metal has no `nothing` to answer with, and stopping
+is its way of refusing — the answer the language's
+maker gave when Stone 38's ledger put the question
+to him. The feather door, which had been taking a
+card's numbers apart byte by byte by hand, can read
+them with the word now.)
+
+```nifla-bare
+say asnumber("620")
+```
+
 ### `bitand`, `bitor`, `bitxor` — working with bits
 
 `bitand(first, second)`, `bitor(first, second)`, and

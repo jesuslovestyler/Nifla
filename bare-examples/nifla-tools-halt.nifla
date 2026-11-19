@@ -1,0 +1,11 @@
+// Stone 39's other half: a text that is not a number
+// stops the bare machine before its next word can be
+// said. The hosted doors answer such a text with a
+// problem 'attempt' can catch; bare metal has no
+// 'nothing' to answer with, and stopping is its way
+// of refusing. The proof boots this program and
+// checks that the first line stands and the last
+// never does.
+say "Before the reading"
+say "Read: " + asnumber("one hundred")
+say "After the reading"

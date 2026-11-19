@@ -204,6 +204,7 @@ struct BareTranslatorARM {
             if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
             if name == "leftover" { return .number }
             if name == "wholediv" { return .number }
+            if name == "asnumber" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -678,6 +679,78 @@ struct BareTranslatorARM {
         out.append("    b 3b")
         out.append("4:  ldp x29, x30, [sp], #16")
         out.append("    ret")
+        out.append("")
+        // asnumber: reading a number out of text (Stone
+        // 39). The text is in x0 (its address) and x1
+        // (its count); the number comes back in x0. The
+        // writing read is the hosted one — a '-' first
+        // when the number is below zero, then digits,
+        // then at most one '.' with digits after it — as
+        // far as bare numbers reach: they are whole, so
+        // a fraction's digits must all be zero for the
+        // text to name a bare number ('3.0' reads as 3,
+        // exactly), and the magnitude must fit the
+        // machine word (up to 9223372036854775807, or
+        // one more below zero). Anything else — letters,
+        // spaces, an empty text, a lone '-', a fraction
+        // that is not zero, a magnitude too big to hold
+        // — stops the machine: the hosted doors answer
+        // such a text with a problem 'attempt' can
+        // catch, but bare metal has no 'nothing' to
+        // answer with, and stopping is its way of
+        // refusing.
+        out.append("__nifla_asnumber:")
+        out.append("    mov x9, x0")
+        out.append("    mov x10, x1")
+        out.append("    mov x11, #0")
+        out.append("    mov x12, #0")
+        out.append("    ldr x13, =922337203685477580")
+        out.append("    cbz x10, __halt_trap")
+        out.append("    ldrb w14, [x9]")
+        out.append("    cmp w14, #45")
+        out.append("    b.ne 1f")
+        out.append("    mov x12, #1")
+        out.append("    add x9, x9, #1")
+        out.append("    sub x10, x10, #1")
+        out.append("1:  cbz x10, __halt_trap")
+        out.append("    ldrb w14, [x9]")
+        out.append("    sub w14, w14, #48")
+        out.append("    cmp w14, #9")
+        out.append("    b.hi __halt_trap")
+        out.append("2:  cmp x11, x13")
+        out.append("    b.hi __halt_trap")
+        out.append("    b.ne 3f")
+        out.append("    add x15, x12, #7")
+        out.append("    cmp x14, x15")
+        out.append("    b.hi __halt_trap")
+        out.append("3:  mov x15, #10")
+        out.append("    mul x11, x11, x15")
+        out.append("    add x11, x11, x14")
+        out.append("    add x9, x9, #1")
+        out.append("    sub x10, x10, #1")
+        out.append("    cbz x10, 5f")
+        out.append("    ldrb w14, [x9]")
+        out.append("    sub w14, w14, #48")
+        out.append("    cmp w14, #9")
+        out.append("    b.ls 2b")
+        out.append("    ldrb w14, [x9]")
+        out.append("    cmp w14, #46")
+        out.append("    b.ne __halt_trap")
+        out.append("    add x9, x9, #1")
+        out.append("    sub x10, x10, #1")
+        out.append("    cbz x10, __halt_trap")
+        out.append("4:  ldrb w14, [x9]")
+        out.append("    sub w14, w14, #48")
+        out.append("    cmp w14, #9")
+        out.append("    b.hi __halt_trap")
+        out.append("    cbnz w14, __halt_trap")
+        out.append("    add x9, x9, #1")
+        out.append("    sub x10, x10, #1")
+        out.append("    cbnz x10, 4b")
+        out.append("5:  mov x0, x11")
+        out.append("    cbz x12, 6f")
+        out.append("    neg x0, x0")
+        out.append("6:  ret")
         out.append("")
         // text_eq: two pieces of text (x0/x1 and x2/x3);
         // gives back 1 in x0 when they are the same words.
@@ -1412,6 +1485,16 @@ struct BareTranslatorARM {
             emit("    ldr x0, [sp], #16")
             emit("    cbz x2, __halt_trap")
             emit("    sdiv x0, x0, x2")
+            return
+        }
+        if name == "asnumber" {
+            // Stone 39: the text is already in x0/x1;
+            // the runtime's reader walks its bytes and
+            // answers the number in x0 — or stops the
+            // machine when the text is not a number
+            // bare metal can hold.
+            emitExpr(args[0])
+            emit("    bl __nifla_asnumber")
             return
         }
         if name == "makebytes" {

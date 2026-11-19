@@ -603,8 +603,29 @@ final class BareValidator {
                 try requireNumber(args[1], line: line, doing: "be divided")
                 return .number
             }
+            if name == "asnumber" {
+                // Stone 39: reading a number out of text
+                // came to bare metal — the feather door
+                // had been taking a card's numbers apart
+                // byte by byte by hand. The word reads
+                // the writing the hosted doors read, as
+                // far as bare numbers reach; a text that
+                // is not such a number stops the machine,
+                // there being no 'nothing' there to
+                // answer with.
+                guard args.count == 1 else {
+                    throw NiflaError(line: line, message: "'asnumber' takes 1 value (text), but it was given \(args.count).")
+                }
+                let kind = try kindOf(args[0])
+                if kind == .unknown, case .variable(let varName, _) = args[0] {
+                    try pin(varName, to: .text, line: line)
+                } else if kind != .text && kind != .unknown {
+                    throw NiflaError(line: line, message: "'asnumber' reads a number out of text — the characters a number is written with, like \"620\" — but here it was given \(kindPhrase(kind)).")
+                }
+                return .number
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, the bit words 'bitand', 'bitor' and 'bitxor', 'leftover', for what a dividing leaves, and 'wholediv', for dividing into whole numbers.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, the bit words 'bitand', 'bitor' and 'bitxor', 'leftover', for what a dividing leaves, 'wholediv', for dividing into whole numbers, and 'asnumber', for reading a number out of text.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -872,6 +893,7 @@ struct BareTranslator {
             if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
             if name == "leftover" { return .number }
             if name == "wholediv" { return .number }
+            if name == "asnumber" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1257,6 +1279,88 @@ struct BareTranslator {
         out.append("    pop rax")
         out.append("    pop r12")
         out.append("    pop rbx")
+        out.append("    ret")
+        out.append("")
+        out.append("// Stone 39: reading a number out of text. The text")
+        out.append("// is in rax (its address) and rdx (its count); the")
+        out.append("// number comes back in rax. The writing read is")
+        out.append("// the hosted one — a '-' first when the number is")
+        out.append("// below zero, then digits, then at most one '.'")
+        out.append("// with digits after it — as far as bare numbers")
+        out.append("// reach: they are whole, so a fraction's digits")
+        out.append("// must all be zero for the text to name a bare")
+        out.append("// number ('3.0' reads as 3, exactly), and the")
+        out.append("// magnitude must fit the machine word (up to")
+        out.append("// 9223372036854775807, or one more below zero).")
+        out.append("// Anything else — letters, spaces, an empty text,")
+        out.append("// a lone '-', a fraction that is not zero, a")
+        out.append("// magnitude too big to hold — stops the machine:")
+        out.append("// the hosted doors answer such a text with a")
+        out.append("// problem 'attempt' can catch, but bare metal has")
+        out.append("// no 'nothing' to answer with, and stopping is")
+        out.append("// its way of refusing.")
+        out.append("__nifla_asnumber:")
+        out.append("    mov rsi, rax")
+        out.append("    mov rcx, rdx")
+        out.append("    xor r8d, r8d")
+        out.append("    xor r9d, r9d")
+        out.append("    mov r10, 922337203685477580")
+        out.append("    test rcx, rcx")
+        out.append("    je __halt_trap")
+        out.append("    cmp byte ptr [rsi], 45")
+        out.append("    jne __an_whole")
+        out.append("    mov r9d, 1")
+        out.append("    inc rsi")
+        out.append("    dec rcx")
+        out.append("__an_whole:")
+        out.append("    test rcx, rcx")
+        out.append("    je __halt_trap")
+        out.append("    movzx eax, byte ptr [rsi]")
+        out.append("    sub eax, 48")
+        out.append("    cmp eax, 9")
+        out.append("    ja __halt_trap")
+        out.append("__an_digit:")
+        out.append("    mov r11d, eax")
+        out.append("    cmp r8, r10")
+        out.append("    ja __halt_trap")
+        out.append("    jne __an_take")
+        out.append("    lea rax, [r9 + 7]")
+        out.append("    cmp r11, rax")
+        out.append("    ja __halt_trap")
+        out.append("__an_take:")
+        out.append("    imul r8, r8, 10")
+        out.append("    add r8, r11")
+        out.append("    inc rsi")
+        out.append("    dec rcx")
+        out.append("    test rcx, rcx")
+        out.append("    je __an_done")
+        out.append("    movzx eax, byte ptr [rsi]")
+        out.append("    sub eax, 48")
+        out.append("    cmp eax, 9")
+        out.append("    jbe __an_digit")
+        out.append("    cmp byte ptr [rsi], 46")
+        out.append("    jne __halt_trap")
+        out.append("    inc rsi")
+        out.append("    dec rcx")
+        out.append("    test rcx, rcx")
+        out.append("    je __halt_trap")
+        out.append("__an_frac:")
+        out.append("    movzx eax, byte ptr [rsi]")
+        out.append("    sub eax, 48")
+        out.append("    cmp eax, 9")
+        out.append("    ja __halt_trap")
+        out.append("    test eax, eax")
+        out.append("    jne __halt_trap")
+        out.append("    inc rsi")
+        out.append("    dec rcx")
+        out.append("    test rcx, rcx")
+        out.append("    jne __an_frac")
+        out.append("__an_done:")
+        out.append("    mov rax, r8")
+        out.append("    test r9d, r9d")
+        out.append("    je __an_ret")
+        out.append("    neg rax")
+        out.append("__an_ret:")
         out.append("    ret")
         out.append("__nifla_say_text:")
         out.append("    push rbx")
@@ -2181,6 +2285,16 @@ struct BareTranslator {
             emit("    je __halt_trap")
             emit("    cqo")
             emit("    idiv rcx")
+            return
+        }
+        if name == "asnumber" {
+            // Stone 39: the text is already in rax/rdx;
+            // the runtime's reader walks its bytes and
+            // answers the number in rax — or stops the
+            // machine when the text is not a number
+            // bare metal can hold.
+            emitExpr(args[0])
+            emit("    call __nifla_asnumber")
             return
         }
         if name == "makebytes" {

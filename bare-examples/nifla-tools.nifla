@@ -19,9 +19,15 @@
 // word names the machine's own division, which never
 // had a fraction to drop; its line shows the quotient
 // dropped toward zero for a negative number too.
+// Stone 39 brought 'asnumber' — reading a number out
+// of text — which the feather door had been doing by
+// hand, byte by byte; its line reads a plain number,
+// a number below zero, and a fraction whose digits
+// are all zero, which names a whole number exactly.
 say "absolute " + absolute(0 - 7)
 say "smallest " + smallest(9, 4) + " largest " + largest(9, 4)
 say "bits " + bitand(12, 10) + " " + bitor(12, 10) + " " + bitxor(12, 10)
 say "leftover " + leftover(17, 5) + " " + leftover(0 - 17, 5)
 say "wholediv " + wholediv(17, 5) + " " + wholediv(0 - 17, 5)
+say "asnumber " + asnumber("620") + " " + asnumber("-42") + " " + asnumber("3.0")
 say "Bare tools"

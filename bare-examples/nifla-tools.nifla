@@ -3,6 +3,10 @@
 // a word to bare metal adds its line here. Stone 34
 // brought 'absolute' — a number's size, never below
 // nothing — the word the calculator feather had been
-// building by hand as 'absn'.
-say absolute(0 - 7)
+// building by hand as 'absn'. Stone 35 brought
+// 'smallest' and 'largest', the choosing pair the
+// kernel had been spelling out with 'if's wherever it
+// keeps a window on the desktop.
+say "absolute " + absolute(0 - 7)
+say "smallest " + smallest(9, 4) + " largest " + largest(9, 4)
 say "Bare tools"

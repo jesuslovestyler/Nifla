@@ -152,6 +152,8 @@ private let builtinRules: [String: BuiltinRule] = [
     "rounddown": BuiltinRule(result: .number, needs: [([.number], "a number to round")]),
     "roundup": BuiltinRule(result: .number, needs: [([.number], "a number to round")]),
     "absolute": BuiltinRule(result: .number, needs: [([.number], "a number to take the size of")]),
+    "smallest": BuiltinRule(result: .number, needs: [([.number], "a number to choose between"), ([.number], "a number to choose between")]),
+    "largest": BuiltinRule(result: .number, needs: [([.number], "a number to choose between"), ([.number], "a number to choose between")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each

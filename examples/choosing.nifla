@@ -1,0 +1,28 @@
+// Stone 35: 'smallest' and 'largest' — choosing
+// between two numbers. Until this stone the choice
+// was spelled out with 'if', two at a time, wherever
+// it was wanted — the Cardnull OS kernel does exactly
+// that wherever it keeps a window on the desktop.
+// Together the pair is also a clamp: largest(0,
+// smallest(place, limit)) holds a number between two
+// bounds. Any numbers may be chosen between,
+// fractions included; equal numbers answer with
+// that number either way.
+say smallest(3, 7)
+say largest(3, 7)
+say smallest(-2, -9)
+say largest(-2, -9)
+say smallest(2.5, 2.25)
+say largest(2.5, 2.25)
+say smallest(5, 5)
+say largest(0, smallest(14, 10))
+say largest(0, smallest(-4, 10))
+make anything(x) {
+    give x
+}
+attempt {
+    let n = smallest(anything("three"), 7)
+    say n
+} if it fails {
+    say "Caught: " + problem
+}

@@ -3589,9 +3589,9 @@ make takesText(params) {
 // stones; 'makebytes' and the bytes it makes are mirrored here
 // with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv", "leftover", "rounddown", "roundup", "absolute"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"], ["bytes"], ["first", "second"], ["first", "second"], ["value"], ["value"], ["value"]]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)", "astext(block)", "wholediv(17, 5)", "leftover(17, 5)", "rounddown(3.5)", "roundup(3.5)", "absolute(-7)"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv", "leftover", "rounddown", "roundup", "absolute", "smallest", "largest"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"], ["bytes"], ["first", "second"], ["first", "second"], ["value"], ["value"], ["value"], ["first", "second"], ["first", "second"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)", "astext(block)", "wholediv(17, 5)", "leftover(17, 5)", "rounddown(3.5)", "roundup(3.5)", "absolute(-7)", "smallest(3, 7)", "largest(3, 7)"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -3933,6 +3933,29 @@ make runBuiltin(name, args, line) {
         // 'rounddown' above — it cannot fail on a
         // number.
         give okVal(vNumber(absolute(args[0].num)))
+    }
+    if name == "smallest" {
+        if args[0].kind != "number" {
+            give errAt(line, "'smallest' needs numbers to choose between, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'smallest' needs numbers to choose between, but it was given " + described(args[1]) + ".")
+        }
+        // Stone 35: the host's choosing words, as
+        // 'absolute' above — they cannot fail on
+        // numbers.
+        give okVal(vNumber(smallest(args[0].num, args[1].num)))
+    }
+    if name == "largest" {
+        if args[0].kind != "number" {
+            give errAt(line, "'largest' needs numbers to choose between, but it was given " + described(args[0]) + ".")
+        }
+        if args[1].kind != "number" {
+            give errAt(line, "'largest' needs numbers to choose between, but it was given " + described(args[1]) + ".")
+        }
+        // Stone 35: the host's choosing words, as
+        // 'smallest' above.
+        give okVal(vNumber(largest(args[0].num, args[1].num)))
     }
     if name == "writefile" {
         if args[0].kind != "text" {

@@ -113,7 +113,7 @@ def screen_rows():
             # prompt, so nothing is ever left waiting.
             read_until_prompt()
             greeted = True
-        sock.sendall(b"xp /320bx 0xb8000\n")
+        sock.sendall(b"xp /1600bx 0xb8000\n")
         out = read_until_prompt()
     except (MonitorQuiet, OSError):
         return None
@@ -122,10 +122,10 @@ def screen_rows():
         match = re.match(r"^[0-9a-f]+: ((?:0x[0-9a-f]{2} ?)+)$", line.strip())
         if match:
             data += [int(part, 16) for part in match.group(1).split()]
-    if len(data) < 320:
+    if len(data) < 1600:
         return None
-    chars = [chr(data[i]) if 32 <= data[i] < 127 else " " for i in range(0, 320, 2)]
-    return ["".join(chars[:80]), "".join(chars[80:])]
+    chars = [chr(data[i]) if 32 <= data[i] < 127 else " " for i in range(0, 1600, 2)]
+    return ["".join(chars[i * 80:(i + 1) * 80]) for i in range(10)]
 
 
 # The machine boots, the BIOS banner comes and goes, and the

@@ -551,8 +551,22 @@ final class BareValidator {
                 try requireNumber(args[0], line: line, doing: "take the size of")
                 return .number
             }
+            if name == "smallest" || name == "largest" {
+                // Stone 35: choosing between two numbers
+                // came to bare metal with the words
+                // themselves — the kernel had been
+                // spelling the choice out by hand, two
+                // 'if's at a time, wherever it keeps a
+                // window on the desktop.
+                guard args.count == 2 else {
+                    throw NiflaError(line: line, message: "'\(name)' takes 2 values (first, second), but it was given \(args.count).")
+                }
+                try requireNumber(args[0], line: line, doing: "choose between")
+                try requireNumber(args[1], line: line, doing: "choose between")
+                return .number
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, and 'absolute', for a number's size.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, and 'smallest' and 'largest', for choosing between two numbers.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -816,6 +830,7 @@ struct BareTranslator {
         case .call(let name, _, _):
             if name == "length" { return .number }
             if name == "absolute" { return .number }
+            if name == "smallest" || name == "largest" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -2046,6 +2061,23 @@ struct BareTranslator {
             emit("    test rax, rax")
             emit("    jns \(done)")
             emit("    neg rax")
+            emit("\(done):")
+            return
+        }
+        if name == "smallest" || name == "largest" {
+            // Stone 35: the first value is kept on the
+            // stack while the second is worked out; the
+            // comparison chooses which of the two the
+            // answer is.
+            emitExpr(args[0])
+            emit("    push rax")
+            emitExpr(args[1])
+            emit("    mov rcx, rax")
+            emit("    pop rax")
+            let done = freshLabel("choose_done")
+            emit("    cmp rax, rcx")
+            emit(name == "smallest" ? "    jle \(done)" : "    jge \(done)")
+            emit("    mov rax, rcx")
             emit("\(done):")
             return
         }

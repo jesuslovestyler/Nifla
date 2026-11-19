@@ -2717,6 +2717,38 @@ true, web corpus byte for byte, feather,
 feathercheck, selfmade, web-floor and every bare
 proof green, the new bare tools proof among them.
 
+## Stone 35 — `smallest` and `largest`: the choosing pair
+
+Two words for a choice the language's programs were
+already making by hand. Wherever the Cardnull OS
+kernel keeps a window on its desktop — laying the
+windows out, dragging them, bringing them back
+whole — it spells the same choice out with two
+'if's: if the place is past the edge, pull it back
+to the edge; if it is below nothing, lift it to
+nothing. Window after window, the same pair of
+questions. `smallest(first, second)` gives the
+smaller of two numbers and `largest(first, second)`
+the larger; any numbers may be chosen between,
+fractions included, and equal numbers answer with
+that number either way. Together the pair is also
+the clamp the kernel keeps writing:
+`largest(0, smallest(place, limit))` holds a number
+between two bounds in one breath.
+
+Like `absolute` before them, the words stand on
+every door at once — the kernel that named the want
+is bare metal, so bare metal has them from the
+first day, proved on the emulated screen by the
+bare tools proof, which gains its second line.
+
+Proofs: `choosing` and `badchoosing` join the
+suites. Interpreted 60/60, compiled 159/159, voice
+6/6, self-hosted 60/60, primer and tutorial books
+true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

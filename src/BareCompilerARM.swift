@@ -200,6 +200,7 @@ struct BareTranslatorARM {
         case .call(let name, _, _):
             if name == "length" { return .number }
             if name == "absolute" { return .number }
+            if name == "smallest" || name == "largest" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1332,6 +1333,23 @@ struct BareTranslatorARM {
             emit("    cmp x0, xzr")
             emit("    b.ge \(done)")
             emit("    neg x0, x0")
+            emit("\(done):")
+            return
+        }
+        if name == "smallest" || name == "largest" {
+            // Stone 35: the first value is kept on the
+            // stack while the second is worked out; the
+            // comparison chooses which of the two the
+            // answer is.
+            emitExpr(args[0])
+            emit("    str x0, [sp, #-16]!")
+            emitExpr(args[1])
+            emit("    mov x2, x0")
+            emit("    ldr x0, [sp], #16")
+            let done = freshLabel("choose_done")
+            emit("    cmp x0, x2")
+            emit(name == "smallest" ? "    b.le \(done)" : "    b.ge \(done)")
+            emit("    mov x0, x2")
             emit("\(done):")
             return
         }

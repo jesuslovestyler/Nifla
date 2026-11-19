@@ -938,6 +938,40 @@ metal, the word stands on every door at once — bare
 metal included, where it is proved on the emulated
 screen by the bare tools proof.)
 
+### `smallest`, `largest` — choosing between two numbers
+
+`smallest(first, second)` gives the smaller of two
+numbers, and `largest(first, second)` the larger.
+Any numbers may be chosen between, fractions
+included; when the two are equal, that number is
+the answer either way:
+
+```nifla
+say smallest(3, 7)
+say largest(3, 7)
+say smallest(2.5, 2.25)
+say largest(-2, -9)
+```
+
+```expected
+3
+7
+2.25
+-2
+```
+
+Together the pair is also a clamp — a number held
+between two bounds, the way a window is held on a
+desktop: `largest(0, smallest(place, limit))` is
+never below 0 and never past the limit.
+
+(Stone 35. The choice was spelled out with 'if',
+two at a time, wherever it was wanted — the
+Cardnull OS kernel does exactly that wherever it
+keeps a window on the desktop, window after window.
+The words stand on every door at once, bare metal
+included, proved there by the bare tools proof.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

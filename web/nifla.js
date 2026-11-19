@@ -1120,6 +1120,8 @@ const BUILTIN_TOOLS = {
   rounddown: { params: ['value'], example: 'rounddown(3.5)' },
   roundup: { params: ['value'], example: 'roundup(3.5)' },
   absolute: { params: ['value'], example: 'absolute(-7)' },
+  smallest: { params: ['first', 'second'], example: 'smallest(3, 7)' },
+  largest: { params: ['first', 'second'], example: 'largest(3, 7)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1416,6 +1418,8 @@ const BUILTIN_RULES = {
   leftover: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
   rounddown: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to round' }] },
   absolute: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to take the size of' }] },
+  smallest: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to choose between' }, { kinds: ['number'], need: 'a number to choose between' }] },
+  largest: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to choose between' }, { kinds: ['number'], need: 'a number to choose between' }] },
   roundup: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to round' }] },
 };
 
@@ -3703,6 +3707,26 @@ class Interpreter {
           throw new NiflaError(line, "'absolute' needs a number to take the size of, but it was given " + describedOf(args[0]) + '.');
         }
         return Math.abs(args[0]);
+      }
+
+      case 'smallest':
+      case 'largest': {
+        // Stone 35: choosing between two numbers —
+        // the smaller of the two, or the larger.
+        // The Cardnull OS kernel spells this choice
+        // out by hand wherever it keeps a window on
+        // the desktop, two 'if's at a time, window
+        // after window; together the pair is also
+        // the clamp the kernel keeps writing:
+        // largest(0, smallest(place, limit)) holds
+        // a number between two bounds.
+        if (typeof args[0] !== 'number') {
+          throw new NiflaError(line, "'" + name + "' needs numbers to choose between, but it was given " + describedOf(args[0]) + '.');
+        }
+        if (typeof args[1] !== 'number') {
+          throw new NiflaError(line, "'" + name + "' needs numbers to choose between, but it was given " + describedOf(args[1]) + '.');
+        }
+        return name === 'smallest' ? Math.min(args[0], args[1]) : Math.max(args[0], args[1]);
       }
 
       case 'writefile': {

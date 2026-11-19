@@ -337,6 +337,8 @@ let builtinTools: [String: BuiltinDef] = [
     "rounddown": BuiltinDef(params: ["value"], example: "rounddown(3.5)"),
     "roundup": BuiltinDef(params: ["value"], example: "roundup(3.5)"),
     "absolute": BuiltinDef(params: ["value"], example: "absolute(-7)"),
+    "smallest": BuiltinDef(params: ["first", "second"], example: "smallest(3, 7)"),
+    "largest": BuiltinDef(params: ["first", "second"], example: "largest(3, 7)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -1309,6 +1311,27 @@ final class Interpreter {
                 throw NiflaError(line: line, message: "'absolute' needs a number to take the size of, but it was given \(args[0].described).")
             }
             return .number(abs(number))
+
+        case "smallest", "largest":
+            // Stone 35: choosing between two numbers —
+            // the smaller of the two, or the larger.
+            // The Cardnull OS kernel spells this choice
+            // out by hand wherever it keeps a window on
+            // the desktop, two 'if's at a time, window
+            // after window; together the pair is also
+            // the clamp the kernel keeps writing:
+            // largest(0, smallest(place, limit)) holds
+            // a number between two bounds. Any numbers
+            // may be chosen between, fractions included;
+            // when the two are equal, that number is
+            // the answer either way.
+            guard case .number(let first) = args[0] else {
+                throw NiflaError(line: line, message: "'\(name)' needs numbers to choose between, but it was given \(args[0].described).")
+            }
+            guard case .number(let second) = args[1] else {
+                throw NiflaError(line: line, message: "'\(name)' needs numbers to choose between, but it was given \(args[1].described).")
+            }
+            return .number(name == "smallest" ? min(first, second) : max(first, second))
 
         case "writefile":
             guard case .text(let path) = args[0] else {

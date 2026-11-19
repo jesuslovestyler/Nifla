@@ -1,0 +1,9 @@
+// 'largest' handed some text, with no 'attempt'
+// standing guard — the problem stops the program,
+// in plain words. The text arrives through a
+// function the checker can't see into, so the
+// runtime's own guard is the one that speaks.
+make anything(x) {
+    give x
+}
+say largest(anything("seven"), 3)

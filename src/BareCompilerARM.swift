@@ -201,6 +201,7 @@ struct BareTranslatorARM {
             if name == "length" { return .number }
             if name == "absolute" { return .number }
             if name == "smallest" || name == "largest" { return .number }
+            if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1351,6 +1352,29 @@ struct BareTranslatorARM {
             emit(name == "smallest" ? "    b.le \(done)" : "    b.ge \(done)")
             emit("    mov x0, x2")
             emit("\(done):")
+            return
+        }
+        if name == "bitand" || name == "bitor" || name == "bitxor" {
+            // Stone 36: the bit words on the machine's
+            // own words — one instruction each, once
+            // both operands are in hand. A negative
+            // operand stops the machine: the hosted
+            // doors refuse one in plain words, and
+            // stopping is bare metal's way of refusing.
+            emitExpr(args[0])
+            emit("    str x0, [sp, #-16]!")
+            emitExpr(args[1])
+            emit("    mov x2, x0")
+            emit("    ldr x0, [sp], #16")
+            emit("    cmp x0, xzr")
+            emit("    b.lt __halt_trap")
+            emit("    cmp x2, xzr")
+            emit("    b.lt __halt_trap")
+            switch name {
+            case "bitand": emit("    and x0, x0, x2")
+            case "bitor": emit("    orr x0, x0, x2")
+            default: emit("    eor x0, x0, x2")
+            }
             return
         }
         if name == "makebytes" {

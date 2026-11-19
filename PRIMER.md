@@ -784,6 +784,18 @@ in a helper it calls `xorbyte`. Programs written
 today can simply call `bitxor` — and `bitand` and
 `bitor` beside it.)
 
+(Stone 36. The words stand on bare metal too, where
+they work on the machine's whole word — one
+instruction each. The kernel's USB work had been
+wrapping a floor block around a single AND to do
+this work; now the word does it. A negative number
+stops the machine there, as bare problems do — the
+hosted refusal, spoken in bare metal's way.)
+
+```nifla-bare
+say bitand(12, 10)
+```
+
 ### `wholediv` — dividing into whole numbers
 
 `wholediv(first, second)` divides two whole numbers

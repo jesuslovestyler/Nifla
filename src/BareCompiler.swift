@@ -565,8 +565,21 @@ final class BareValidator {
                 try requireNumber(args[1], line: line, doing: "choose between")
                 return .number
             }
+            if name == "bitand" || name == "bitor" || name == "bitxor" {
+                // Stone 36: the bit words came to bare
+                // metal — the kernel's USB work had been
+                // wrapping a floor block around a single
+                // AND to do what Stone 27 gave the hosted
+                // doors as a word.
+                guard args.count == 2 else {
+                    throw NiflaError(line: line, message: "'\(name)' takes 2 values (first, second), but it was given \(args.count).")
+                }
+                try requireNumber(args[0], line: line, doing: "be worked on bit by bit")
+                try requireNumber(args[1], line: line, doing: "be worked on bit by bit")
+                return .number
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, and 'smallest' and 'largest', for choosing between two numbers.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, and the bit words 'bitand', 'bitor' and 'bitxor'.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -831,6 +844,7 @@ struct BareTranslator {
             if name == "length" { return .number }
             if name == "absolute" { return .number }
             if name == "smallest" || name == "largest" { return .number }
+            if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -2079,6 +2093,29 @@ struct BareTranslator {
             emit(name == "smallest" ? "    jle \(done)" : "    jge \(done)")
             emit("    mov rax, rcx")
             emit("\(done):")
+            return
+        }
+        if name == "bitand" || name == "bitor" || name == "bitxor" {
+            // Stone 36: the bit words on the machine's
+            // own words — one instruction each, once
+            // both operands are in hand. A negative
+            // operand stops the machine: the hosted
+            // doors refuse one in plain words, and
+            // stopping is bare metal's way of refusing.
+            emitExpr(args[0])
+            emit("    push rax")
+            emitExpr(args[1])
+            emit("    mov rcx, rax")
+            emit("    pop rax")
+            emit("    test rax, rax")
+            emit("    js __halt_trap")
+            emit("    test rcx, rcx")
+            emit("    js __halt_trap")
+            switch name {
+            case "bitand": emit("    and rax, rcx")
+            case "bitor": emit("    or rax, rcx")
+            default: emit("    xor rax, rcx")
+            }
             return
         }
         if name == "makebytes" {

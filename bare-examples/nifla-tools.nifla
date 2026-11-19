@@ -6,7 +6,11 @@
 // building by hand as 'absn'. Stone 35 brought
 // 'smallest' and 'largest', the choosing pair the
 // kernel had been spelling out with 'if's wherever it
-// keeps a window on the desktop.
+// keeps a window on the desktop. Stone 36 brought the
+// bit words — 'bitand', 'bitor', 'bitxor' — which the
+// kernel's USB work had been reaching through a floor
+// block wrapped around a single AND.
 say "absolute " + absolute(0 - 7)
 say "smallest " + smallest(9, 4) + " largest " + largest(9, 4)
+say "bits " + bitand(12, 10) + " " + bitor(12, 10) + " " + bitxor(12, 10)
 say "Bare tools"

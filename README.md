@@ -2749,6 +2749,43 @@ true, web corpus byte for byte, feather,
 feathercheck, selfmade, web-floor and every bare
 proof green.
 
+## Stone 36 — the bit words come to bare metal
+
+Stone 27 gave the hosted doors `bitand`, `bitor`
+and `bitxor`, and bare metal went on without them —
+its toolbox the smaller for it, as Stone 32's
+ledger named. The want surfaced in the kernel's
+own work: the USB keyboard road needs a number's
+bits masked, and to get one AND it wraps a floor
+block around the single instruction, a helper
+called `andmask` — the floor doing a word's work,
+the way programs do before the language learns to
+say a thing. Now the words stand on bare metal:
+both bare compilers take them, on the machine's
+whole word, one instruction each once the operands
+are in hand.
+
+The contract travels with the words. The hosted
+doors refuse a negative number in plain words —
+bits are counted in whole numbers from zero up —
+and bare metal refuses in its own way: a negative
+operand stops the machine, as bare problems do.
+Within the words' reach every door answers alike,
+and a program written with the bit words for a
+hosted door compiles for bare metal unchanged.
+
+Proofs: no suite count changes — the words were
+already proved on the hosted doors at Stone 27.
+The bare tools proof gains its third line ("bits
+8 14 6" on the emulated screen), a negative
+operand is shown to stop the bare machine before
+its next word can be said, and the primer's bit
+section gains a bare example. Interpreted 60/60,
+compiled 159/159, voice 6/6, self-hosted 60/60,
+primer and tutorial books true, web corpus byte
+for byte, feather, feathercheck, selfmade,
+web-floor and every bare proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

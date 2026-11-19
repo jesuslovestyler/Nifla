@@ -151,6 +151,7 @@ private let builtinRules: [String: BuiltinRule] = [
     "leftover": BuiltinRule(result: .number, needs: [([.number], "a whole number to divide"), ([.number], "a whole number to divide by")]),
     "rounddown": BuiltinRule(result: .number, needs: [([.number], "a number to round")]),
     "roundup": BuiltinRule(result: .number, needs: [([.number], "a number to round")]),
+    "absolute": BuiltinRule(result: .number, needs: [([.number], "a number to take the size of")]),
 ]
 
 // The checker's picture of the scopes: a stack of blocks, each

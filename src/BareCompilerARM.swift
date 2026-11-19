@@ -199,6 +199,7 @@ struct BareTranslatorARM {
             return .number
         case .call(let name, _, _):
             if name == "length" { return .number }
+            if name == "absolute" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1320,6 +1321,18 @@ struct BareTranslatorARM {
         if name == "length" {
             emitExpr(args[0])
             emit("    mov x0, x1")
+            return
+        }
+        if name == "absolute" {
+            // Stone 34: the value is in x0; a value
+            // below zero is negated, the rest are left
+            // as they stand.
+            emitExpr(args[0])
+            let done = freshLabel("absolute_done")
+            emit("    cmp x0, xzr")
+            emit("    b.ge \(done)")
+            emit("    neg x0, x0")
+            emit("\(done):")
             return
         }
         if name == "makebytes" {

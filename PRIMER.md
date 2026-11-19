@@ -909,6 +909,35 @@ one meant reading its spoken form apart — the
 self-host does exactly that, by hand, to speak its
 rounding messages.)
 
+### `absolute` — a number's size
+
+`absolute(value)` gives a number's size, never below
+nothing: a below-zero number comes back with the
+sign lifted off, and any other number comes back as
+it is. A fraction keeps its fraction:
+
+```nifla
+say absolute(-7)
+say absolute(7)
+say absolute(-3.5)
+say absolute(0)
+```
+
+```expected
+7
+7
+3.5
+0
+```
+
+(Stone 34. The word was first built by hand as
+'absn' in the Cardnull OS calculator feather, which
+reaches for a number's size at every turn of its
+reckoning. Because the feather is a guest on bare
+metal, the word stands on every door at once — bare
+metal included, where it is proved on the emulated
+screen by the bare tools proof.)
+
 ### `arguments` — the words the program was run with
 
 `arguments()` gives the list of words that came after the

@@ -1,0 +1,8 @@
+// The hosted toolbox words that stand on bare metal,
+// proved on the emulated screen: each stone that brings
+// a word to bare metal adds its line here. Stone 34
+// brought 'absolute' — a number's size, never below
+// nothing — the word the calculator feather had been
+// building by hand as 'absn'.
+say absolute(0 - 7)
+say "Bare tools"

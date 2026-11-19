@@ -1119,6 +1119,7 @@ const BUILTIN_TOOLS = {
   leftover: { params: ['first', 'second'], example: 'leftover(17, 5)' },
   rounddown: { params: ['value'], example: 'rounddown(3.5)' },
   roundup: { params: ['value'], example: 'roundup(3.5)' },
+  absolute: { params: ['value'], example: 'absolute(-7)' },
 };
 
 // The plain-words message for a call to a built-in tool with
@@ -1414,6 +1415,7 @@ const BUILTIN_RULES = {
   wholediv: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
   leftover: { result: 'number', needs: [{ kinds: ['number'], need: 'a whole number to divide' }, { kinds: ['number'], need: 'a whole number to divide by' }] },
   rounddown: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to round' }] },
+  absolute: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to take the size of' }] },
   roundup: { result: 'number', needs: [{ kinds: ['number'], need: 'a number to round' }] },
 };
 
@@ -3685,6 +3687,22 @@ class Interpreter {
           throw new NiflaError(line, "'" + name + "' needs a number to round, but it was given " + describedOf(args[0]) + '.');
         }
         return name === 'rounddown' ? Math.floor(args[0]) : Math.ceil(args[0]);
+      }
+
+      case 'absolute': {
+        // Stone 34: a number's size, never below
+        // nothing — below-zero numbers come back
+        // with the sign lifted off, the rest come
+        // back as they are, fractions keeping
+        // their fraction. The word was first built
+        // by hand as 'absn' in the Cardnull OS
+        // calculator feather — a bare-metal guest,
+        // which is why this word stands on every
+        // door at once, bare metal included.
+        if (typeof args[0] !== 'number') {
+          throw new NiflaError(line, "'absolute' needs a number to take the size of, but it was given " + describedOf(args[0]) + '.');
+        }
+        return Math.abs(args[0]);
       }
 
       case 'writefile': {

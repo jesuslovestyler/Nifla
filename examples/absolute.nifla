@@ -1,0 +1,24 @@
+// Stone 34: 'absolute' — a number's size, never below
+// nothing. Below-zero numbers come back with the sign
+// lifted off; the rest come back as they are, and a
+// fraction keeps its fraction. Until this stone the
+// language had no size word: the Cardnull OS
+// calculator feather — a guest program on bare metal —
+// had been building this by hand as 'absn' since the
+// calculator was young, so the word stands on every
+// door at once, bare metal included.
+say absolute(-7)
+say absolute(7)
+say absolute(0)
+say absolute(-3.5)
+say absolute(2.25)
+say absolute(0 - 12) + absolute(-3)
+make anything(x) {
+    give x
+}
+attempt {
+    let n = absolute(anything("seven"))
+    say n
+} if it fails {
+    say "Caught: " + problem
+}

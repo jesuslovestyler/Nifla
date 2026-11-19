@@ -331,6 +331,7 @@ let builtinTools: [String: BuiltinDef] = [
     "leftover": BuiltinDef(params: ["first", "second"], example: "leftover(17, 5)"),
     "rounddown": BuiltinDef(params: ["value"], example: "rounddown(3.5)"),
     "roundup": BuiltinDef(params: ["value"], example: "roundup(3.5)"),
+    "absolute": BuiltinDef(params: ["value"], example: "absolute(-7)"),
 ]
 
 // The plain-words message for a call to a built-in tool with the
@@ -1345,6 +1346,21 @@ final class Machine {
                 throw NiflaError(line: line, message: "'\(name)' needs a number to round, but it was given \(args[0].described).")
             }
             return .number(name == "rounddown" ? number.rounded(.down) : number.rounded(.up))
+
+        case "absolute":
+            // Stone 34: a number's size, never below
+            // nothing — below-zero numbers come back
+            // with the sign lifted off, the rest come
+            // back as they are, fractions keeping
+            // their fraction. The word was first built
+            // by hand as 'absn' in the Cardnull OS
+            // calculator feather — a bare-metal guest,
+            // which is why this word stands on every
+            // door at once, bare metal included.
+            guard case .number(let number) = args[0] else {
+                throw NiflaError(line: line, message: "'absolute' needs a number to take the size of, but it was given \(args[0].described).")
+            }
+            return .number(abs(number))
 
         case "writefile":
             guard case .text(let path) = args[0] else {

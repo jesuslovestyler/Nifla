@@ -540,8 +540,19 @@ final class BareValidator {
                 try requireNumber(args[0], line: line, doing: "say how many bytes to make")
                 return .bytes
             }
+            if name == "absolute" {
+                // Stone 34: a number's size came to bare
+                // metal with the word itself — the
+                // calculator feather, a bare guest, had
+                // been building it by hand as 'absn'.
+                guard args.count == 1 else {
+                    throw NiflaError(line: line, message: "'absolute' takes 1 value (value), but it was given \(args.count).")
+                }
+                try requireNumber(args[0], line: line, doing: "take the size of")
+                return .number
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, and 'absolute', for a number's size.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -804,6 +815,7 @@ struct BareTranslator {
             return .number
         case .call(let name, _, _):
             if name == "length" { return .number }
+            if name == "absolute" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -2023,6 +2035,18 @@ struct BareTranslator {
         if name == "length" {
             emitExpr(args[0])
             emit("    mov rax, rdx")
+            return
+        }
+        if name == "absolute" {
+            // Stone 34: the value is in rax; a value
+            // below zero is negated, the rest are left
+            // as they stand.
+            emitExpr(args[0])
+            let done = freshLabel("absolute_done")
+            emit("    test rax, rax")
+            emit("    jns \(done)")
+            emit("    neg rax")
+            emit("\(done):")
             return
         }
         if name == "makebytes" {

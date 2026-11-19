@@ -3589,9 +3589,9 @@ make takesText(params) {
 // stones; 'makebytes' and the bytes it makes are mirrored here
 // with Stone 10, one stone after the hosted tools learned them.
 
-let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv", "leftover", "rounddown", "roundup"]
-let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"], ["bytes"], ["first", "second"], ["first", "second"], ["value"], ["value"]]
-let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)", "astext(block)", "wholediv(17, 5)", "leftover(17, 5)", "rounddown(3.5)", "roundup(3.5)"]
+let gBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv", "leftover", "rounddown", "roundup", "absolute"]
+let gBuiltinParams = [["value"], ["list", "separator"], ["text", "separator"], ["text", "start", "count"], ["text", "piece"], ["list", "value"], ["path"], ["path"], ["path", "text"], [], ["count"], ["value"], ["code"], ["list", "index"], ["list", "index", "value"], ["list"], ["object"], ["object", "name"], ["text"], ["first", "second"], ["first", "second"], ["first", "second"], ["bytes"], ["first", "second"], ["first", "second"], ["value"], ["value"], ["value"]]
+let gBuiltinExamples = ["length(\"Tyler\")", "join(words, \" \")", "split(\"a,b\", \",\")", "part(\"Tyler\", 0, 2)", "find(\"Tyler\", \"y\")", "append(items, 4)", "readfile(\"notes.txt\")", "readbytes(\"notes.txt\")", "writefile(\"notes.txt\", \"Shalom\")", "arguments()", "makebytes(8)", "sayerr(\"Mind the step.\")", "exitwith(1)", "removeat(items, 0)", "insertat(items, 0, 4)", "sorted(items)", "fieldnames(person)", "removefield(person, \"town\")", "asnumber(\"620\")", "bitand(12, 10)", "bitor(12, 10)", "bitxor(12, 10)", "astext(block)", "wholediv(17, 5)", "leftover(17, 5)", "rounddown(3.5)", "roundup(3.5)", "absolute(-7)"]
 
 make builtinNamesList() {
     give gBuiltinNames
@@ -3924,6 +3924,15 @@ make runBuiltin(name, args, line) {
         // Stone 32: the host's rounding words, as
         // 'rounddown' above.
         give okVal(vNumber(roundup(args[0].num)))
+    }
+    if name == "absolute" {
+        if args[0].kind != "number" {
+            give errAt(line, "'absolute' needs a number to take the size of, but it was given " + described(args[0]) + ".")
+        }
+        // Stone 34: the host's size word, as
+        // 'rounddown' above — it cannot fail on a
+        // number.
+        give okVal(vNumber(absolute(args[0].num)))
     }
     if name == "writefile" {
         if args[0].kind != "text" {

@@ -2684,6 +2684,39 @@ loops now reaches its last line, where one loop of
 two million still stops the machine in silence, as
 bare guards do.
 
+## Stone 34 — `absolute`: a number's size, on every door
+
+One word, named by a program that had been building
+it by hand. The Cardnull OS calculator feather
+reaches for a number's size at every turn of its
+reckoning — is this sum too big, is this share safe
+— and since the calculator was young it had carried
+its own little function for the work: `absn`, "a
+number's size, never below nothing," called six
+times over in one file. What a program of the
+language builds by hand, stone after stone, the
+language learns to say: `absolute(value)` gives a
+number's size — a below-zero number comes back with
+the sign lifted off, any other comes back as it is,
+and a fraction keeps its fraction.
+
+Because the program that named the want is a guest
+on bare metal, the word stands on every door at
+once: the interpreter, the compiler, the web, the
+self-host, and both bare compilers, where the size
+of a machine word is three instructions and a
+negation. A new bare proof, `nifla-tools`, begins
+here — each word that comes to bare metal in this
+chain adds its line to that program, and the
+emulated screen reads the lines back.
+
+Proofs: `absolute` and `badabsolute` join the
+suites. Interpreted 58/58, compiled 157/157, voice
+6/6, self-hosted 58/58, primer and tutorial books
+true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green, the new bare tools proof among them.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

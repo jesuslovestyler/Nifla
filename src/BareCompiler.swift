@@ -578,8 +578,21 @@ final class BareValidator {
                 try requireNumber(args[1], line: line, doing: "be worked on bit by bit")
                 return .number
             }
+            if name == "leftover" {
+                // Stone 37: what a dividing leaves came
+                // to bare metal — the kernel's clock
+                // prelude had been spelling it longhand,
+                // subtracting the quotient times the
+                // divisor, at every face it draws.
+                guard args.count == 2 else {
+                    throw NiflaError(line: line, message: "'leftover' takes 2 values (first, second), but it was given \(args.count).")
+                }
+                try requireNumber(args[0], line: line, doing: "be divided")
+                try requireNumber(args[1], line: line, doing: "be divided")
+                return .number
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, and the bit words 'bitand', 'bitor' and 'bitxor'.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, the bit words 'bitand', 'bitor' and 'bitxor', and 'leftover', for what a dividing leaves.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -845,6 +858,7 @@ struct BareTranslator {
             if name == "absolute" { return .number }
             if name == "smallest" || name == "largest" { return .number }
             if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
+            if name == "leftover" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -2116,6 +2130,26 @@ struct BareTranslator {
             case "bitor": emit("    or rax, rcx")
             default: emit("    xor rax, rcx")
             }
+            return
+        }
+        if name == "leftover" {
+            // Stone 37: the machine's division leaves
+            // the remainder in rdx beside the quotient
+            // in rax — the word takes the remainder.
+            // A divisor of zero stops the machine, the
+            // same guard bare division itself keeps.
+            // The remainder carries the divided
+            // number's sign, as it does on every door.
+            emitExpr(args[0])
+            emit("    push rax")
+            emitExpr(args[1])
+            emit("    mov rcx, rax")
+            emit("    pop rax")
+            emit("    test rcx, rcx")
+            emit("    je __halt_trap")
+            emit("    cqo")
+            emit("    idiv rcx")
+            emit("    mov rax, rdx")
             return
         }
         if name == "makebytes" {

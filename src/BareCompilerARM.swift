@@ -202,6 +202,7 @@ struct BareTranslatorARM {
             if name == "absolute" { return .number }
             if name == "smallest" || name == "largest" { return .number }
             if name == "bitand" || name == "bitor" || name == "bitxor" { return .number }
+            if name == "leftover" { return .number }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1375,6 +1376,25 @@ struct BareTranslatorARM {
             case "bitor": emit("    orr x0, x0, x2")
             default: emit("    eor x0, x0, x2")
             }
+            return
+        }
+        if name == "leftover" {
+            // Stone 37: this machine's division gives
+            // the quotient only, so the remainder is
+            // the divided number less the quotient
+            // times the divisor — counted by the same
+            // steps the hosted doors count by, carrying
+            // the divided number's sign. A divisor of
+            // zero stops the machine, the same guard
+            // bare division itself keeps.
+            emitExpr(args[0])
+            emit("    str x0, [sp, #-16]!")
+            emitExpr(args[1])
+            emit("    mov x2, x0")
+            emit("    ldr x0, [sp], #16")
+            emit("    cbz x2, __halt_trap")
+            emit("    sdiv x3, x0, x2")
+            emit("    msub x0, x3, x2, x0")
             return
         }
         if name == "makebytes" {

@@ -2786,6 +2786,42 @@ primer and tutorial books true, web corpus byte
 for byte, feather, feathercheck, selfmade,
 web-floor and every bare proof green.
 
+## Stone 37 — `leftover` comes to bare metal
+
+Stone 31 gave the hosted doors `leftover`, and bare
+metal went on spelling it longhand. The spelling
+stands in the kernel's clock prelude, at every face
+the clock draws: the count of seconds less the
+hours times their seconds is what the hour's
+dividing leaves; the rest less the minutes times
+theirs is what the minute's dividing leaves. Twice
+in one small function, the word's whole work done
+in the open because bare metal had no word for it.
+
+Now it has. On the x86 door the machine's division
+leaves the remainder in a register beside the
+quotient, and the word takes it; on the ARM door
+the remainder is counted by the hosted steps — the
+divided number less the quotient times the divisor
+— in two instructions. Either way the answer
+carries the divided number's sign, as it does on
+every door, and a divisor of zero stops the
+machine behind the same guard bare division itself
+keeps. The clock's longhand and the word agree by
+construction: they were always the same reckoning.
+
+Proofs: no suite count changes — the word was
+proved on the hosted doors at Stone 31. The bare
+tools proof gains its fourth line ("leftover 2 -2"
+— the sign carried, on the emulated screen), the
+tools program also boots on the ARM machine and
+speaks every line over the serial line, and the
+primer's leftover section gains a bare example.
+Interpreted 60/60, compiled 159/159, voice 6/6,
+self-hosted 60/60, primer and tutorial books true,
+web corpus byte for byte, feather, feathercheck,
+selfmade, web-floor and every bare proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

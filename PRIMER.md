@@ -891,6 +891,21 @@ in the open, as `n - wholediv(n, d) * d` — the
 self-made feather checker counts it so at every limb
 of its reckoning and every digit of its counts.)
 
+(Stone 37. The word stands on bare metal too: the
+machine's own division leaves the remainder beside
+the quotient, and the word takes it, carrying the
+divided number's sign as it does on every door. The
+kernel's clock prelude had been spelling the
+leftover longhand — the count less the hours times
+their seconds, the rest less the minutes times
+theirs — at every face it draws. A divisor of zero
+stops the bare machine, the same guard bare
+division itself keeps.)
+
+```nifla-bare
+say leftover(17, 5)
+```
+
 ### `rounddown`, `roundup` — rounding to a whole number
 
 `rounddown(value)` gives the whole number at or

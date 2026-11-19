@@ -346,7 +346,6 @@ struct BareTranslatorARM {
         out.append("__heap_cursor:  .skip 8")
         out.append("__heap_limit:   .skip 8")
         out.append("__tick_divisor: .skip 8")
-        out.append("__guard_passes: .skip 8")
         out.append("__guard_depth:  .skip 8")
         out.append("__floor_inputs: .skip 128")
         out.append("__video_fb:     .skip 8")
@@ -1018,11 +1017,14 @@ struct BareTranslatorARM {
         scopes.removeLast()
     }
 
-    private mutating func emitGuardTick() {
-        emit("    ldr x9, =__guard_passes")
-        emit("    ldr x10, [x9]")
+    // One pass of one loop, counted in that loop's own frame
+    // slot (Stone 33): the million-pass guard stands over one
+    // loop's run, not over the whole program, so each loop is
+    // given a fresh count of its own as it starts.
+    private mutating func emitGuardTick(_ passEntry: (offset: Int, kind: BareKind)) {
+        emit("    ldr x10, [x29, #-\(passEntry.offset)]")
         emit("    add x10, x10, #1")
-        emit("    str x10, [x9]")
+        emit("    str x10, [x29, #-\(passEntry.offset)]")
         emit("    ldr x11, =1000000")
         emit("    cmp x10, x11")
         emit("    b.gt __halt_trap")
@@ -1093,12 +1095,14 @@ struct BareTranslatorARM {
             emit("\(endLabel):")
 
         case .whileLoop(let condition, let body, _):
+            let passEntry = declareVar(freshLabel("guard_passes"), kind: .number)
             let topLabel = freshLabel("while")
             let endLabel = freshLabel("endwhile")
+            emit("    str xzr, [x29, #-\(passEntry.offset)]")
             emit("\(topLabel):")
             emitExpr(condition)
             emit("    cbz x0, \(endLabel)")
-            emitGuardTick()
+            emitGuardTick(passEntry)
             emitBlock(body)
             emit("    b \(topLabel)")
             emit("\(endLabel):")
@@ -1106,11 +1110,13 @@ struct BareTranslatorARM {
         case .repeatLoop(let count, let body, _):
             let countEntry = declareVar(freshLabel("repeat_count"), kind: .number)
             let counterEntry = declareVar(freshLabel("repeat_done"), kind: .number)
+            let passEntry = declareVar(freshLabel("guard_passes"), kind: .number)
             emitExpr(count)
             emit("    str x0, [x29, #-\(countEntry.offset)]")
             emit("    cmp x0, #0")
             emit("    b.lt __halt_trap")
             emit("    str xzr, [x29, #-\(counterEntry.offset)]")
+            emit("    str xzr, [x29, #-\(passEntry.offset)]")
             let topLabel = freshLabel("repeat")
             let endLabel = freshLabel("endrepeat")
             emit("\(topLabel):")
@@ -1118,7 +1124,7 @@ struct BareTranslatorARM {
             emit("    ldr x9, [x29, #-\(countEntry.offset)]")
             emit("    cmp x0, x9")
             emit("    b.hs \(endLabel)")
-            emitGuardTick()
+            emitGuardTick(passEntry)
             emitBlock(body)
             emit("    ldr x0, [x29, #-\(counterEntry.offset)]")
             emit("    add x0, x0, #1")

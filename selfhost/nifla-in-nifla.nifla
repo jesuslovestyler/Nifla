@@ -1907,7 +1907,6 @@ make parseObjectLiteral(openToken) {
 
 let gFnNames = []
 let gFnDefs = []
-let gLoopPasses = 0
 let gCallDepth = 0
 let gArgs = []
 
@@ -1915,12 +1914,17 @@ make okDone() {
     give { ok: true, gave: false, value: NOTHING }
 }
 
-// The runaway guard: a kindness limit on the total number of
-// loop passes in one run, across every loop in the program.
-make tickLoop(line) {
-    gLoopPasses = gLoopPasses + 1
-    if gLoopPasses > 1000000 {
-        give errAt(line, "This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.")
+// The runaway guard, re-counted by Stone 33 the way every
+// mirror counts it: a kindness limit of a million passes on
+// ONE loop's run. The count lives in the loop's own frame
+// (its 'passes' field, starting at zero when the frame is
+// laid down), so each loop that starts is given a fresh
+// count of its own, and a program of many loops, each
+// finishing, may pass a million times in all and run on.
+make tickLoop(top) {
+    top.passes = top.passes + 1
+    if top.passes > 1000000 {
+        give errAt(top.stmt.line, "This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.")
     }
     give okVal(NOTHING)
 }
@@ -2342,17 +2346,17 @@ make dispatchStmt(blockFrame, s) {
         give mDone
     }
     if s.type == "while" {
-        append(mStack, { kind: "whileStmt", stmt: s, scope: blockFrame.scope, stage: 0, bodyEmpty: length(s.body) == 0, condReady: false, condResult: NOTHING })
+        append(mStack, { kind: "whileStmt", stmt: s, scope: blockFrame.scope, stage: 0, passes: 0, bodyEmpty: length(s.body) == 0, condReady: false, condResult: NOTHING })
         pushExpr(s.condition, blockFrame.scope)
         give mDone
     }
     if s.type == "repeat" {
-        append(mStack, { kind: "repeatStmt", stmt: s, scope: blockFrame.scope, stage: 0, n: 0, done: 0, bodyEmpty: length(s.body) == 0 })
+        append(mStack, { kind: "repeatStmt", stmt: s, scope: blockFrame.scope, stage: 0, passes: 0, n: 0, done: 0, bodyEmpty: length(s.body) == 0 })
         pushExpr(s.count, blockFrame.scope)
         give mDone
     }
     if s.type == "for" {
-        append(mStack, { kind: "forStmt", stmt: s, scope: blockFrame.scope, stage: 0, items: [], index: 0 })
+        append(mStack, { kind: "forStmt", stmt: s, scope: blockFrame.scope, stage: 0, passes: 0, items: [], index: 0 })
         pushExpr(s.over, blockFrame.scope)
         give mDone
     }
@@ -2453,7 +2457,7 @@ make consumeWhile(top) {
             finishFrame(mDone, false)
             give mDone
         }
-        let t = tickLoop(top.stmt.line)
+        let t = tickLoop(top)
         if t.ok == false {
             finishFrame(t, false)
             give mDone
@@ -2499,7 +2503,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2531,7 +2535,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2563,7 +2567,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2595,7 +2599,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2627,7 +2631,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2659,7 +2663,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2691,7 +2695,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2723,7 +2727,7 @@ make waitLoop(top) {
                 finishFrame(mDone, false)
                 give mDone
             }
-            let t = tickLoop(top.stmt.line)
+            let t = tickLoop(top)
             if t.ok == false {
                 finishFrame(t, false)
                 give mDone
@@ -2783,7 +2787,7 @@ make consumeRepeat(top) {
         finishFrame(mDone, false)
         give mDone
     }
-    let t = tickLoop(top.stmt.line)
+    let t = tickLoop(top)
     if t.ok == false {
         finishFrame(t, false)
         give mDone
@@ -2801,7 +2805,7 @@ make repeatWait(top) {
         finishFrame(mDone, false)
         give mDone
     }
-    let t = tickLoop(top.stmt.line)
+    let t = tickLoop(top)
     if t.ok == false {
         finishFrame(t, false)
         give mDone
@@ -2840,7 +2844,7 @@ make repeatPass(top) {
         finishFrame(mDone, false)
         give false
     }
-    let t = tickLoop(top.stmt.line)
+    let t = tickLoop(top)
     if t.ok == false {
         finishFrame(t, false)
         give false
@@ -2887,7 +2891,7 @@ make consumeFor(top) {
         finishFrame(mDone, false)
         give mDone
     }
-    let t = tickLoop(top.stmt.line)
+    let t = tickLoop(top)
     if t.ok == false {
         finishFrame(t, false)
         give mDone

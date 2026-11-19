@@ -1623,8 +1623,6 @@ struct BareTranslator {
         out.append("    .skip 32")
         out.append("__disk_id_buf:")
         out.append("    .skip 512")
-        out.append("__guard_passes:")
-        out.append("    .skip 8")
         out.append("__guard_depth:")
         out.append("    .skip 8")
         out.append("__floor_inputs:")
@@ -1726,10 +1724,14 @@ struct BareTranslator {
         scopes.removeLast()
     }
 
-    private mutating func emitGuardTick() {
-        emit("    mov rax, [__guard_passes]")
+    // One pass of one loop, counted in that loop's own frame
+    // slot (Stone 33): the million-pass guard stands over one
+    // loop's run, not over the whole program, so each loop is
+    // given a fresh count of its own as it starts.
+    private mutating func emitGuardTick(_ passEntry: (offset: Int, kind: BareKind)) {
+        emit("    mov rax, [rbp - \(passEntry.offset)]")
         emit("    inc rax")
-        emit("    mov [__guard_passes], rax")
+        emit("    mov [rbp - \(passEntry.offset)], rax")
         emit("    cmp rax, 1000000")
         emit("    jg __halt_trap")
     }
@@ -1802,13 +1804,15 @@ struct BareTranslator {
             emit("\(endLabel):")
 
         case .whileLoop(let condition, let body, _):
+            let passEntry = declareVar(freshLabel("guard_passes"), kind: .number)
             let topLabel = freshLabel("while")
             let endLabel = freshLabel("endwhile")
+            emit("    mov qword ptr [rbp - \(passEntry.offset)], 0")
             emit("\(topLabel):")
             emitExpr(condition)
             emit("    test rax, rax")
             emit("    je \(endLabel)")
-            emitGuardTick()
+            emitGuardTick(passEntry)
             emitBlock(body)
             emit("    jmp \(topLabel)")
             emit("\(endLabel):")
@@ -1816,18 +1820,20 @@ struct BareTranslator {
         case .repeatLoop(let count, let body, _):
             let countEntry = declareVar(freshLabel("repeat_count"), kind: .number)
             let counterEntry = declareVar(freshLabel("repeat_done"), kind: .number)
+            let passEntry = declareVar(freshLabel("guard_passes"), kind: .number)
             emitExpr(count)
             emit("    mov [rbp - \(countEntry.offset)], rax")
             emit("    test rax, rax")
             emit("    js __halt_trap")
             emit("    mov qword ptr [rbp - \(counterEntry.offset)], 0")
+            emit("    mov qword ptr [rbp - \(passEntry.offset)], 0")
             let topLabel = freshLabel("repeat")
             let endLabel = freshLabel("endrepeat")
             emit("\(topLabel):")
             emit("    mov rax, [rbp - \(counterEntry.offset)]")
             emit("    cmp rax, [rbp - \(countEntry.offset)]")
             emit("    jae \(endLabel)")
-            emitGuardTick()
+            emitGuardTick(passEntry)
             emitBlock(body)
             emit("    mov rax, [rbp - \(counterEntry.offset)]")
             emit("    inc rax")

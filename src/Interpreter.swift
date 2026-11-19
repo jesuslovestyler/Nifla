@@ -616,11 +616,16 @@ func firstFloorLine(in expr: Expr) -> Int? {
 }
 
 final class Interpreter {
-    // The runaway guard (Stone 2): a kindness limit on the total number
-    // of loop passes in one run, across every loop in the program. A
-    // loop that would spin forever is stopped with a plain-words error
-    // instead of hanging.
-    private var loopPasses = 0
+    // The runaway guard (Stone 2, re-counted by Stone 33): a kindness
+    // limit of a million passes on ONE loop's run — each time a loop
+    // starts, it is given a fresh count of its own, kept on this stack
+    // (a loop inside another keeps its own count under the outer
+    // loop's). A loop that would spin forever is stopped with a
+    // plain-words error instead of hanging; a program of many loops,
+    // each finishing, may pass a million times in all and run on —
+    // a forever-running program of finishing loops (an operating
+    // system's main loop, say) is not a runaway.
+    private var loopBudgets: [Int] = []
     private let loopPassLimit = 1_000_000
 
     // The words handed to the program when it was started, after
@@ -638,10 +643,21 @@ final class Interpreter {
     private let callDepthLimit = 500
 
     private func tickLoop(line: Int) throws {
-        loopPasses += 1
-        if loopPasses > loopPassLimit {
+        if loopBudgets.isEmpty { loopBudgets.append(0) }
+        loopBudgets[loopBudgets.count - 1] += 1
+        if loopBudgets[loopBudgets.count - 1] > loopPassLimit {
             throw NiflaError(line: line, message: "This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.")
         }
+    }
+
+    // Runs one loop's whole run under a fresh pass budget of its
+    // own (Stone 33): the budget is laid down as the loop starts
+    // and lifted however the loop ends — finished, stopped by a
+    // problem, or left by a 'give' travelling out of it.
+    private func withLoopBudget<T>(_ body: () throws -> T) throws -> T {
+        loopBudgets.append(0)
+        defer { loopBudgets.removeLast() }
+        return try body()
     }
 
     func run(_ program: [Stmt]) throws {
@@ -703,16 +719,18 @@ final class Interpreter {
             // does: 'let' inside is new each pass, while setting a
             // variable reaches the one outside — that is how counting
             // works.
-            while true {
-                let value = try evaluate(condition, in: scope)
-                guard case .boolean(let flag) = value else {
-                    throw NiflaError(line: line, message: "'while' needs a true or false value to decide with, but here it was given \(value.described). Try a comparison, like: while years < 40 { ... }")
-                }
-                if !flag { break }
-                try tickLoop(line: line)
-                let child = Scope(parent: scope)
-                for inner in body {
-                    try execute(inner, in: child)
+            try withLoopBudget {
+                while true {
+                    let value = try evaluate(condition, in: scope)
+                    guard case .boolean(let flag) = value else {
+                        throw NiflaError(line: line, message: "'while' needs a true or false value to decide with, but here it was given \(value.described). Try a comparison, like: while years < 40 { ... }")
+                    }
+                    if !flag { break }
+                    try tickLoop(line: line)
+                    let child = Scope(parent: scope)
+                    for inner in body {
+                        try execute(inner, in: child)
+                    }
                 }
             }
 
@@ -730,13 +748,15 @@ final class Interpreter {
                 throw NiflaError(line: line, message: "'repeat' was told to run \(formatNumber(count)) times, but a loop can only run a whole number of times. Use a whole number instead, like \(formatNumber(count.rounded(.down))) or \(formatNumber(count.rounded(.up))).")
             }
             var done = 0.0
-            while done < count {
-                try tickLoop(line: line)
-                let child = Scope(parent: scope)
-                for inner in body {
-                    try execute(inner, in: child)
+            try withLoopBudget {
+                while done < count {
+                    try tickLoop(line: line)
+                    let child = Scope(parent: scope)
+                    for inner in body {
+                        try execute(inner, in: child)
+                    }
+                    done += 1
                 }
-                done += 1
             }
 
         case .forEach(let name, let overExpr, let body, let line):
@@ -756,12 +776,14 @@ final class Interpreter {
             default:
                 throw NiflaError(line: line, message: "'for' needs a list, some text, or a block of bytes to walk through, but here it was given \(over.described). Write it like: for item in items { ... }")
             }
-            for item in items {
-                try tickLoop(line: line)
-                let child = Scope(parent: scope)
-                child.declare(name, item)
-                for inner in body {
-                    try execute(inner, in: child)
+            try withLoopBudget {
+                for item in items {
+                    try tickLoop(line: line)
+                    let child = Scope(parent: scope)
+                    child.declare(name, item)
+                    for inner in body {
+                        try execute(inner, in: child)
+                    }
                 }
             }
 

@@ -432,9 +432,12 @@ n still at least 1?" is asked before every round;
 inside, the program says `n` and then makes `n`
 smaller — and that making-smaller is what lets the
 loop ever end. A loop whose question never turns false
-would run forever, so the language stands guard: a
-program whose loops pass a million times without
-finishing is stopped and told so, in plain words.
+would run forever, so the language stands guard: one
+loop that passes a million times without finishing is
+stopped and told so, in plain words. The million belongs
+to that one loop — each loop you start gets a fresh
+count of its own, so a program with many loops, each
+finishing, may pass a million times in all.
 
 **Your turn.** Count up instead of down: start at 1 and
 say 1, 2, 3, 4, 5, one per line, with a `while`.

@@ -570,7 +570,11 @@ struct FunctionDef {
 // far, and the two kindness guards (loop passes, call depth), with
 // the interpreter's own plain words for every problem.
 final class Machine {
-    private var loopPasses = 0
+    // The runaway guard, re-counted by Stone 33 the way the
+    // interpreter counts it: a million passes for ONE loop's run,
+    // each loop starting with a fresh count of its own, kept on
+    // this stack — never one count shared by the whole run.
+    private var loopBudgets: [Int] = []
     private let loopPassLimit = 1_000_000
 
     private var functions: [String: FunctionDef] = [:]
@@ -592,10 +596,21 @@ final class Machine {
     }
 
     func tickLoop(line: Int) throws {
-        loopPasses += 1
-        if loopPasses > loopPassLimit {
+        if loopBudgets.isEmpty { loopBudgets.append(0) }
+        loopBudgets[loopBudgets.count - 1] += 1
+        if loopBudgets[loopBudgets.count - 1] > loopPassLimit {
             throw NiflaError(line: line, message: "This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.")
         }
+    }
+
+    // Runs one loop's whole run under a fresh pass budget of its
+    // own (Stone 33): the translated loop sits inside this call,
+    // and the budget is lifted however the loop ends — finished,
+    // stopped by a problem, or left by a 'give' travelling out.
+    func loopBudget(_ body: () throws -> Void) throws {
+        loopBudgets.append(0)
+        defer { loopBudgets.removeLast() }
+        try body()
     }
 
     // --- variables -------------------------------------------------

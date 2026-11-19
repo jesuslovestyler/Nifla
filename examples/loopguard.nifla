@@ -1,0 +1,11 @@
+// Stone 33: a runaway loop still traps, even nested inside a
+// loop that would finish. The inner loop never ends, so its
+// own million-pass budget stops it, naming the inner loop's
+// line — the outer loop's three rounds never get the chance.
+let n = 0
+while n < 3 {
+    while true {
+    }
+    n = n + 1
+}
+say n

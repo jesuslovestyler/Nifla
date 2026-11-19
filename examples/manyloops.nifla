@@ -1,0 +1,14 @@
+// Stone 33: the runaway guard stands over ONE loop's run, not
+// over the whole program. This program passes a million times
+// and more in all — twelve hundred rounds of a thousand passes
+// each, 1,200,000 passes — but no single loop's run comes near
+// its own million, so the program runs to the end and says how
+// many rounds it finished. Before Stone 33, the shared count
+// would have stopped it partway through.
+let rounds = 0
+repeat 1200 {
+    repeat 1000 {
+    }
+    rounds = rounds + 1
+}
+say rounds

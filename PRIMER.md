@@ -229,9 +229,15 @@ say "Done"
 Done
 ```
 
-A guard stands over loops: a program whose loops pass a
+A guard stands over every loop: one loop that passes a
 million times without finishing is stopped and told so,
-in plain words — a runaway program helps no one.
+in plain words — a runaway program helps no one. The
+count belongs to the one loop's run (Stone 33): each
+loop that starts is given a fresh million of its own, so
+a program of many loops, each finishing, may pass a
+million times in all and run on — a program that runs
+forever by design, like an operating system's main loop
+of finishing loops, is not a runaway.
 
 ### `repeat` — again, a counted number of times
 

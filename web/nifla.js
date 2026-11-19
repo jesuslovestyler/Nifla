@@ -10,9 +10,10 @@
 // runs and refuses what it can prove wrong, in the same
 // plain words the Swift implementation speaks; the run
 // answers in the same plain words too, line numbers and all.
-// The runaway guards are the same: a million loop passes,
-// five hundred calls deep, sixteen megabytes in one block
-// of bytes.
+// The runaway guards are the same: a million passes for
+// one loop's run (each loop starts with a fresh count of
+// its own, Stone 33), five hundred calls deep, sixteen
+// megabytes in one block of bytes.
 //
 // What this door does NOT run, honestly: bare metal,
 // guests and feathers, and the compiler. Those belong to
@@ -3005,10 +3006,13 @@ class Scope {
 
 class Interpreter {
   constructor(store, args) {
-    // The runaway guard: a kindness limit on the total
-    // number of loop passes in one run, across every loop
-    // in the program.
-    this.loopPasses = 0;
+    // The runaway guard, re-counted by Stone 33 the way
+    // the Swift interpreter counts it: a kindness limit of
+    // a million passes on ONE loop's run — each time a loop
+    // starts, it is given a fresh count of its own, kept on
+    // this stack. A program of many loops, each finishing,
+    // may pass a million times in all and run on.
+    this.loopBudgets = [];
     this.loopPassLimit = 1000000;
     // The call-depth guard: how many calls are running at
     // once, one inside another.
@@ -3027,9 +3031,23 @@ class Interpreter {
   }
 
   tickLoop(line) {
-    this.loopPasses += 1;
-    if (this.loopPasses > this.loopPassLimit) {
+    if (this.loopBudgets.length === 0) this.loopBudgets.push(0);
+    const top = this.loopBudgets.length - 1;
+    this.loopBudgets[top] += 1;
+    if (this.loopBudgets[top] > this.loopPassLimit) {
       throw new NiflaError(line, 'This loop ran more than a million times and was stopped — it may never end. Check the condition, and make sure something inside the loop changes each time around, so it can finish.');
+    }
+  }
+
+  // Runs one loop's whole run under a fresh pass budget of
+  // its own (Stone 33): the budget is laid down as the loop
+  // starts and lifted however the loop ends.
+  withLoopBudget(body) {
+    this.loopBudgets.push(0);
+    try {
+      body();
+    } finally {
+      this.loopBudgets.pop();
     }
   }
 
@@ -3102,16 +3120,18 @@ class Interpreter {
         // inside is new each pass, while setting a variable
         // reaches the one outside — that is how counting
         // works.
-        while (true) {
-          const value = this.evaluate(statement.cond, scope);
-          if (typeof value !== 'boolean') {
-            throw new NiflaError(statement.line, "'while' needs a true or false value to decide with, but here it was given " + describedOf(value) + '. Try a comparison, like: while years < 40 { ... }');
+        this.withLoopBudget(() => {
+          while (true) {
+            const value = this.evaluate(statement.cond, scope);
+            if (typeof value !== 'boolean') {
+              throw new NiflaError(statement.line, "'while' needs a true or false value to decide with, but here it was given " + describedOf(value) + '. Try a comparison, like: while years < 40 { ... }');
+            }
+            if (!value) break;
+            this.tickLoop(statement.line);
+            const child = new Scope(scope);
+            for (const inner of statement.body) this.execute(inner, child);
           }
-          if (!value) break;
-          this.tickLoop(statement.line);
-          const child = new Scope(scope);
-          for (const inner of statement.body) this.execute(inner, child);
-        }
+        });
         return;
       }
 
@@ -3130,12 +3150,14 @@ class Interpreter {
           throw new NiflaError(statement.line, "'repeat' was told to run " + formatNumber(count) + ' times, but a loop can only run a whole number of times. Use a whole number instead, like ' + formatNumber(Math.floor(count)) + ' or ' + formatNumber(Math.ceil(count)) + '.');
         }
         let done = 0;
-        while (done < count) {
-          this.tickLoop(statement.line);
-          const child = new Scope(scope);
-          for (const inner of statement.body) this.execute(inner, child);
-          done += 1;
-        }
+        this.withLoopBudget(() => {
+          while (done < count) {
+            this.tickLoop(statement.line);
+            const child = new Scope(scope);
+            for (const inner of statement.body) this.execute(inner, child);
+            done += 1;
+          }
+        });
         return;
       }
 
@@ -3154,12 +3176,14 @@ class Interpreter {
         } else {
           throw new NiflaError(statement.line, "'for' needs a list, some text, or a block of bytes to walk through, but here it was given " + describedOf(over) + '. Write it like: for item in items { ... }');
         }
-        for (const item of items) {
-          this.tickLoop(statement.line);
-          const child = new Scope(scope);
-          child.declare(statement.name, item);
-          for (const inner of statement.body) this.execute(inner, child);
-        }
+        this.withLoopBudget(() => {
+          for (const item of items) {
+            this.tickLoop(statement.line);
+            const child = new Scope(scope);
+            child.declare(statement.name, item);
+            for (const inner of statement.body) this.execute(inner, child);
+          }
+        });
         return;
       }
 

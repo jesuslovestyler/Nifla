@@ -2634,6 +2634,56 @@ ARM edition and the Raspian bar that gates it. No
 toolbox gap named by the language's own tools
 remains open.
 
+## Stone 33 — the guard re-counted: a million passes for one loop
+
+The runaway guard's number never changed, but its
+counting did. Since Stone 2 the million-pass budget
+was counted once for the whole run, across every
+loop in the program — a kindness limit written when
+every program was a short errand that ends. Cardnull
+OS 2, written in Nifla, named the cost: an operating
+system's main loop runs forever on purpose, a
+thousand finishing loops deep, and the shared count
+stopped it mid-work — the desktop froze after some
+two hundred presses of the paint brush, the counter
+standing at a million and one, the heap nowhere near
+its limit. The guard was doing exactly what it was
+told; what it was told no longer fit.
+
+The budget now belongs to one loop's run, the way
+the compiler's own comment always said it should:
+each time a loop starts, it is given a fresh count
+of its own — a stack of counts in the interpreter
+and the compiled runtime, a count kept in the
+loop's own frame in the self-host, a frame slot of
+its own in both bare compilers, a stack in the web
+interpreter — so every door counts the same way. A
+single loop that passes a million times is stopped
+in the same plain words, at its own line, exactly as
+before: the protection is untouched. But a program
+of many loops, each finishing, may pass a million
+times in all and run on, and a forever-running
+program of finishing loops no longer dies for the
+crime of running long. This cures the OS's paint
+and calculator freezes at the root — they were
+never the brush's or the calculator's fault; they
+were this count, spent by every loop the system had
+ever run since it booted.
+
+Proofs: two new examples join the suites —
+`manyloops` passes 1,200,000 times across twelve
+hundred finishing rounds and runs to the end, and
+`loopguard` shows a runaway loop nested inside a
+finishing one still stopped at its own line.
+Interpreted 56/56, compiled 155/155, voice 6/6,
+self-hosted 56/56, primer and tutorial books true,
+web corpus byte for byte, feather, feathercheck,
+selfmade, web-floor and every bare proof green; and
+on bare metal itself, a program of two 700,000-pass
+loops now reaches its last line, where one loop of
+two million still stops the machine in silence, as
+bare guards do.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

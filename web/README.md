@@ -48,9 +48,10 @@ misspelled name, a wrong-kind tool argument, or a maybe-value
 used as surely-there is refused **before** anything runs, in
 the same plain words the Swift checker speaks. Runtime
 problems are answered in the same plain words too, with line
-numbers, and the runaway guards are the same: a million loop
-passes, five hundred calls deep, sixteen megabytes in one
-block of bytes.
+numbers, and the runaway guards are the same: a million
+passes for one loop's run (each loop starts with a fresh
+count of its own, Stone 33), five hundred calls deep,
+sixteen megabytes in one block of bytes.
 
 **Not on this door:** bare metal, guests and feathers, and
 the compiler. Those belong to real metal and to `niflac`.

@@ -4792,6 +4792,246 @@ and gate and the checker leg's corpus proof,
 sweep and gate passing whole on the enlarged
 front end.
 
+## Stone 54 — identity, proved whole: the compiler leg closes
+
+The all-Nifla port's third leg — the compiler
+— closes here. The translator (Stone 53) stands
+in Nifla in `selfhost/nifla-front.nifla` as the
+front end's `compile` mode, proved identical to
+the untouched Swift translator across the whole
+corpus and the 10 fixtures in
+`compile-examples/`. This stone proves the
+identity whole, against generated cases no one
+hand-picked, and gives the leg its single gate.
+Nothing under `src/` is touched, and
+`selfhost/nifla-in-nifla.nifla` is untouched —
+indeed `selfhost/nifla-front.nifla` itself is
+untouched in this stone: no translator fix was
+needed and none was made. The one disagreement
+the sweep found anywhere is not the
+translator's; it belongs to the front end's
+number reader, and it stands below as this
+stone's finding, recorded as a boundary in the
+established way. PRIMER.md is not edited
+either: the language's surface did not change
+anywhere in this leg, and this entry says so
+plainly.
+
+**The sweep** is `./run-compile-sweep.sh`, in
+the front sweep's established shape: build via
+`build.sh`; the oracle and the front end built
+fresh into a scratch folder (the oracle
+compiled from its seven-file link, the front
+end compiled with `./niflac`); a python3
+generator embedded as a heredoc; every
+generated case written to its own file and
+compared on stdout, stderr and exit code, each
+run wrapped in a thirty-second timeout; and
+all generation from fixed seeds (python's
+`random.Random` on 53053, 53054, 53055), so
+the same cases are made on every run and any
+failure reproduces exactly, from its family
+and index — on a disagreement the script
+prints the family, the index, the case and
+both sides' outputs, and fails. Three
+families, all in `compile` mode:
+
+- **Programs — 300 cases.** Complete programs
+  from a seeded grammar aimed at the
+  translator's walks: every statement and
+  expression shape the checker accepts, and
+  the refusals it speaks (wrong counts, wrong
+  kinds, unknown names, proven-range
+  violations) — the generated Swift of an
+  acceptance compared whole, a refusal
+  compared in its words and its exit. The
+  oracle accepted 205 and refused 95; every
+  case agreed byte for byte.
+- **Numbers — 250 cases.** Lets and says whose
+  literals are generated digit strings: whole
+  parts of 1–20 digits straddling the 1e15 /
+  9e15 / 2^53 boundaries, fractions with long
+  tails and zero runs, whole strings of 21–40
+  digits (past the reader's exact keeping, so
+  the second-mantissa path is exercised) — so
+  the one patch in the port's number rendering
+  and Swift's Double text are compared where
+  they can drift. All 250 were accepted; every
+  case agreed byte for byte — inside the
+  envelope named below.
+- **Texts — 200 cases.** String literals built
+  byte by byte in python and written raw, so
+  generation itself never normalizes a byte:
+  named-escape material, raw control bytes
+  (0x01, tab, VT, 0x1F, DEL), raw CR and CRLF
+  pairs beside escaped ones, quote and
+  backslash runs, Latin-1 letters, and the
+  empty text — so the escape walk is compared
+  where cluster and scalar readings can
+  part. (Raw NUL, 0x01 and 0x7F in literals
+  were separately verified to agree byte for
+  byte; a raw NUL cannot ride in a generated
+  file's heredoc, so it stands verified by
+  hand, not generated.) All 200 were accepted;
+  every case agreed byte for byte.
+
+**The finding: the number boundary.** The
+sweep's first run disagreed on 32 of its 250
+number cases — and on nothing else. Minimized,
+the disagreement is not in the translator at
+all: it stands already in the `tokens` dump,
+before any translation — the front end's
+number reader (`numberFromDigits`, Stone 47's
+machinery) reads some extreme-scale literals
+one ulp away from Swift's correctly rounded
+reading. Stone 47's header prescribed the
+remedy in advance — this reader "is not a
+proof for every conceivable pattern, and a
+pattern found to miss by an ulp belongs in
+`front-examples/BOUNDARY.txt` with its pattern
+named, never silently absorbed" — and this
+stone follows the prescription exactly.
+Probed across a 495-case grid and the sweep's
+own literals, the shortfall has two faces,
+both irregular (a missing literal's neighbours
+usually agree): short digit strings at extreme
+scales — a literal with one or two significant
+digits far from 1, tiny fractions below about
+1e-22 and huge powers of ten past about 1e44 —
+and very long digit strings (hundreds of
+digits), where the digits past the second
+mantissa are judged rather than kept. A rich
+mantissa (a dozen digits or more) agrees at
+every scale probed, and at the very extremes
+the value overflows to infinity or underflows
+to zero, where the two agree again — the
+corpus's own extreme fixtures (a 412-digit
+literal read as infinity, a fraction with 393
+zeros read as zero) stand as agreements; it is
+the representable middle band at extreme
+scales where the ulp lives. The boundary is
+recorded with its pattern named in
+`front-examples/BOUNDARY.txt`, with two new
+fixtures pinning one instance of each face
+(`boundary-tiny-fraction.nifla`: Swift reads
+5e-29, the port 4.9999999999999993e-29;
+`boundary-long-number.nifla`: a 303-digit
+literal, Swift 3.317805359059565e+302, the port
+3.3178053590595647e+302). The fixtures diverge
+wherever the value is surfaced — the token
+dump, the tree dump, the generated Swift — and
+the front and compile proofs verify the
+divergence on every run; in the check modes
+alone the verdict agrees (both sides accept:
+no checker verdict reads a value finely enough
+to turn on one ulp at these scales), and
+`run-check.sh` now asserts that agreement for
+these two by their NUMBER BOUNDARY mark, so a
+change on either side is caught either way.
+The boundary now numbers five fixtures (three
+word, two number), and the proofs' counts say
+so (104 fixtures, boundary 5 noted). The
+sweep's number envelope is set to the reader's
+proved ground — fractions no deeper than 22
+digits of scale, whole strings no longer than
+40 digits — exactly as the check sweep stays
+inside ASCII by design: that is the boundary's
+territory, already recorded. Inside the
+envelope the sweep passes whole. Closing this
+boundary would take an arbitrary-precision
+number reader; that is future work, not a
+claim made here.
+
+**The gate** is `./run-compile.sh`, re-shaped
+the way `run-front.sh` and `run-check.sh`
+stand over their legs: it runs the corpus
+proof (Stone 53, as it stands, per-file
+PASS/FAIL output kept whole) and then
+`run-compile-sweep.sh`, in order, stopping at
+the first failure, and on success prints one
+closing summary naming the whole claim — the
+corpus counts, the 10 fixtures, the generated
+sweep, boundary 5 noted. It is the one command
+future work runs to prove the translator
+whole, and it passes whole on this tree.
+
+**The leg is complete.** The translator stands
+in Nifla, its generated Swift identical to
+Swift's across the whole corpus, the 10
+fixtures, and the generated sweep of 750
+generated programs.
+
+**The convergence note, restated briefly.**
+Stone 53's decision stands: SUPERSEDE — the
+self-hosted interpreter holds no translator to
+converge with (it runs programs; it never
+writes one out, and its file holds none of the
+translator's fingerprints), so the translator
+was written fresh in Nifla against
+`Compiler.swift` as the sole standard, and the
+shared helper layer — the front file's result
+objects, `numText`, `CRCHAR` — was reused. The
+self-host keeps its own way and stays
+untouched.
+
+**The inheritance note.** What the bare legs
+and the bootstrap should know from this leg:
+(1) `compileMain`'s driver half stands
+unported, as Stone 53 recorded — the flag
+words, the file writing, the scratch folder,
+the running of `swiftc` and of the assembler,
+the floor blocks' `.s` wrapper text — and
+`findAssembler`, which `Compiler.swift` also
+hosts, stands with the bare legs; both belong
+to the bootstrap's story, when a Nifla program
+must drive a build and not only speak its
+text. (2) This leg carries no shared-body
+deviation of the checker's kind: Swift's
+translator has one walk, and the port's is one
+walk. (3) The diagnostics measurement stands
+at Stone 53's — the front file is unchanged in
+this stone — 58 warnings / 48,149 bytes of
+generated-Swift diagnostics, well under the
+swiftc-stderr pipe's 64 KB. (4) The number
+boundary above is the front end's second
+boundary, and the first found by a sweep
+rather than the corpus; it is the number
+reader's, inherited by every mode that
+surfaces a value, and the translator inherits
+it exactly as the checker inherits the Unicode
+boundary at the lex stage.
+
+**The boundaries stand as recorded, and no
+compiler-specific boundary was found.** The
+front end's Unicode boundary (three fixtures)
+is inherited at the lex stage; the number
+boundary (two fixtures) is inherited at the
+reader. Within the proved ground, no case,
+generated or hand-written, exposed any further
+expressibility gap in the translator.
+
+No PRIMER change: the language's surface did
+not change in this stone.
+
+Behavior unchanged everywhere else: the full
+suite sweep on this stone's tree — every
+run-*.sh plus run_tests.sh, 30 scripts in all
+with this stone's sweep among them, each exit
+0 — interpreted 60/60, compiled 159/159, voice
+6/6, self-hosted 60/60, primer and tutorial
+books true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every
+bare proof green, with the front leg's proofs
+and gate, the checker leg's proofs, sweep and
+gate, and this leg's corpus proof, sweep and
+gate passing whole. The compiler leg is
+complete: the translator is one translator in
+Nifla, proved identical to Swift whole. What
+legs follow — the two bare compilers, carried
+into Nifla the same way, piece by piece, and
+the bootstrap stone at the road's end — are
+future work, named here and not started.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

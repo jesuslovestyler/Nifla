@@ -20,3 +20,50 @@
 boundary-greek.nifla # a name written in a Greek letter (α): a letter beyond Latin-1 — Swift lexes it as a name; the port refuses the character.
 boundary-cjk.nifla # a name written in a CJK character (猫): a letter beyond Latin-1 — Swift lexes it as a name; the port refuses the character.
 boundary-arabic-digit.nifla # an Arabic-Indic digit (٣): a non-ASCII digit — Swift starts a number and refuses it as unreadable ("I couldn't read '٣' as a number."); the port refuses the character itself. Both refuse; the words differ.
+
+# The number boundary (Stone 54, found by the compiler
+# leg's generated sweep — the first generator to read
+# literals at these scales). The port's number reader
+# (numberFromDigits in selfhost/nifla-front.nifla)
+# keeps an exact whole-number mantissa while the
+# keeping is exact, carries the next digits as a
+# second, smaller mantissa, and scales the pair by
+# exact powers of ten with every step's rounding error
+# carried along (Dekker's two-product) — the design
+# Stone 47's header records, with its own warning:
+# this is not a proof for every conceivable pattern,
+# and a pattern found to miss by an ulp belongs here,
+# with its pattern named, never silently absorbed.
+# Two faces of the one shortfall are now known, both
+# irregular — a missing literal's neighbours usually
+# agree:
+#
+#   * Short digit strings at extreme scales: a
+#     literal with one or two significant digits far
+#     from 1 — tiny fractions below about 1e-22, huge
+#     powers of ten past about 1e44 — may be read one
+#     ulp away from Swift's correctly rounded reading.
+#     A rich mantissa (a dozen digits or more) agrees
+#     at every scale probed, and at the very extremes
+#     the value overflows to infinity or underflows to
+#     zero, where the two agree again.
+#   * Very long digit strings (hundreds of digits),
+#     where the digits past the second mantissa are
+#     judged rather than kept: a rare ulp miss.
+#
+# The two fixtures below pin one instance of each
+# face. They diverge wherever the value is surfaced —
+# the token dump, the tree dump, the generated Swift —
+# and the front and compile proofs verify the
+# divergence on every run. In the check modes alone
+# the verdict AGREES (both sides accept): no checker
+# verdict reads a value finely enough to turn on one
+# ulp at these scales, and run-check.sh asserts that
+# agreement for these two by their NUMBER BOUNDARY
+# mark, so a change on either side is caught either
+# way. Closing this boundary would take an
+# arbitrary-precision number reader; that is future
+# work, not a claim made here.
+
+boundary-tiny-fraction.nifla # NUMBER BOUNDARY: the literal 0.00000000000000000000000000005 — Swift reads 5e-29; the port reads 4.9999999999999993e-29, one ulp away.
+boundary-long-number.nifla # NUMBER BOUNDARY: a 303-digit literal — Swift reads 3.317805359059565e+302; the port reads 3.3178053590595647e+302, one ulp away.

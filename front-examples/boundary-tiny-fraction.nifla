@@ -1,0 +1,11 @@
+// A boundary fixture — see BOUNDARY.txt, the number
+// boundary. A tiny fraction: one significant digit at
+// a deep scale. Swift reads the literal below as
+// 5e-29; the Nifla-written reader reads
+// 4.9999999999999993e-29, one ulp lower — so the
+// token dump, the tree dump and the generated Swift
+// disagree on the number, while the check verdict
+// agrees (both sides accept: no verdict reads a
+// value that finely).
+let x = 0.00000000000000000000000000005
+say x

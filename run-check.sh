@@ -24,7 +24,7 @@
 #     its .error file byte for byte), floor-examples/,
 #     voice-examples/, selfhost (2), tools (1), every
 #     fenced nifla block in PRIMER.md and TUTORIAL.md,
-#     front-examples/*.nifla (102 fixtures — lex/parse
+#     front-examples/*.nifla (104 fixtures — lex/parse
 #     refusals agree through the front end, acceptances
 #     then check), and check-examples/*.nifla (the Stone
 #     50 checker fixtures and Stone 51's door/bare ones)
@@ -53,10 +53,19 @@
 # ports the doors and the floor rule whole: the pending
 # list stands EMPTIED, and every file in the bare and
 # guest groups must now agree byte for byte — this proof
-# fails on ANY divergence in any group. The three
-# fixtures in front-examples/BOUNDARY.txt diverge at the
-# lex stage in check mode, as in the front proofs, and
-# must DISAGREE here too.
+# fails on ANY divergence in any group. The fixtures in
+# front-examples/BOUNDARY.txt divide in two: the word
+# fixtures (Stone 47) diverge at the lex stage in check
+# mode, as in the front proofs, and must DISAGREE here
+# too; the number fixtures (Stone 54, marked NUMBER
+# BOUNDARY in that file) diverge in the VALUE of a
+# number token — surfaced by the token dump, the tree
+# dump and the generated Swift, and verified divergent
+# there — while the check verdict AGREES here by the
+# nature of the divergence (both sides accept; no
+# verdict reads a value that finely), and this proof
+# asserts that agreement for them by name, so a change
+# on either side is caught either way.
 #
 # Prints PASS or FAIL per file and a summary with
 # per-group counts and the claim.
@@ -142,6 +151,15 @@ is_boundary() {
     grep -qx "$(basename "$1")" "$BOUNDARY_LIST"
 }
 
+# The number boundary's fixtures: the BOUNDARY.txt lines
+# carrying the NUMBER BOUNDARY mark.
+NUMBER_BOUNDARY_LIST="$SCRATCH/number-boundary.txt"
+grep 'NUMBER BOUNDARY' front-examples/BOUNDARY.txt | awk '{print $1}' > "$NUMBER_BOUNDARY_LIST"
+
+is_number_boundary() {
+    grep -qx "$(basename "$1")" "$NUMBER_BOUNDARY_LIST"
+}
+
 pass=0
 fail=0
 
@@ -167,6 +185,22 @@ run_group() {
             agree=1
         fi
         if [ "$label" = "fixtures" ] && is_boundary "$f"; then
+            if is_number_boundary "$f"; then
+                # The number boundary: the divergence is in
+                # a number's value, which no check verdict
+                # reads — the two sides must AGREE here,
+                # both accepting, and the agreement is the
+                # assertion (the divergence itself is
+                # verified in tokens, tree and compile).
+                if [ "$agree" -eq 1 ] && [ "$oc" -eq 0 ]; then
+                    echo "BOUNDARY $f (number boundary: the check verdicts agree, both accepting, as the record states)"
+                    gpass=$((gpass + 1))
+                else
+                    echo "FAIL $f (a NUMBER BOUNDARY fixture must be ACCEPTED identically in check mode — the record is stale and must be revisited)"
+                    fail=$((fail + 1))
+                fi
+                continue
+            fi
             if [ "$agree" -eq 1 ]; then
                 echo "FAIL $f (named in BOUNDARY.txt but the two sides AGREE in check mode — the boundary list is stale and must be revisited)"
                 fail=$((fail + 1))

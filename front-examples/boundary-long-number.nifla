@@ -1,0 +1,13 @@
+// A boundary fixture — see BOUNDARY.txt, the number
+// boundary. A very long digit string: 303 digits,
+// past the reader's second mantissa, where the tail
+// is judged rather than kept. Swift reads the
+// literal below as 3.317805359059565e+302; the
+// Nifla-written reader reads
+// 3.3178053590595647e+302, one ulp away — so the
+// token dump, the tree dump and the generated Swift
+// disagree on the number, while the check verdict
+// agrees (both sides accept: no verdict reads a
+// value that finely).
+let x = 331780535905956498401642267459472639908327724640427498417178520194999825467059966091963929573875853141472017753503661025472612016227051082471619513562731941170307872942823199883739940466246297214925022109139207563026164503985123801549308292446948583218529576641571861989402035411869957199342894263160363
+say x

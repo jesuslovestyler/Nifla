@@ -16,4 +16,4 @@ cd "$(dirname "$0")"
 ./run-front-parser.sh || { echo "FAIL front: the parser proof failed — the gate stops here"; exit 1; }
 ./run-front-sweep.sh || { echo "FAIL front: the generated sweep failed — the gate stops here"; exit 1; }
 
-echo "PASS front (Stone 49: the Nifla-written front end is byte-identical to the Swift front end — lexer and parser — across the whole corpus and the 102 fixtures in both modes, and across the generated sweep of 300 numbers, 200 programs and 200 token soup, boundary 3 noted)"
+echo "PASS front (Stone 49: the Nifla-written front end is byte-identical to the Swift front end — lexer and parser — across the whole corpus and the 104 fixtures in both modes, and across the generated sweep of 300 numbers, 200 programs and 200 token soup, boundary 5 noted)"

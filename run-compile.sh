@@ -1,8 +1,18 @@
 #!/bin/sh
-# Stone 53: the compiler leg's corpus proof.
+# Stone 54 gate: the compiler leg's single command.
+#
+# This script is the gate for the whole compiler leg:
+# it runs the corpus proof (Stone 53, as it stands —
+# the translator stands in the front end's compile
+# mode) and then the generated sweep
+# (run-compile-sweep.sh, Stone 54), stopping at the
+# first failure, and on success prints one closing
+# summary naming the whole claim.
+#
+# The corpus proof:
 #
 # selfhost/nifla-front.nifla — the toolchain front end
-# written in Nifla, this stone carrying the compiler's
+# written in Nifla, this leg carrying the compiler's
 # translator beside the lexer, the parser and the
 # checker — must agree with the Swift translator
 # (SwiftTranslator in src/Compiler.swift) in its
@@ -16,7 +26,7 @@
 #     also equal its .error file byte for byte),
 #     floor-examples/, voice-examples/, selfhost (2),
 #     tools (1), every fenced nifla block in PRIMER.md
-#     and TUTORIAL.md, front-examples/*.nifla (102
+#     and TUTORIAL.md, front-examples/*.nifla (104
 #     fixtures — lex/parse/check refusals agree through
 #     the front end, acceptances then translate),
 #     check-examples/*.nifla (the checker fixtures),
@@ -35,9 +45,11 @@
 # src/BareCompilerARM.swift, which the link pulls in
 # (Compiler.swift reaches the ARM bare compiler).
 #
-# The three fixtures in front-examples/BOUNDARY.txt
-# diverge at the lex stage in compile mode, as in the
-# front and check proofs, and must DISAGREE here too.
+# The fixtures named in front-examples/BOUNDARY.txt
+# diverge in compile mode, as in the front proofs,
+# and must DISAGREE here too — the word fixtures at
+# the lex stage, and the number fixtures (Stone 54)
+# in the value the generated Swift carries.
 #
 # Prints PASS or FAIL per file and a summary with
 # per-group counts and the claim.
@@ -213,9 +225,13 @@ fi
 
 boundary_count=$(wc -l < "$BOUNDARY_LIST" | tr -d ' ')
 echo "compile:$GROUP_RESULTS boundary $boundary_count noted"
-if [ "$fail" -eq 0 ]; then
-    echo "PASS compile (Stone 53: the Nifla-written translator's generated Swift is byte-identical to the Swift translator's across the whole corpus — acceptances translated whole, refusals refused in the same words — the boundary apart and verified divergent)"
-else
+if [ "$fail" -ne 0 ]; then
     echo "FAIL compile: $fail failure(s)"
     exit 1
 fi
+
+# Stone 54: the generated sweep, after the corpus proof.
+# The gate stops at the first failure.
+./run-compile-sweep.sh || { echo "FAIL compile-gate: the generated sweep failed — the gate stops here"; exit 1; }
+
+echo "PASS compile-gate (Stone 54: the Nifla-written translator's generated Swift is byte-identical to the Swift translator's across the whole corpus:$GROUP_RESULTS and the 10 fixtures in compile-examples/, and across the generated sweep of 300 translation-shape programs (205 accepted, 95 refused identically), 250 number-literal programs and 200 byte-built text programs, boundary $boundary_count noted)"

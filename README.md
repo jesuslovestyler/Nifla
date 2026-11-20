@@ -3047,6 +3047,72 @@ true, web corpus byte for byte, feather,
 feathercheck, selfmade, web-floor and every bare
 proof green.
 
+## Stone 41 — the fix stands in the doorman; the running kernel is the compiler's own bytes
+
+Stone 40 acquitted the bare compilers, so this
+stone's planned work — a fix in both of them — had
+nothing honest to fix. What the evidence called
+for instead was proof, on the healed loader, that
+what the compilers emit is what the machine runs,
+and that the phantom close is gone. Both were
+proved fresh for this stone, in a scratch copy of
+the OS tree carrying only the doorman fix (the
+protected-mode stack moved from 0x8F000 to
+0x3F000, and the four module stages moved from
+0x98000–0x9C000 to the free low ground at
+0x10000–0x14000, below the system stage at
+0x40000 and inside no stage's claim). The fix
+itself belongs to the OS's own repo and chain;
+this ledger records what it proves about Nifla.
+
+- **Byte fidelity.** The running kernel was read
+  out of the machine whole (QEMU `memsave` of the
+  loaded segment) and compared byte for byte with
+  the compiled ELF the bare compiler produced:
+  360,347 segment bytes, and exactly **one**
+  differing byte — at 0x153BCD, 0x92 in the file
+  and 0x93 running, the accessed bit the CPU
+  itself sets in the GDT data descriptor. Apart
+  from the processor's own mark, the running
+  kernel is the compiler's output, byte for byte.
+  On the unhealed loader the same comparison
+  showed the fatal eight-byte wound at 0x14DFF8
+  and the tail splash; both are gone.
+- **The press, re-probed.** The desk-diff press
+  probe of Stone 40 was run again on the healed
+  build: with the Bible window open, a press on
+  open ground changes exactly one desk dword —
+  slot 180, the forward reckoning (11→1) that any
+  ground press honestly makes. Slot 424, the
+  Bible window's open flag, stands at 1. No reset,
+  no close. The Stone 40 repro passes.
+- **The OS's own proof.** prove-stone41.sh on the
+  healed build passes its whole first boot — the
+  typed word, the contents page, Jonah read
+  forward and back, the foot More, Back, and
+  First page presses, Escape. Its second boot's
+  two failing checks are mistakes in the proof,
+  each diagnosed and recorded in the OS's resume
+  note (Addendum 3): the proof clicks the close
+  mark one cell right of the cell the window
+  draws it in (a press on the drawn cell, arrow
+  verified, closes the window — desk flag 1→0),
+  and it expects the ninth icon's name to stand
+  clear where the terminal window standing open
+  at the rising covers every icon's name alike.
+  The OS chain corrects the proof; nothing in the
+  OS or the compilers needed correcting for
+  either.
+
+No Nifla code changes at this stone either — the
+tree is as Stone 40 left it, and the full sweep
+run for Stone 40 this morning stands as this
+stone's suite proof: interpreted 60/60, compiled
+159/159, voice 6/6, self-hosted 60/60, primer and
+tutorial books true, web corpus byte for byte,
+feather, feathercheck, selfmade, web-floor and
+every bare proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

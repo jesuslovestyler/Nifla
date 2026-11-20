@@ -1,0 +1,168 @@
+// Deeply nested and interleaved call shapes on bare
+// metal (Stone 43) — the armor laid after the phantom
+// close hunt (Stone 40) and the interleave verdict
+// (Stone 42). The shapes that were suspected, in
+// miniature, each with an answer that any lost,
+// doubled, or misplaced call would change:
+//
+//   1. The weave, reduced: a row painter called from
+//      an outer loop (the terminal body), painting
+//      forty-eight cells in one loop — for each cell
+//      the desk's color slot is set to the paper
+//      value and a fill call is made; for each letter
+//      the slot is set to the ink value and a draw
+//      call is made, exactly the woven shape Stone 42
+//      found losing letters at the OS's large size.
+//      Everything stands in one desk block, as the
+//      OS's own desk keeps it: the color slot at 56,
+//      the rows' letter codes at 128, the drawn
+//      letters kept at 512. Each helper reads the
+//      slot it was handed and poisons its reckoning
+//      if the slot is wrong, so a call that arrives
+//      with its neighbor's state cannot pass quietly.
+//      The drawn letters are said as their codes,
+//      byte for byte.
+//
+//   2. A deep chain: seven calls nested one inside
+//      the next, worked inside three nested loops,
+//      the answers summed.
+//
+//   3. Alternating recursion: a function that calls
+//      itself, and between its own calls loops over
+//      two helpers in turn — the weave at the level
+//      of the call graph.
+//
+// run-bare-nested.sh boots this on both bare doors
+// and reads every line back.
+
+make fillcell(desk: bytes, i: number) -> number {
+    if desk[56] != 7 {
+        give 1000
+    }
+    give 1
+}
+
+make drawcell(desk: bytes, at: number, code: number) -> number {
+    if desk[56] != 15 {
+        give 1000
+    }
+    desk[512 + at] = code
+    give code * (at + 1)
+}
+
+make paintrow(desk: bytes, row: number) -> number {
+    let paper = 0
+    let letters = 0
+    let c = 0
+    while c < 48 {
+        let code = desk[128 + row * 48 + c]
+        desk[56] = 7
+        paper = paper + fillcell(desk, c)
+        if code != 32 {
+            desk[56] = 15
+            letters = letters + drawcell(desk, c, code)
+        }
+        c = c + 1
+    }
+    give paper * 100000 + letters
+}
+
+let desk = makebytes(1024)
+let r = 0
+while r < 3 {
+    let c = 0
+    while c < 48 {
+        let code = 65 + leftover(c + r * 7, 26)
+        if leftover(c, 9) == 4 {
+            code = 32
+        }
+        desk[128 + r * 48 + c] = code
+        c = c + 1
+    }
+    r = r + 1
+}
+r = 0
+while r < 3 {
+    let reckoning = paintrow(desk, r)
+    say "row " + r + " reckoning " + reckoning
+    let line = ""
+    let c = 0
+    while c < 24 {
+        if c > 0 {
+            line = line + " "
+        }
+        line = line + desk[512 + c]
+        c = c + 1
+    }
+    say line
+    line = ""
+    while c < 48 {
+        if c > 24 {
+            line = line + " "
+        }
+        line = line + desk[512 + c]
+        c = c + 1
+    }
+    say line
+    r = r + 1
+}
+
+make chain1(x: number) -> number {
+    give x + 1
+}
+make chain2(x: number) -> number {
+    give chain1(x) * 2
+}
+make chain3(x: number) -> number {
+    give chain2(x) + 3
+}
+make chain4(x: number) -> number {
+    give chain3(x) * 2
+}
+make chain5(x: number) -> number {
+    give chain4(x) - 5
+}
+make chain6(x: number) -> number {
+    give chain5(x) * 3
+}
+make chain7(x: number) -> number {
+    give chain6(x) + 7
+}
+
+let total = 0
+let i = 0
+while i < 3 {
+    let j = 0
+    while j < 3 {
+        let k = 0
+        while k < 3 {
+            total = total + chain7(i * 9 + j * 3 + k)
+            k = k + 1
+        }
+        j = j + 1
+    }
+    i = i + 1
+}
+say "chain total " + total
+
+make altA(x: number) -> number {
+    give x * x + 1
+}
+make altB(x: number) -> number {
+    give x * 3 - 2
+}
+make descend(n: number) -> number {
+    if n == 0 {
+        give 0
+    }
+    let s = 0
+    let t = 1
+    while t <= 3 {
+        s = s + altA(n * t)
+        s = s + altB(n + t)
+        t = t + 1
+    }
+    give s + descend(n - 1)
+}
+say "descend " + descend(6)
+say "Nested shapes stand"

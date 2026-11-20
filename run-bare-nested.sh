@@ -1,0 +1,259 @@
+#!/bin/sh
+# Stone 43 proof: deeply nested and interleaved call
+# shapes on bare metal — the armor laid after the
+# phantom close hunt (Stone 40) and the interleave
+# verdict (Stone 42). Compiles
+# bare-examples/nifla-nested.nifla with `niflac --bare`
+# and boots it in QEMU with no display, reading the
+# emulated screen's memory back through the monitor:
+# the weave's three painted rows (their reckonings
+# and every drawn letter's code), the seven-deep
+# chain's total, and the alternating recursion's
+# answer must stand exactly as the interpreter says
+# them (bare-examples/nifla-nested.screen). The same
+# program is then built for the ARM door
+# (`niflac --bare --arm`), booted on QEMU's virt
+# machine, and every line must be spoken over the
+# serial line.
+#
+# Prints PASS or FAIL. The x86 QEMU is the bench
+# machine's extracted QEMU 10 (~/qemu10-root), run
+# through its own loader; set QEMU to a plain
+# qemu-system-x86_64 command line instead if one is
+# installed. The ARM QEMU is found the way
+# run-bare-arm.sh finds it ($QEMU_ARM,
+# ~/qemu-arm-root, or the PATH).
+
+set -u
+cd "$(dirname "$0")"
+
+./build.sh >/dev/null || { echo "FAIL: build.sh failed"; exit 1; }
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"; [ -n "${QEMU_PID:-}" ] && kill "$QEMU_PID" 2>/dev/null' EXIT
+
+ELF="$WORK/nifla-nested.elf"
+if ! ./niflac --bare bare-examples/nifla-nested.nifla -o "$ELF" > "$WORK/build.txt" 2>&1; then
+    echo "FAIL: niflac --bare refused or failed:"
+    cat "$WORK/build.txt"
+    exit 1
+fi
+echo "Built the bare binary:"
+cat "$WORK/build.txt"
+
+SOCK="$WORK/monitor.sock"
+if [ -n "${QEMU:-}" ]; then
+    # A ready-made QEMU command (words are split on purpose).
+    # shellcheck disable=SC2086
+    $QEMU -kernel "$ELF" -display none -m 32 -nic none \
+        -monitor "unix:$SOCK,server,nowait" &
+    QEMU_PID=$!
+elif [ -x "$HOME/qemu10-root/usr/bin/qemu-system-x86_64" ]; then
+    "$HOME/qemu10-root/usr/lib64/ld-linux-x86-64.so.2" \
+        --library-path "$HOME/qemu10-root/usr/lib/x86_64-linux-gnu:$HOME/qemu10-root/lib/x86_64-linux-gnu" \
+        "$HOME/qemu10-root/usr/bin/qemu-system-x86_64" \
+        -kernel "$ELF" -display none -m 32 -nic none \
+        -monitor "unix:$SOCK,server,nowait" \
+        -L "$HOME/qemu10-root/usr/share/qemu" \
+        -L "$HOME/qemu10-root/usr/share/seabios" \
+        > "$WORK/qemu.txt" 2>&1 &
+    QEMU_PID=$!
+else
+    echo "FAIL: no QEMU found (looked for ~/qemu10-root; set QEMU to a qemu-system-x86_64 command)"
+    exit 1
+fi
+
+python3 - "$SOCK" bare-examples/nifla-nested.screen <<'PYEOF'
+import re
+import socket
+import sys
+import time
+
+sock_path, screen_path = sys.argv[1], sys.argv[2]
+expected = [line for line in open(screen_path).read().splitlines()]
+
+# Connect to the monitor (QEMU may take a moment to open it).
+deadline = time.time() + 15
+sock = None
+while time.time() < deadline:
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(sock_path)
+        break
+    except OSError:
+        if sock is not None:
+            sock.close()
+        sock = None
+        time.sleep(0.2)
+if sock is None:
+    print("FAIL: the QEMU monitor never opened")
+    sys.exit(1)
+sock.settimeout(5)
+
+
+class MonitorQuiet(Exception):
+    """The monitor hasn't answered yet — worth another try."""
+
+
+def read_until_prompt():
+    buf = b""
+    while b"(qemu)" not in buf:
+        try:
+            chunk = sock.recv(4096)
+        except socket.timeout:
+            raise MonitorQuiet()
+        if not chunk:
+            raise MonitorQuiet()
+        buf += chunk
+    return buf.decode(errors="replace")
+
+
+greeted = False
+
+
+def screen_rows():
+    """The first thirteen rows of the text screen, as text."""
+    global greeted
+    try:
+        if not greeted:
+            # The monitor's greeting, prompt and all, is read
+            # once; after that, each answer ends with the next
+            # prompt, so nothing is ever left waiting.
+            read_until_prompt()
+            greeted = True
+        sock.sendall(b"xp /2080bx 0xb8000\n")
+        out = read_until_prompt()
+    except (MonitorQuiet, OSError):
+        return None
+    data = []
+    for line in out.splitlines():
+        match = re.match(r"^[0-9a-f]+: ((?:0x[0-9a-f]{2} ?)+)$", line.strip())
+        if match:
+            data += [int(part, 16) for part in match.group(1).split()]
+    if len(data) < 2080:
+        return None
+    chars = [chr(data[i]) if 32 <= data[i] < 127 else " " for i in range(0, 2080, 2)]
+    return ["".join(chars[i * 80:(i + 1) * 80]) for i in range(13)]
+
+
+# The machine boots, the BIOS banner comes and goes, and the
+# program writes and halts; poll until the words are there.
+deadline = time.time() + 25
+rows = None
+while time.time() < deadline:
+    rows = screen_rows()
+    if rows and all(rows[i].startswith(expected[i]) for i in range(len(expected))):
+        break
+    time.sleep(0.5)
+
+try:
+    sock.sendall(b"quit\n")
+    sock.close()
+except OSError:
+    pass
+
+if rows and all(rows[i].startswith(expected[i]) for i in range(len(expected))):
+    for i, line in enumerate(expected):
+        print(f"row {i + 1} begins: {line!r}")
+    print("PASS nifla-nested (bare metal: the weave, the deep chain, and the alternating recursion stand on the emulated screen)")
+    sys.exit(0)
+print("FAIL: the expected words never appeared on the emulated screen")
+print(f"expected rows to begin with: {expected!r}")
+print(f"last rows read: {rows!r}")
+sys.exit(1)
+PYEOF
+[ $? -eq 0 ] || exit 1
+kill "$QEMU_PID" 2>/dev/null; QEMU_PID=""
+
+# --- The same program on the ARM door -----------------------
+QEMU_ARM_BIN=""
+if [ -n "${QEMU_ARM:-}" ]; then
+    QEMU_ARM_BIN="$QEMU_ARM"
+elif [ -x "$HOME/qemu-arm-root/usr/bin/qemu-system-aarch64" ]; then
+    QEMU_ARM_BIN="$HOME/qemu-arm-root/usr/bin/qemu-system-aarch64"
+    export LD_LIBRARY_PATH="$HOME/qemu-arm-root/usr/lib/x86_64-linux-gnu:$HOME/qemu-arm-root/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+elif command -v qemu-system-aarch64 >/dev/null 2>&1; then
+    QEMU_ARM_BIN="$(command -v qemu-system-aarch64)"
+fi
+[ -n "$QEMU_ARM_BIN" ] || { echo "FAIL: qemu-system-aarch64 was not found (looked in \$QEMU_ARM, ~/qemu-arm-root, and the PATH)"; exit 1; }
+
+# The shared serial drive: boot an ELF on the virt machine,
+# gather its serial words until $2 appears in them (or the
+# deadline passes), and print what was gathered. Bytes sent
+# before a client is listening are lost, so the drive
+# connects first and then resets the machine.
+cat >"$WORK/drive.py" <<'PYEOF'
+import os, socket, subprocess, sys, time
+elf, waitfor = sys.argv[1], sys.argv[2]
+settle = float(sys.argv[3]) if len(sys.argv) > 3 else 0
+ser_path, mon_path = elf + ".ser.sock", elf + ".mon.sock"
+for p in (ser_path, mon_path):
+    try: os.unlink(p)
+    except FileNotFoundError: pass
+args = [os.environ["QEMU_ARM_BIN"], "-machine", "virt", "-cpu", "cortex-a57",
+    "-m", "128", "-nic", "none", "-kernel", elf, "-display", "none",
+    "-serial", "unix:" + ser_path + ",server,nowait",
+    "-monitor", "unix:" + mon_path + ",server,nowait"]
+proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def connect(path):
+    for _ in range(200):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(path)
+            return s
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError("no socket " + path)
+try:
+    ser = connect(ser_path)
+    mon = connect(mon_path)
+    mon.sendall(b"system_reset\n")
+    time.sleep(0.5)
+    mon.settimeout(0.3)
+    try:
+        while mon.recv(65536):
+            pass
+    except socket.timeout:
+        pass
+    ser.settimeout(0.2)
+    data = b""
+    deadline = time.time() + 25
+    found_at = None
+    while time.time() < deadline:
+        if waitfor.encode() in data:
+            if found_at is None:
+                found_at = time.time()
+            if time.time() - found_at >= settle:
+                break
+        try:
+            chunk = ser.recv(4096)
+            if chunk:
+                data += chunk
+        except socket.timeout:
+            pass
+finally:
+    proc.terminate()
+sys.stdout.write(data.decode("utf-8", "replace"))
+PYEOF
+
+drive_arm() {
+    # $1 = elf, $2 = words to wait for, $3 = settle seconds
+    QEMU_ARM_BIN="$QEMU_ARM_BIN" python3 "$WORK/drive.py" "$1" "$2" "$3"
+}
+
+ARM_ELF="$WORK/nifla-nested-arm.elf"
+if ! ./niflac --bare --arm bare-examples/nifla-nested.nifla -o "$ARM_ELF" > "$WORK/build-arm.txt" 2>&1; then
+    echo "FAIL: niflac --bare --arm refused or failed:"
+    cat "$WORK/build-arm.txt"
+    exit 1
+fi
+drive_arm "$ARM_ELF" "Nested shapes stand" 0 >"$WORK/nested-serial.txt" || { echo "FAIL: the ARM serial drive failed"; exit 1; }
+while IFS= read -r line; do
+    grep -Fqx "$line" "$WORK/nested-serial.txt" || {
+        echo "FAIL: the ARM serial line never said: $line"
+        echo "What it said:"
+        cat "$WORK/nested-serial.txt"
+        exit 1
+    }
+done < bare-examples/nifla-nested.screen
+echo "PASS nifla-nested on ARM (the nested shapes spoken over the serial line)"

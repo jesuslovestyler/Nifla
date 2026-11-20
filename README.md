@@ -3175,6 +3175,77 @@ feathercheck, selfmade, web-floor and every bare
 proof green (the full sweep of Stone 40, the
 tree unchanged since).
 
+## Stone 43 — regression armor: the nested shapes stand watch
+
+Stone 42 left the interleave loss bounded but
+unnamed: real at the OS's scale, in the woven
+call shape alone. This stone lays the armor —
+new proof programs that hold the suspected
+shapes up to the light on both bare doors, so
+if this class of defect ever does enter the
+compilers, it cannot pass silently — and takes
+the woven shape down to miniature to see whether
+it reproduces there.
+
+The new proof (bare-examples/nifla-nested.nifla,
+run by run-bare-nested.sh) works three movements,
+each with an answer any lost, doubled, or
+misplaced call would change:
+
+- **The weave, reduced.** A row painter called
+  from an outer loop paints forty-eight cells in
+  one loop: for each cell the desk's color slot
+  (slot 56 of one desk block, as the OS keeps it)
+  is set to the paper value and a fill call made;
+  for each letter the slot is set to the ink
+  value and a draw call made — the woven shape
+  itself. Each helper reads the slot it was
+  handed and poisons its reckoning if the slot is
+  wrong, so a call arriving with its neighbor's
+  state cannot pass quietly. Three rows are
+  painted; their reckonings and every drawn
+  letter's code are read back.
+- **A deep chain.** Seven calls nested one inside
+  the next, worked inside three nested loops, the
+  answers summed.
+- **Alternating recursion.** A function that
+  calls itself, and between its own calls loops
+  over two helpers in turn — the weave at the
+  level of the call graph.
+
+On both bare doors the program answers exactly
+as the interpreter does — the reckonings
+(4882921, 4883094, 4881395), every letter code
+in its place, the chain's total (4806), the
+recursion's answer (1553). **So the woven shape
+in miniature is innocent on both compilers**: the
+loss Stone 42 proved needs the OS's scale — its
+heavy pixel work per cell, its font-block glyph
+rendering at the large scale, its standing loop
+guard and interrupt field — and not the call
+shape alone. The two-pass row remains the OS's
+standing remedy, and this armor now watches the
+shape itself: should a future compiler change
+ever make the miniature fail, run-bare-nested.sh
+fails with it, in the open.
+
+The loader class gets its armor too, on its own
+side of the fence: a build-time stage check for
+the OS's build is specified in the OS's resume
+note (Addendum 4) — the staged system file's true
+span, from its actual size on the day, must
+intersect no module stage and not the stack's
+ground, or the build stops and says so. The
+Cardnull chain adds it when it takes the doorman
+fix home.
+
+Proofs: the new bare proof passes on both doors;
+no suite count changes — interpreted 60/60,
+compiled 159/159, voice 6/6, self-hosted 60/60,
+primer and tutorial books true, web corpus byte
+for byte, feather, feathercheck, selfmade,
+web-floor and every other bare proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

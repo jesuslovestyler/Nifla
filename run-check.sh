@@ -1,6 +1,7 @@
 #!/bin/sh
-# Stone 50 proof: the checker begins — the hosted walk
-# stands in Nifla.
+# Stone 51 proof: the checker stands whole in every
+# mode — the hosted walk of Stone 50, and the bare and
+# guest doors.
 #
 # selfhost/nifla-front.nifla — the toolchain front end
 # written in Nifla, this stone carrying the checker beside
@@ -18,13 +19,15 @@
 #     front-examples/*.nifla (102 fixtures — lex/parse
 #     refusals agree through the front end, acceptances
 #     then check), and check-examples/*.nifla (the Stone
-#     50 checker fixtures)
-#   bare `check-bare`: bare-examples/ and the Cardnull
-#     OS 2 sources (read-only)
+#     50 checker fixtures and Stone 51's door/bare ones)
+#   bare `check-bare`: bare-examples/, the Cardnull
+#     OS 2 sources (read-only), and the door-/bare-
+#     prefixed fixtures in check-examples/
 #   guest `check-guest`: bare-examples/nifla-guest.nifla,
-#     bare-examples/nifla-guest-desk.nifla, and the
+#     bare-examples/nifla-guest-desk.nifla, the
 #     Cardnull feathers calculator-feather, paint-feather
-#     and welcome-feather
+#     and welcome-feather, and the same door-/bare-
+#     prefixed fixtures
 #
 # The Swift side is spoken for by a proof-only oracle
 # (tools/check-oracle.swift) that links the untouched
@@ -35,19 +38,20 @@
 # findAssembler in Compiler.swift, and Compiler.swift
 # reaches the ARM bare compiler).
 #
-# In this stone the port's check-bare and check-guest
-# modes run the HOSTED walk: the bare/guest tool doors
-# and the bare floor-text rule land in Stone 51. The bare
-# and guest files that diverge ONLY for that missing door
-# (or the bare floor rules) are named in STONE50_PENDING
-# below, each verified divergent: this proof FAILS if one
-# of them agrees, and fails if any other file diverges.
-# The three fixtures in front-examples/BOUNDARY.txt
-# diverge at the lex stage in check mode, as in the front
-# proofs, and must DISAGREE here too.
+# Stone 50's port ran the HOSTED walk in all three
+# modes, and its proof carried a pending list of 22
+# mode-and-file pairs that diverged only for the missing
+# bare/guest tool doors and bare floor rules. Stone 51
+# ports the doors and the floor rule whole: the pending
+# list stands EMPTIED, and every file in the bare and
+# guest groups must now agree byte for byte — this proof
+# fails on ANY divergence in any group. The three
+# fixtures in front-examples/BOUNDARY.txt diverge at the
+# lex stage in check mode, as in the front proofs, and
+# must DISAGREE here too.
 #
 # Prints PASS or FAIL per file and a summary with
-# per-group counts, the pending count, and the claim.
+# per-group counts and the claim.
 
 set -u
 cd "$(dirname "$0")"
@@ -130,51 +134,12 @@ is_boundary() {
     grep -qx "$(basename "$1")" "$BOUNDARY_LIST"
 }
 
-# The Stone 51 pending list: "<mode>:<basename>" entries,
-# one per line, for the bare/guest files that diverge in
-# this stone ONLY because the port's check-bare and
-# check-guest modes still run the hosted walk — the
-# bare/guest tool doors and the bare floor rules land in
-# Stone 51. Verified divergent on every run: if a named
-# file ever agrees, this proof fails (the list is stale);
-# any OTHER divergence fails as a bug in the port.
-STONE50_PENDING="
-check-bare:nifla-arm-floor.nifla
-check-bare:nifla-arm.nifla
-check-bare:nifla-bare.nifla
-check-bare:nifla-disk.nifla
-check-bare:nifla-guest-desk.nifla
-check-bare:nifla-guest.nifla
-check-bare:nifla-host.nifla
-check-bare:nifla-listen.nifla
-check-bare:nifla-memory.nifla
-check-bare:calculator-feather.nifla
-check-bare:commands.nifla
-check-bare:diskkeep.nifla
-check-bare:featherdoor.nifla
-check-bare:paint-feather.nifla
-check-bare:pixface.nifla
-check-bare:usbkey.nifla
-check-bare:welcome-feather.nifla
-check-guest:nifla-guest.nifla
-check-guest:nifla-guest-desk.nifla
-check-guest:calculator-feather.nifla
-check-guest:paint-feather.nifla
-check-guest:welcome-feather.nifla
-"
-
-is_pending() {
-    printf '%s\n' "$STONE50_PENDING" | grep -qx "$1"
-}
-
 pass=0
 fail=0
-pending_seen=0
 
 # run_group <mode> <label> <files...> — compares the two
 # check verdicts on every file; boundary fixtures (the
-# fixtures group only) and pending files (bare/guest
-# groups) must diverge instead.
+# fixtures group only) must diverge instead.
 GROUP_RESULTS=""
 run_group() {
     mode="$1"
@@ -199,17 +164,6 @@ run_group() {
                 fail=$((fail + 1))
             else
                 echo "BOUNDARY $f (verified divergent: oracle exit $oc, front exit $fc)"
-                gpass=$((gpass + 1))
-            fi
-            continue
-        fi
-        if is_pending "$mode:$(basename "$f")"; then
-            if [ "$agree" -eq 1 ]; then
-                echo "FAIL $f (named in the Stone 51 pending list for $mode but the two sides AGREE — the pending list is stale and must be revisited)"
-                fail=$((fail + 1))
-            else
-                echo "PENDING $f (Stone 51: diverges only for the missing bare/guest door or bare floor rule — oracle exit $oc, front exit $fc)"
-                pending_seen=$((pending_seen + 1))
                 gpass=$((gpass + 1))
             fi
             continue
@@ -258,6 +212,8 @@ run_group check primer "$SCRATCH"/primer/*.nifla
 run_group check tutorial "$SCRATCH"/tutorial/*.nifla
 run_group check fixtures front-examples/*.nifla
 run_group check checkfix check-examples/*.nifla
+run_group check-bare checkfixbare check-examples/door-*.nifla check-examples/bare-*.nifla
+run_group check-guest checkfixguest check-examples/door-*.nifla check-examples/bare-*.nifla
 
 run_group check-bare bare bare-examples/*.nifla
 
@@ -273,14 +229,9 @@ else
 fi
 
 boundary_count=$(wc -l < "$BOUNDARY_LIST" | tr -d ' ')
-pending_total=$(printf '%s\n' "$STONE50_PENDING" | grep -c ':' || true)
-echo "check:$GROUP_RESULTS boundary $boundary_count noted, Stone 51 pending $pending_seen/$pending_total"
+echo "check:$GROUP_RESULTS boundary $boundary_count noted, Stone 50 pending list emptied (0 pending)"
 if [ "$fail" -eq 0 ]; then
-    if [ "$pending_seen" -ne "$pending_total" ]; then
-        echo "FAIL check: $pending_seen of $pending_total pending files were seen (a pending file is missing from the corpus)"
-        exit 1
-    fi
-    echo "PASS check (Stone 50: the Nifla-written checker's hosted verdicts are byte-identical to the Swift checker's across the whole corpus, the boundary apart and verified divergent, and the $pending_seen bare/guest files that diverge only for the doors and bare floor rules Stone 51 will add named in the pending list and verified divergent)"
+    echo "PASS check (Stone 51: the Nifla-written checker's verdicts are byte-identical to the Swift checker's across the whole corpus in all three modes — hosted, bare and guest — the boundary apart and verified divergent; the Stone 50 pending list stands emptied, all 22 of its pairs now agreeing byte for byte)"
 else
     echo "FAIL check: $fail failure(s)"
     exit 1

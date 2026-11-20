@@ -1,0 +1,4 @@
+let r = floor([1, 2]) {
+    mov rax, 1
+}
+say r

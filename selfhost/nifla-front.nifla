@@ -13,10 +13,11 @@
 //
 // Stone 50 adds the check modes: lex, parse, then the
 // checker (the section below the tree dump), printing
-// exactly "checked" for an accepted program. In this
-// stone all three check modes run the one hosted walk —
-// the bare/guest tool doors and the bare floor-text rule
-// land in Stone 51.
+// exactly "checked" for an accepted program. Stone 51
+// completes them: check-bare and check-guest run the
+// bare and guest pictures — the bare/guest tool doors
+// and the bare floor-text rule stand in the checker
+// section beside the hosted walk.
 //
 // 'tokens' reads the file at <path> and prints its tokens,
 // one per line, in this dump:
@@ -2098,12 +2099,17 @@ make dumpProgram(stmts) {
 // names no kind (Swift's nil from fromKindWord, which is
 // what the word "nothing" maps to there) is carried as "".
 //
-// In this stone the walk is the HOSTED walk only:
-// check-bare and check-guest run this same walk, and
-// chkBareTool below answers "not a bare tool" for every
-// name — the bare/guest tool doors and the bare floor-text
-// rule land in Stone 51, which extends chkBareTool in this
-// one place and teaches chkFloor its bare branches.
+// Stone 50 carried the HOSTED walk; Stone 51 stands
+// the checker whole in every mode: chkBareTool below
+// carries the bare/guest tool doors whole (the three
+// pictures — hosted, bare, guest — and their crossing
+// refusals), and chkFloor carries its bare branches
+// (a piece of text allowed, a number given back)
+// beside its hosted ones. The mode's picture is held
+// in gChkForBare / gChkForGuest, set when the checker
+// starts (check: false/false, check-bare: true/false,
+// check-guest: true/true), as Swift's Checker is made
+// with forBareMetal / forGuest.
 //
 // A writing note, learned the hard way in this stone:
 // several tables and walks below are written in
@@ -2937,6 +2943,10 @@ make chkBuiltinCountMessage(name, def, given) {
 let gChkFuncs = { names: [], vals: [] }
 let gChkReturnKind = ""
 let gChkFuncName = ""
+// The mode's picture — Swift's forBareMetal / forGuest,
+// set by chkCheckProgram when the checker starts.
+let gChkForBare = false
+let gChkForGuest = false
 
 make chkCollectFunctions(stmts) {
     for s in stmts {
@@ -3888,15 +3898,114 @@ make chkAsmIsEmpty(asm) {
 
 // ---------- calls ----------
 
-// The bare-only tools. Stone 50: this answers "not a bare
-// tool" ({ found: false }) for every name, in every mode —
-// the hosted walk knows none of them, and check-bare /
-// check-guest run the hosted walk in this stone. Stone 51
-// extends THIS function with the bare/guest doors (the
-// bareOnlyTools / guestDeskTools / guestDoorTools tables
-// and their crossing refusals), in this one place.
+// The bare-only tools and the guest door's tools —
+// checkBareToolCall in Checker.swift, with the tables
+// in src/BareCompiler.swift. Each helper gives back the
+// number of values the name takes in its table, or -1
+// when the name is not in the table at all (Swift's nil).
+
+// bareOnlyTools: the machine's own tools, the host's.
+make chkBareOnlyArity(name) {
+    let out = -1
+    if name == "ticks" {
+        out = 0
+    }
+    if name == "readkey" {
+        out = 0
+    }
+    if name == "waittick" {
+        out = 0
+    }
+    if name == "memorysize" {
+        out = 0
+    }
+    if name == "disksectors" {
+        out = 0
+    }
+    if name == "diskread" {
+        out = 2
+    }
+    if name == "diskwrite" {
+        out = 2
+    }
+    give out
+}
+
+// guestDeskTools: what a guest speaks through its desk.
+make chkGuestDeskArity(name) {
+    let out = -1
+    if name == "guestvalue" {
+        out = 0
+    }
+    if name == "guestgive" {
+        out = 1
+    }
+    give out
+}
+
+// guestDoorTools: the host's door into a guest.
+make chkGuestDoorArity(name) {
+    let out = -1
+    if name == "callguest" {
+        out = 2
+    }
+    give out
+}
+
+// The bare/guest tool door. In the hosted picture this
+// answers "not a bare tool" ({ found: false }) for every
+// name, always — the tables are never consulted — and
+// the ordinary rules apply. On bare metal each side has
+// its own tools and the machine's own tools stay with
+// the host; crossing any of those lines is refused here,
+// before the handed values are even read. When the name
+// is one of the picture's tools, the handed values are
+// checked (the forgiving flag choosing the walk, as
+// everywhere) and their number verified, and the call's
+// kind is "number". A refusal is handed back as an errAt
+// result ({ ok: false, ... }); the two call sites check
+// for it before they look at "found".
 make chkBareTool(name, args, line, e, outerNames, forgiving) {
-    give { found: false, kind: "unknown" }
+    if gChkForBare == false {
+        give { found: false, kind: "unknown", ok: true }
+    }
+    let bareArity = chkBareOnlyArity(name)
+    let deskArity = chkGuestDeskArity(name)
+    let doorArity = chkGuestDoorArity(name)
+    let arity = -1
+    if gChkForGuest {
+        if bareArity >= 0 {
+            give errAt(line, "'" + name + "' belongs to the host — a guest does not own the machine's timer, keyboard, memory map, or disk; the host keeps those. A guest's world is the screen, its own heap, and the desk the host hands it (guestvalue and guestgive). I caught this before the program ran, so nothing ran.")
+        }
+        if doorArity >= 0 {
+            give errAt(line, "'" + name + "' is the host's door — a guest cannot call a guest. Only the host program, the one that was booted, opens the door. I caught this before the program ran, so nothing ran.")
+        }
+        arity = deskArity
+    } else {
+        if deskArity >= 0 {
+            give errAt(line, "'" + name + "' is a guest's tool — it speaks through the desk a host hands a guest, and this program is not being built as a guest. Build it with 'niflac --bare --guest' to make it a guest, or take the call out. I caught this before the program ran, so nothing ran.")
+        }
+        arity = doorArity
+        if arity < 0 {
+            arity = bareArity
+        }
+    }
+    if arity < 0 {
+        give { found: false, kind: "unknown", ok: true }
+    }
+    for arg in args {
+        let kr = chkExprAny(arg, e, outerNames, forgiving)
+        if kr.ok == false {
+            give kr
+        }
+    }
+    if length(args) != arity {
+        if arity == 0 {
+            give errAt(line, "'" + name + "' takes no values, but it was given " + length(args) + ". Call it with nothing between the parentheses: " + name + "(). I caught this before the program ran, so nothing ran.")
+        }
+        give errAt(line, "'" + name + "' takes " + arity + " values, but it was given " + length(args) + ". I caught this before the program ran, so nothing ran.")
+    }
+    give { found: true, kind: "number", ok: true }
 }
 
 // A call to a built-in tool — checkBuiltinCall. Gives
@@ -4012,18 +4121,24 @@ make chkCallAny(name, args, line, e, outerNames, forgiving) {
         give okVal("")
     }
     let bare = chkBareTool(name, args, line, e, outerNames, forgiving)
+    if bare.ok == false {
+        give bare
+    }
     if bare.found {
         give okVal("")
     }
     give chkCallMade(name, args, line, e, outerNames, forgiving)
 }
 
-// A floor block — checkFloor, the hosted side: the block
-// must not be empty, each handed value a number or a
-// block of bytes, at most one block of bytes; what it
-// gives back can't be proven, so the kind is unknown.
-// (The bare branches — a piece of text allowed, a number
-// given back — land in Stone 51 with the doors.)
+// A floor block — checkFloor, whole: the block must not
+// be empty, each handed value a number or a block of
+// bytes, at most one block of bytes. On bare metal (either
+// bare picture) a handed value of kind text is also
+// allowed — the bare desk's memory side carries one piece
+// of text, and the bare validator, not the checker, counts
+// them — the wrong-kind refusal speaks the bare words,
+// and a bare floor gives back a number where a hosted
+// floor's answer can't be proven (the kind is unknown).
 make chkFloor(asm, args, line, e, outerNames, forgiving) {
     if chkAsmIsEmpty(asm) {
         give errAt(line, "This floor block is empty — it needs the processor instructions it is meant to run, between the 'floor {' line and the line holding only '}'.")
@@ -4041,12 +4156,25 @@ make chkFloor(asm, args, line, e, outerNames, forgiving) {
                 give errAt(line, "'floor' can be handed only one block of bytes, but it was given two. I caught this before the program ran, so nothing ran.")
             }
         } else {
-            if kind != "unknown" {
-                if kind != "number" {
-                    give errAt(line, "'floor' can be handed numbers and one block of bytes, but it was given " + chkPhrase(kind) + ". I caught this before the program ran, so nothing ran.")
+            if gChkForBare {
+                if kind != "text" {
+                    if kind != "unknown" {
+                        if kind != "number" {
+                            give errAt(line, "'floor' can be handed numbers and one piece of text on bare metal, but it was given " + chkPhrase(kind) + ". I caught this before the program ran, so nothing ran.")
+                        }
+                    }
+                }
+            } else {
+                if kind != "unknown" {
+                    if kind != "number" {
+                        give errAt(line, "'floor' can be handed numbers and one block of bytes, but it was given " + chkPhrase(kind) + ". I caught this before the program ran, so nothing ran.")
+                    }
                 }
             }
         }
+    }
+    if gChkForBare {
+        give okVal("number")
     }
     give okVal("unknown")
 }
@@ -4102,6 +4230,9 @@ make chkExprAny(expr, e, outerNames, forgiving) {
             give chkBuiltinCall(expr.name, expr.args, expr.line, e, outerNames, forgiving)
         }
         let bare = chkBareTool(expr.name, expr.args, expr.line, e, outerNames, forgiving)
+        if bare.ok == false {
+            give bare
+        }
         if bare.found {
             give okVal(bare.kind)
         }
@@ -4721,13 +4852,16 @@ make chkStatementForgiving(s, e, outerNames) {
     give okVal("")
 }
 
-// The checker's door: collect the functions, then walk
-// the program in a fresh environment.
-make chkCheckProgram(stmts) {
+// The checker's door: set the mode's picture, collect
+// the functions, then walk the program in a fresh
+// environment.
+make chkCheckProgram(stmts, forBare, forGuest) {
     nmClear(gChkFuncs)
     chkCollectFunctions(stmts)
     gChkReturnKind = ""
     gChkFuncName = ""
+    gChkForBare = forBare
+    gChkForGuest = forGuest
     let e = envNew()
     give chkBlock(stmts, e, [])
 }
@@ -4738,11 +4872,10 @@ make chkCheckProgram(stmts) {
 // file, and print what the mode asks for — the tokens
 // ('tokens', Stone 47), the parse tree on one line
 // ('tree', Stone 48), or the checker's verdict ('check',
-// 'check-bare', 'check-guest', Stone 50: lex, parse, then
-// the checker walk above; an accepted program prints
-// exactly "checked"). In this stone the three check modes
-// all run the hosted walk (see the checker section's
-// header). A problem is spoken on the error channel,
+// 'check-bare', 'check-guest', Stones 50–51: lex, parse,
+// then the checker walk above, in the mode's picture —
+// hosted, bare, or guest; an accepted program prints
+// exactly "checked"). A problem is spoken on the error channel,
 // leaving with the contract's parting numbers: 2 when the
 // file itself can't be opened (or the mode is not one this
 // program knows), 1 when the lexer refuses the program —
@@ -4796,7 +4929,7 @@ if length(allArgs) < 2 {
                 if allArgs[0] == "tree" {
                     say dumpProgram(parsed.value)
                 } else {
-                    let checked = chkCheckProgram(parsed.value)
+                    let checked = chkCheckProgram(parsed.value, allArgs[0] != "check", allArgs[0] == "check-guest")
                     if checked.ok == false {
                         sayerr(checked.message)
                         exitwith(1)

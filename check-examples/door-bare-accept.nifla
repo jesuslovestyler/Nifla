@@ -1,0 +1,3 @@
+let t = ticks()
+let m = memorysize()
+say t + m

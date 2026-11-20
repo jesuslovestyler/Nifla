@@ -4,4 +4,5 @@ bits 8 14 6
 leftover 2 -2
 wholediv 3 -3
 asnumber 620 -42 3
+astext Shalom
 Bare tools

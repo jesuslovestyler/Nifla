@@ -624,8 +624,33 @@ final class BareValidator {
                 }
                 return .number
             }
+            if name == "astext" {
+                // Stone 44: reading text out of a block of
+                // bytes came to bare metal — the road back
+                // from 'makebytes' side of the house, which
+                // the feather door had been walking by hand,
+                // building its letters one by one and letting
+                // what it could not build fall away. The
+                // bytes are read as UTF-8, as the hosted
+                // doors read them; a run of bytes that is not
+                // a letter stands in the text as the
+                // replacement mark — never dropped, never
+                // guessed at — so the word needs no answer
+                // bare metal cannot give: its answer is text,
+                // and text is a shape bare metal holds.
+                guard args.count == 1 else {
+                    throw NiflaError(line: line, message: "'astext' takes 1 value (bytes), but it was given \(args.count).")
+                }
+                let kind = try kindOf(args[0])
+                if kind == .unknown, case .variable(let varName, _) = args[0] {
+                    try pin(varName, to: .bytes, line: line)
+                } else if kind != .bytes && kind != .unknown {
+                    throw NiflaError(line: line, message: "'astext' reads text out of a block of bytes — the bytes a file's or a card's contents are held in — but here it was given \(kindPhrase(kind)).")
+                }
+                return .text
+            }
             guard name == "length" else {
-                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, the bit words 'bitand', 'bitor' and 'bitxor', 'leftover', for what a dividing leaves, 'wholediv', for dividing into whole numbers, and 'asnumber', for reading a number out of text.")
+                throw NiflaError(line: line, message: "The tool '\(name)' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, the bit words 'bitand', 'bitor' and 'bitxor', 'leftover', for what a dividing leaves, 'wholediv', for dividing into whole numbers, 'asnumber', for reading a number out of text, and 'astext', for reading text out of a block of bytes.")
             }
             guard args.count == 1 else {
                 throw NiflaError(line: line, message: "'length' takes 1 value (value), but it was given \(args.count).")
@@ -894,6 +919,7 @@ struct BareTranslator {
             if name == "leftover" { return .number }
             if name == "wholediv" { return .number }
             if name == "asnumber" { return .number }
+            if name == "astext" { return .text }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -1361,6 +1387,157 @@ struct BareTranslator {
         out.append("    je __an_ret")
         out.append("    neg rax")
         out.append("__an_ret:")
+        out.append("    ret")
+        out.append("")
+        out.append("// Stone 44: reading text out of a block of bytes.")
+        out.append("// The block is in rax (its address) and rdx (its")
+        out.append("// count); the text comes back in rax and rdx the")
+        out.append("// same way, in a fresh block from the allocator")
+        out.append("// (three times the block's count is room enough:")
+        out.append("// a letter never takes more room as text than it")
+        out.append("// did as bytes, except a byte that is no letter")
+        out.append("// at all, which takes the replacement mark's")
+        out.append("// three). The bytes are read as UTF-8, the")
+        out.append("// writing the hosted doors read: a letter's whole")
+        out.append("// sequence of bytes passes through as it stands;")
+        out.append("// a run of bytes that is not a letter — a byte")
+        out.append("// that starts nothing, a letter cut short, a")
+        out.append("// sequence written overlong or into the marks")
+        out.append("// set apart — stands as the one replacement mark")
+        out.append("// (U+FFFD, written EF BF BD), never dropped,")
+        out.append("// never guessed at. The walk follows the rule")
+        out.append("// every reader follows: a cut-short letter counts")
+        out.append("// its whole sound prefix as the one run, and the")
+        out.append("// byte that broke it is read afresh after the")
+        out.append("// mark.")
+        out.append("__nifla_astext:")
+        out.append("    push rbx")
+        out.append("    push r12")
+        out.append("    push r13")
+        out.append("    mov rbx, rax")
+        out.append("    mov r12, rdx")
+        out.append("    lea rax, [rdx + rdx*2]")
+        out.append("    call __nifla_alloc")
+        out.append("    mov r13, rax")
+        out.append("    mov rdi, rax")
+        out.append("    mov rsi, rbx")
+        out.append("    mov rcx, r12")
+        out.append("__at_loop:")
+        out.append("    test rcx, rcx")
+        out.append("    je __at_done")
+        out.append("    movzx eax, byte ptr [rsi]")
+        out.append("    cmp eax, 0x80")
+        out.append("    jb __at_copy1")
+        out.append("    cmp eax, 0xC2")
+        out.append("    jb __at_mark1")
+        out.append("    cmp eax, 0xE0")
+        out.append("    jb __at_2byte")
+        out.append("    je __at_e0")
+        out.append("    cmp eax, 0xED")
+        out.append("    jb __at_3byte")
+        out.append("    je __at_ed")
+        out.append("    cmp eax, 0xF0")
+        out.append("    jb __at_3byte")
+        out.append("    je __at_f0")
+        out.append("    cmp eax, 0xF4")
+        out.append("    jb __at_4byte")
+        out.append("    je __at_f4")
+        out.append("    jmp __at_mark1")
+        out.append("__at_2byte:")
+        out.append("    mov r8, 2")
+        out.append("    mov r9, 0x80")
+        out.append("    mov r10, 0xBF")
+        out.append("    jmp __at_seq")
+        out.append("__at_e0:")
+        out.append("    mov r8, 3")
+        out.append("    mov r9, 0xA0")
+        out.append("    mov r10, 0xBF")
+        out.append("    jmp __at_seq")
+        out.append("__at_3byte:")
+        out.append("    mov r8, 3")
+        out.append("    mov r9, 0x80")
+        out.append("    mov r10, 0xBF")
+        out.append("    jmp __at_seq")
+        out.append("__at_ed:")
+        out.append("    mov r8, 3")
+        out.append("    mov r9, 0x80")
+        out.append("    mov r10, 0x9F")
+        out.append("    jmp __at_seq")
+        out.append("__at_f0:")
+        out.append("    mov r8, 4")
+        out.append("    mov r9, 0x90")
+        out.append("    mov r10, 0xBF")
+        out.append("    jmp __at_seq")
+        out.append("__at_4byte:")
+        out.append("    mov r8, 4")
+        out.append("    mov r9, 0x80")
+        out.append("    mov r10, 0xBF")
+        out.append("    jmp __at_seq")
+        out.append("__at_f4:")
+        out.append("    mov r8, 4")
+        out.append("    mov r9, 0x80")
+        out.append("    mov r10, 0x8F")
+        out.append("    jmp __at_seq")
+        out.append("__at_seq:")
+        out.append("    mov r11, 1")
+        out.append("__at_seq_check:")
+        out.append("    cmp r11, r8")
+        out.append("    je __at_copyseq")
+        out.append("    cmp r11, rcx")
+        out.append("    je __at_markprefix")
+        out.append("    movzx eax, byte ptr [rsi + r11]")
+        out.append("    cmp r11, 1")
+        out.append("    je __at_seq_first")
+        out.append("    cmp eax, 0x80")
+        out.append("    jb __at_markprefix")
+        out.append("    cmp eax, 0xBF")
+        out.append("    ja __at_markprefix")
+        out.append("    inc r11")
+        out.append("    jmp __at_seq_check")
+        out.append("__at_seq_first:")
+        out.append("    cmp eax, r9d")
+        out.append("    jb __at_markprefix")
+        out.append("    cmp eax, r10d")
+        out.append("    ja __at_markprefix")
+        out.append("    inc r11")
+        out.append("    jmp __at_seq_check")
+        out.append("__at_copyseq:")
+        out.append("    push rcx")
+        out.append("    mov rcx, r8")
+        out.append("    rep movsb")
+        out.append("    pop rcx")
+        out.append("    sub rcx, r8")
+        out.append("    jmp __at_loop")
+        out.append("__at_markprefix:")
+        out.append("    mov byte ptr [rdi], 0xEF")
+        out.append("    mov byte ptr [rdi + 1], 0xBF")
+        out.append("    mov byte ptr [rdi + 2], 0xBD")
+        out.append("    add rdi, 3")
+        out.append("    add rsi, r11")
+        out.append("    sub rcx, r11")
+        out.append("    jmp __at_loop")
+        out.append("__at_mark1:")
+        out.append("    mov byte ptr [rdi], 0xEF")
+        out.append("    mov byte ptr [rdi + 1], 0xBF")
+        out.append("    mov byte ptr [rdi + 2], 0xBD")
+        out.append("    add rdi, 3")
+        out.append("    inc rsi")
+        out.append("    dec rcx")
+        out.append("    jmp __at_loop")
+        out.append("__at_copy1:")
+        out.append("    movzx eax, byte ptr [rsi]")
+        out.append("    mov byte ptr [rdi], al")
+        out.append("    inc rsi")
+        out.append("    inc rdi")
+        out.append("    dec rcx")
+        out.append("    jmp __at_loop")
+        out.append("__at_done:")
+        out.append("    mov rax, r13")
+        out.append("    mov rdx, rdi")
+        out.append("    sub rdx, r13")
+        out.append("    pop r13")
+        out.append("    pop r12")
+        out.append("    pop rbx")
         out.append("    ret")
         out.append("__nifla_say_text:")
         out.append("    push rbx")
@@ -2295,6 +2472,17 @@ struct BareTranslator {
             // bare metal can hold.
             emitExpr(args[0])
             emit("    call __nifla_asnumber")
+            return
+        }
+        if name == "astext" {
+            // Stone 44: the block is already in rax/rdx;
+            // the runtime's reader walks its bytes and
+            // answers a fresh piece of text in rax/rdx —
+            // the bytes read as UTF-8, with the
+            // replacement mark standing for any run of
+            // bytes that is not a letter.
+            emitExpr(args[0])
+            emit("    call __nifla_astext")
             return
         }
         if name == "makebytes" {

@@ -3246,6 +3246,76 @@ primer and tutorial books true, web corpus byte
 for byte, feather, feathercheck, selfmade,
 web-floor and every other bare proof green.
 
+## Stone 44 — `astext` comes to bare metal: the last word answered
+
+Stone 39's ledger left one word standing apart:
+`astext`, which "still needs a bare answer of its
+own." The need was never a missing shape — its
+answer is text, and text is a shape bare metal
+holds — but a meaning: the hosted word reads a
+block of bytes as UTF-8 and stands the
+replacement mark for any run of bytes that is
+not a letter, and the mark's reckoning (which
+bytes form one run, and how many marks a broken
+sequence earns) had to be carried to bare metal
+whole, not thinned. This stone carries it whole.
+
+Both bare compilers now take the word (validator,
+kind, and emission), and each door's runtime
+carries a reader that walks the block's bytes
+into a fresh block from the allocator. The
+reading is the hosted one, exactly: a letter's
+whole sequence of bytes passes through as it
+stands — plain letters, two-byte letters,
+four-byte letters — and a run that is not a
+letter stands as the one replacement mark
+(U+FFFD), never dropped, never guessed at. The
+walk follows the rule every reader follows,
+checked against the hosted door byte for byte
+before it was trusted: a byte that starts
+nothing is one mark; a lone continuation is one
+mark; a letter cut short — at the block's end,
+or by a byte that cannot continue it — counts
+its whole sound prefix as the one run and earns
+one mark, and the byte that broke it is read
+afresh after the mark; a sequence written
+overlong earns a mark for its false lead and
+another for the continuation left standing; one
+written into the marks set apart (a surrogate)
+earns a mark for each of its bytes, as every
+reader shows it. An empty block reads as an
+empty text.
+
+With this stone the ledger Stone 38 left stands
+answered in full, with nothing left apart: every
+word of Stones 26–32 that the language has —
+`asnumber` at Stone 39 and now `astext` — stands
+on bare metal with its hosted meaning, except
+the rounding words, which name a thing whole
+numbers have no share in and stand apart with
+their reason recorded, not as a debt.
+
+PRIMER's `astext` section gains the bare note
+and a bare example. The bare tools proof gains
+its seventh line ("astext Shalom" — a word read
+out of its bytes), spoken on the ARM machine
+too, and two new parts that prove the mark's
+reckoning byte for byte on both doors
+(bare-examples/nifla-astext.nifla): twelve blocks
+read aloud — letters whole in two and four
+bytes, and every shape of not-a-letter — checked
+against the screen's own bytes on x86 and the
+serial bytes themselves on ARM.
+
+Proofs: no suite count changes — the word was
+proved on the hosted doors at Stone 28.
+Interpreted 60/60, compiled 159/159, voice 6/6,
+self-hosted 60/60, primer and tutorial books
+true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green, the full sweep run on this stone's
+own tree.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

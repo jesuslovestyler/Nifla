@@ -1,0 +1,80 @@
+// 'astext' on bare metal (Stone 44): a block of bytes
+// read as text, line by line — the hosted word's whole
+// reckoning, proved byte for byte. A letter's sequence
+// passes through as it stands (a two-byte letter, a
+// four-byte letter); a run of bytes that is not a
+// letter stands as the replacement mark — a byte that
+// starts nothing, a lone continuation, a letter cut
+// short at the block's end or by a byte that cannot
+// continue it, a sequence written overlong, and one
+// written into the marks set apart (each of its bytes
+// a mark of its own, as every reader shows it). An
+// empty block reads as an empty line. The lines are
+// checked byte for byte on both bare doors by
+// run-bare-tools.sh (its fifth and sixth parts): on
+// the x86 door the screen's own bytes are read back,
+// and on the ARM door the serial bytes themselves.
+
+make show(bs: bytes) {
+    say astext(bs)
+}
+
+let a = makebytes(3)
+a[0] = 72
+a[1] = 255
+a[2] = 105
+show(a)
+
+let b = makebytes(2)
+b[0] = 195
+b[1] = 169
+show(b)
+
+let c = makebytes(2)
+c[0] = 226
+c[1] = 130
+show(c)
+
+let d = makebytes(4)
+d[0] = 240
+d[1] = 159
+d[2] = 152
+d[3] = 128
+show(d)
+
+let e = makebytes(1)
+e[0] = 128
+show(e)
+
+let f = makebytes(2)
+f[0] = 195
+f[1] = 40
+show(f)
+
+let g = makebytes(2)
+g[0] = 192
+g[1] = 128
+show(g)
+
+let h = makebytes(3)
+h[0] = 237
+h[1] = 160
+h[2] = 128
+show(h)
+
+let i = makebytes(3)
+i[0] = 226
+i[1] = 130
+i[2] = 40
+show(i)
+
+let j = makebytes(3)
+j[0] = 240
+j[1] = 159
+j[2] = 152
+show(j)
+
+let k = makebytes(0)
+show(k)
+
+say "astext read whole"

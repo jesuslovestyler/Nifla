@@ -1,6 +1,6 @@
 #!/bin/sh
 # The bare tools proof: the hosted toolbox words on bare
-# metal. Four parts:
+# metal. Six parts:
 #
 #   1. (Stone 34) Compiles bare-examples/nifla-tools.nifla
 #      with `niflac --bare`, boots the binary in QEMU with
@@ -29,6 +29,20 @@
 #   4. (Stone 39) The halt proof, ARM: the same program
 #      over the serial line — the first line arrives and
 #      the last never does.
+#
+#   5. (Stone 44) The astext proof, x86: bare-examples/
+#      nifla-astext.nifla reads twelve blocks of bytes
+#      as text — letters whole, and every shape of
+#      not-a-letter standing as the replacement mark.
+#      The screen's rows are read back as their raw
+#      bytes (the mark and the letters beyond ASCII
+#      are bytes, not glyphs the readback could name)
+#      and must begin, byte for byte, with the lines
+#      of bare-examples/nifla-astext.screen.
+#
+#   6. (Stone 44) The astext proof, ARM: the same
+#      program over the serial line — every line's
+#      bytes exactly the screen file's lines.
 #
 # Prints PASS or FAIL. The x86 QEMU is the bench machine's
 # extracted QEMU 10 (~/qemu10-root), run through its own
@@ -424,4 +438,153 @@ if grep -Fq "After the reading" "$WORK/halt-serial.txt" || grep -Fq "Read:" "$WO
 fi
 echo "PASS nifla-tools-halt on ARM (an unreadable text stopped the machine before its next word)"
 
-echo "run-bare-tools: PASS — the toolbox words stand on both bare doors, and an unreadable text stops both machines."
+# --- Part 5: the astext proof, x86 ---------------------------
+ASTEXT_ELF="$WORK/nifla-astext.elf"
+if ! ./niflac --bare bare-examples/nifla-astext.nifla -o "$ASTEXT_ELF" > "$WORK/build-astext.txt" 2>&1; then
+    echo "FAIL: niflac --bare refused or failed (astext proof):"
+    cat "$WORK/build-astext.txt"
+    exit 1
+fi
+SOCK="$WORK/monitor-astext.sock"
+if [ -n "${QEMU:-}" ]; then
+    # shellcheck disable=SC2086
+    $QEMU -kernel "$ASTEXT_ELF" -display none -m 32 -nic none \
+        -monitor "unix:$SOCK,server,nowait" &
+    QEMU_PID=$!
+else
+    "$HOME/qemu10-root/usr/lib64/ld-linux-x86-64.so.2" \
+        --library-path "$HOME/qemu10-root/usr/lib/x86_64-linux-gnu:$HOME/qemu10-root/lib/x86_64-linux-gnu" \
+        "$HOME/qemu10-root/usr/bin/qemu-system-x86_64" \
+        -kernel "$ASTEXT_ELF" -display none -m 32 -nic none \
+        -monitor "unix:$SOCK,server,nowait" \
+        -L "$HOME/qemu10-root/usr/share/qemu" \
+        -L "$HOME/qemu10-root/usr/share/seabios" \
+        > "$WORK/qemu-astext.txt" 2>&1 &
+    QEMU_PID=$!
+fi
+
+python3 - "$SOCK" bare-examples/nifla-astext.screen <<'PYEOF'
+import re
+import socket
+import sys
+import time
+
+sock_path, screen_path = sys.argv[1], sys.argv[2]
+expected = [line.encode("utf-8") for line in open(screen_path, encoding="utf-8").read().splitlines()]
+
+deadline = time.time() + 15
+sock = None
+while time.time() < deadline:
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(sock_path)
+        break
+    except OSError:
+        if sock is not None:
+            sock.close()
+        sock = None
+        time.sleep(0.2)
+if sock is None:
+    print("FAIL: the QEMU monitor never opened (astext proof)")
+    sys.exit(1)
+sock.settimeout(5)
+
+
+class MonitorQuiet(Exception):
+    """The monitor hasn't answered yet — worth another try."""
+
+
+def read_until_prompt():
+    buf = b""
+    while b"(qemu)" not in buf:
+        try:
+            chunk = sock.recv(4096)
+        except socket.timeout:
+            raise MonitorQuiet()
+        if not chunk:
+            raise MonitorQuiet()
+        buf += chunk
+    return buf.decode(errors="replace")
+
+
+greeted = False
+
+
+def screen_rows():
+    """The first thirteen rows of the text screen, as raw
+    character bytes (the attribute bytes set aside)."""
+    global greeted
+    try:
+        if not greeted:
+            read_until_prompt()
+            greeted = True
+        sock.sendall(b"xp /2080bx 0xb8000\n")
+        out = read_until_prompt()
+    except (MonitorQuiet, OSError):
+        return None
+    data = []
+    for line in out.splitlines():
+        match = re.match(r"^[0-9a-f]+: ((?:0x[0-9a-f]{2} ?)+)$", line.strip())
+        if match:
+            data += [int(part, 16) for part in match.group(1).split()]
+    if len(data) < 2080:
+        return None
+    chars = bytes(data[i] for i in range(0, 2080, 2))
+    return [chars[i * 80:(i + 1) * 80] for i in range(13)]
+
+
+deadline = time.time() + 25
+rows = None
+while time.time() < deadline:
+    rows = screen_rows()
+    if rows and all(rows[i].startswith(expected[i]) for i in range(len(expected))):
+        break
+    time.sleep(0.5)
+
+try:
+    sock.sendall(b"quit\n")
+    sock.close()
+except OSError:
+    pass
+
+if rows and all(rows[i].startswith(expected[i]) for i in range(len(expected))):
+    for i, line in enumerate(expected):
+        print(f"row {i + 1} begins (bytes): {line!r}")
+    print("PASS nifla-astext (bare metal: bytes read as text, the replacement mark standing where no letter stands)")
+    sys.exit(0)
+print("FAIL: the expected bytes never appeared on the emulated screen (astext proof)")
+print(f"expected rows to begin with: {expected!r}")
+print(f"last rows read: {rows!r}")
+sys.exit(1)
+PYEOF
+[ $? -eq 0 ] || exit 1
+kill "$QEMU_PID" 2>/dev/null; QEMU_PID=""
+
+# --- Part 6: the astext proof, ARM ---------------------------
+ASTEXT_ARM_ELF="$WORK/nifla-astext-arm.elf"
+if ! ./niflac --bare --arm bare-examples/nifla-astext.nifla -o "$ASTEXT_ARM_ELF" > "$WORK/build-astext-arm.txt" 2>&1; then
+    echo "FAIL: niflac --bare --arm refused or failed (astext proof):"
+    cat "$WORK/build-astext-arm.txt"
+    exit 1
+fi
+drive_arm "$ASTEXT_ARM_ELF" "astext read whole" 0 >"$WORK/astext-serial.txt" || { echo "FAIL: the ARM serial drive failed (astext proof)"; exit 1; }
+python3 - "$WORK/astext-serial.txt" bare-examples/nifla-astext.screen <<'PYEOF'
+import sys
+
+serial_path, screen_path = sys.argv[1], sys.argv[2]
+expected = open(screen_path, "rb").read().split(b"\n")
+if expected and expected[-1] == b"":
+    expected = expected[:-1]
+got = open(serial_path, "rb").read().replace(b"\r\n", b"\n").split(b"\n")
+ok = len(got) >= len(expected) and all(got[i] == expected[i] for i in range(len(expected)))
+if ok:
+    print("PASS nifla-astext on ARM (bytes read as text over the serial line, byte for byte)")
+    sys.exit(0)
+print("FAIL: the ARM serial lines were not the expected bytes (astext proof)")
+print(f"expected lines: {expected!r}")
+print(f"lines that arrived: {got!r}")
+sys.exit(1)
+PYEOF
+[ $? -eq 0 ] || exit 1
+
+echo "run-bare-tools: PASS — the toolbox words stand on both bare doors, an unreadable text stops both machines, and bytes read as text on both doors."

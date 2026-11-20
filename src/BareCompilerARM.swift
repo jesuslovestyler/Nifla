@@ -205,6 +205,7 @@ struct BareTranslatorARM {
             if name == "leftover" { return .number }
             if name == "wholediv" { return .number }
             if name == "asnumber" { return .number }
+            if name == "astext" { return .text }
             if name == "makebytes" { return .bytes }
             if bareOnlyTools[name] != nil { return .number }
             if guestDeskTools[name] != nil || guestDoorTools[name] != nil { return .number }
@@ -751,6 +752,163 @@ struct BareTranslatorARM {
         out.append("    cbz x12, 6f")
         out.append("    neg x0, x0")
         out.append("6:  ret")
+        out.append("")
+        // astext: reading text out of a block of bytes
+        // (Stone 44). The block is in x0 (its address)
+        // and x1 (its count); the text comes back in
+        // x0 and x1 the same way, in a fresh block from
+        // the allocator (three times the block's count
+        // is room enough: a letter never takes more
+        // room as text than it did as bytes, except a
+        // byte that is no letter at all, which takes
+        // the replacement mark's three). The bytes are
+        // read as UTF-8, the writing the hosted doors
+        // read: a letter's whole sequence of bytes
+        // passes through as it stands; a run of bytes
+        // that is not a letter — a byte that starts
+        // nothing, a letter cut short, a sequence
+        // written overlong or into the marks set
+        // apart — stands as the one replacement mark
+        // (U+FFFD, written EF BF BD), never dropped,
+        // never guessed at. The walk follows the rule
+        // every reader follows: a cut-short letter
+        // counts its whole sound prefix as the one
+        // run, and the byte that broke it is read
+        // afresh after the mark.
+        out.append("__nifla_astext:")
+        out.append("    stp x29, x30, [sp, #-16]!")
+        out.append("    mov x29, sp")
+        out.append("    mov x9, x0")
+        out.append("    mov x10, x1")
+        out.append("    str x9, [sp, #-16]!")
+        out.append("    str x10, [sp, #-16]!")
+        out.append("    add x0, x1, x1, lsl #1")
+        out.append("    bl __nifla_alloc")
+        out.append("    ldr x10, [sp], #16")
+        out.append("    ldr x9, [sp], #16")
+        out.append("    mov x11, x0")
+        out.append("    mov x12, x0")
+        out.append("    mov x13, x9")
+        out.append("    mov x14, x10")
+        out.append("__at_loop:")
+        out.append("    cbz x14, __at_done")
+        out.append("    ldrb w15, [x13]")
+        out.append("    cmp w15, #0x80")
+        out.append("    b.lo __at_copy1")
+        out.append("    cmp w15, #0xC2")
+        out.append("    b.lo __at_mark1")
+        out.append("    cmp w15, #0xE0")
+        out.append("    b.lo __at_2byte")
+        out.append("    b.eq __at_e0")
+        out.append("    cmp w15, #0xED")
+        out.append("    b.lo __at_3byte")
+        out.append("    b.eq __at_ed")
+        out.append("    cmp w15, #0xF0")
+        out.append("    b.lo __at_3byte")
+        out.append("    b.eq __at_f0")
+        out.append("    cmp w15, #0xF4")
+        out.append("    b.lo __at_4byte")
+        out.append("    b.eq __at_f4")
+        out.append("    b __at_mark1")
+        out.append("__at_2byte:")
+        out.append("    mov x16, #2")
+        out.append("    mov x17, #0x80")
+        out.append("    mov x9, #0xBF")
+        out.append("    b __at_seq")
+        out.append("__at_e0:")
+        out.append("    mov x16, #3")
+        out.append("    mov x17, #0xA0")
+        out.append("    mov x9, #0xBF")
+        out.append("    b __at_seq")
+        out.append("__at_3byte:")
+        out.append("    mov x16, #3")
+        out.append("    mov x17, #0x80")
+        out.append("    mov x9, #0xBF")
+        out.append("    b __at_seq")
+        out.append("__at_ed:")
+        out.append("    mov x16, #3")
+        out.append("    mov x17, #0x80")
+        out.append("    mov x9, #0x9F")
+        out.append("    b __at_seq")
+        out.append("__at_f0:")
+        out.append("    mov x16, #4")
+        out.append("    mov x17, #0x90")
+        out.append("    mov x9, #0xBF")
+        out.append("    b __at_seq")
+        out.append("__at_4byte:")
+        out.append("    mov x16, #4")
+        out.append("    mov x17, #0x80")
+        out.append("    mov x9, #0xBF")
+        out.append("    b __at_seq")
+        out.append("__at_f4:")
+        out.append("    mov x16, #4")
+        out.append("    mov x17, #0x80")
+        out.append("    mov x9, #0x8F")
+        out.append("    b __at_seq")
+        out.append("__at_seq:")
+        out.append("    mov x10, #1")
+        out.append("__at_seq_check:")
+        out.append("    cmp x10, x16")
+        out.append("    b.eq __at_copyseq")
+        out.append("    cmp x10, x14")
+        out.append("    b.eq __at_markprefix")
+        out.append("    ldrb w15, [x13, x10]")
+        out.append("    cmp x10, #1")
+        out.append("    b.eq __at_seq_first")
+        out.append("    cmp w15, #0x80")
+        out.append("    b.lo __at_markprefix")
+        out.append("    cmp w15, #0xBF")
+        out.append("    b.hi __at_markprefix")
+        out.append("    add x10, x10, #1")
+        out.append("    b __at_seq_check")
+        out.append("__at_seq_first:")
+        out.append("    cmp w15, w17")
+        out.append("    b.lo __at_markprefix")
+        out.append("    cmp w15, w9")
+        out.append("    b.hi __at_markprefix")
+        out.append("    add x10, x10, #1")
+        out.append("    b __at_seq_check")
+        out.append("__at_copyseq:")
+        out.append("    mov x10, x16")
+        out.append("__at_copyseq_loop:")
+        out.append("    cbz x10, __at_copyseq_done")
+        out.append("    ldrb w15, [x13], #1")
+        out.append("    strb w15, [x12], #1")
+        out.append("    sub x10, x10, #1")
+        out.append("    b __at_copyseq_loop")
+        out.append("__at_copyseq_done:")
+        out.append("    sub x14, x14, x16")
+        out.append("    b __at_loop")
+        out.append("__at_markprefix:")
+        out.append("    mov w15, #0xEF")
+        out.append("    strb w15, [x12], #1")
+        out.append("    mov w15, #0xBF")
+        out.append("    strb w15, [x12], #1")
+        out.append("    mov w15, #0xBD")
+        out.append("    strb w15, [x12], #1")
+        out.append("    add x13, x13, x10")
+        out.append("    sub x14, x14, x10")
+        out.append("    b __at_loop")
+        out.append("__at_mark1:")
+        out.append("    mov w15, #0xEF")
+        out.append("    strb w15, [x12], #1")
+        out.append("    mov w15, #0xBF")
+        out.append("    strb w15, [x12], #1")
+        out.append("    mov w15, #0xBD")
+        out.append("    strb w15, [x12], #1")
+        out.append("    add x13, x13, #1")
+        out.append("    sub x14, x14, #1")
+        out.append("    b __at_loop")
+        out.append("__at_copy1:")
+        out.append("    ldrb w15, [x13], #1")
+        out.append("    strb w15, [x12], #1")
+        out.append("    sub x14, x14, #1")
+        out.append("    b __at_loop")
+        out.append("__at_done:")
+        out.append("    mov x0, x11")
+        out.append("    sub x1, x12, x11")
+        out.append("    ldp x29, x30, [sp], #16")
+        out.append("    ret")
         out.append("")
         // text_eq: two pieces of text (x0/x1 and x2/x3);
         // gives back 1 in x0 when they are the same words.
@@ -1495,6 +1653,17 @@ struct BareTranslatorARM {
             // bare metal can hold.
             emitExpr(args[0])
             emit("    bl __nifla_asnumber")
+            return
+        }
+        if name == "astext" {
+            // Stone 44: the block is already in x0/x1;
+            // the runtime's reader walks its bytes and
+            // answers a fresh piece of text in x0/x1 —
+            // the bytes read as UTF-8, with the
+            // replacement mark standing for any run of
+            // bytes that is not a letter.
+            emitExpr(args[0])
+            emit("    bl __nifla_astext")
             return
         }
         if name == "makebytes" {

@@ -689,6 +689,31 @@ build its letters one by one out of the printable
 characters, and let whatever it could not build fall
 away.)
 
+(Stone 44. The word stands on bare metal too, with
+the same reading: the bytes are read as UTF-8, a
+letter's whole sequence passes through as it
+stands, and a run of bytes that is not a letter
+stands as the replacement mark — a byte that
+starts nothing, a lone continuation, a letter cut
+short, a sequence written overlong or into the
+marks set apart, each counted the way every reader
+counts it, the mark never dropped and never
+guessed at. Unlike `asnumber` the word needed no
+answer bare metal cannot give: its answer is text,
+and text is a shape bare metal holds, so nothing
+about the reading changes at the bare door. The
+feather door, which had been building a card's
+letters one by one and letting what it could not
+build fall away, can read them whole now.)
+
+```nifla-bare
+let block = makebytes(3)
+block[0] = 72
+block[1] = 255
+block[2] = 105
+say astext(block)
+```
+
 ### `asnumber` — a number out of text
 
 `asnumber(text)` reads a number out of some text — the

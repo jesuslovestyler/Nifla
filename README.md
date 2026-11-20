@@ -3113,6 +3113,68 @@ tutorial books true, web corpus byte for byte,
 feather, feathercheck, selfmade, web-floor and
 every bare proof green.
 
+## Stone 42 — the interleave verdict: a separate defect, standing apart from the doorman
+
+Stone 38 of the OS closed with a flag: at large
+print, the terminal answers' first letters never
+reached the screen, though the kept block held
+the whole line; the loss was pinned to the woven
+pass in the terminal row's painting, which laid
+each cell's paper and its letter together, and
+the row has been painted in two passes since.
+Stone 40's hunt raised the question this stone
+answers: was that loss the doorman's splash, like
+the phantom close, or a defect of its own?
+
+The experiment was run on the healed loader, so
+nothing could splash: a scratch OS tree carrying
+only the doorman fix, with `drawtermrow` woven
+back into its pre-Stone-38 shape — one loop,
+paper then letter per cell, the desk's color slot
+switched between them, exactly as the old console
+painted its rows. A targeted bench probe (the
+full prove-stone28.sh is currently bench-blocked
+on both builds alike by its large-size window
+drag — the pointer flake family the OS ledger
+already knows; the probe asks the letter question
+without the drag): settings opened, Large chosen,
+four `hello`s typed in the terminal, the screen
+read back letter by letter at the large size.
+
+- On the woven build, every answer line reads
+  "It is good to see you." — its first word,
+  "Hello.", never reaches the screen. The rest of
+  each line stands whole.
+- On the two-pass build, the identical probe
+  reads "Hello. It is good to see you.", whole,
+  on every line.
+
+**Verdict: separate.** The interleave loss is not
+the doorman's disease. It lives in the woven call
+shape itself — paper-fill and glyph interleaved
+per cell inside one loop, at the large size —
+on a loader proved byte-clean (Stone 41), with
+the compiled code reading correct, as it did at
+Stone 38. The mechanism below the source level
+is not named by this stone, and this ledger will
+not guess it: Stone 43 takes the woven shape
+down to a minimal bare-metal program, where the
+loss either reproduces in miniature — and can be
+bisected — or stands as an OS-scale interaction,
+with the two-pass row as its standing remedy
+either way. The OS has shipped the remedy since
+its Stone 38; nothing in the OS needs to change
+for this verdict, and the woven shape is not
+used there anymore.
+
+Proofs: no suite count changes and no Nifla code
+changes — interpreted 60/60, compiled 159/159,
+voice 6/6, self-hosted 60/60, primer and tutorial
+books true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green (the full sweep of Stone 40, the
+tree unchanged since).
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

@@ -1,0 +1,47 @@
+// Stone 53 fixture: the floor battery — floor blocks
+// in every position the translator meets them: handed
+// nothing, handed values, two handed to one call and
+// two chained by an operator (the walk meets the left
+// block first, so the numbering is pinned across an
+// expression), one inside a function's body, and
+// several in one program, so the declarations at the
+// foot of the generated Swift are pinned in order.
+// A floor block's closing line holds only '}', so a
+// block standing inside a larger expression leaves
+// the expression to continue on the next line — the
+// shape these middle lets take. (A floor inside
+// another floor's handed values is not a shape the
+// language has at all: floors-nested-refused.nifla
+// pins that refusal.)
+let zero = floor() {
+    mov rax, 7
+}
+let sum = floor(1, 2) {
+    mov rax, [r10]
+    add rax, [r10 + 8]
+}
+make add2(a, b) {
+    give a + b
+}
+let both = add2(floor(1) {
+    mov rax, [r10]
+}
+, floor(2) {
+    mov rax, [r10]
+    add rax, 1
+}
+)
+let chained = floor(3) {
+    mov rax, [r10]
+}
+ + floor(4) {
+    mov rax, [r10]
+}
+make infn(x) {
+    let y = floor(x) {
+        mov rax, [r10]
+        add rax, 100
+    }
+    give y
+}
+say zero + sum + both + chained + infn(1)

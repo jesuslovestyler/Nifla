@@ -1,0 +1,19 @@
+// Stone 53 fixture: a floor block inside another
+// floor's handed values — a shape the language does
+// not have. The Swift lexer reads a floor's values by
+// collecting tokens itself, and a nested floor-with-
+// values assigns the pending-token queue as it
+// finishes, stranding the outer collection, which
+// then reports its '(' as never closed. Both sides
+// refuse this program with that very message; the
+// fixture pins the refusal so the fact stands in the
+// corpus, named, rather than surprising anyone later.
+// It is a fact about the language, not a divergence:
+// the port's lexer was corrected to this behaviour in
+// Stone 47, and the translator is never reached.
+let nested = floor(floor(3) {
+    mov rax, [r10]
+}) {
+    mov rax, [r10]
+}
+say nested

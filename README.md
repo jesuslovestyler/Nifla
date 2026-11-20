@@ -4609,6 +4609,189 @@ the compiler, carried into Nifla the same way,
 piece by piece — is future work, named here
 and not started.
 
+## Stone 53 — the compiler begins: the translator stands in Nifla
+
+The all-Nifla port's third leg — the compiler —
+opens. `SwiftTranslator` in `src/Compiler.swift`
+(the part of `niflac` that turns a checked
+program into Swift text, the compiled door's
+generator) stands in Nifla in
+`selfhost/nifla-front.nifla` as the front end's
+new `compile` mode: lex, parse, check in the
+hosted picture, then translate, printing the
+generated Swift byte for byte as the Swift
+translator writes it. Nothing under `src/` is
+touched, and `selfhost/nifla-in-nifla.nifla` is
+untouched.
+
+**The convergence decision for this leg:
+SUPERSEDE**, in Stone 50's pattern. The
+self-hosted interpreter holds no translator to
+converge with — it runs programs; it never
+writes one out. Its file holds no occurrence of
+the translator's fingerprints (no
+`Value.number(`, no `__m.`, no translation walk
+of any kind), so there was nothing to lift. The
+translator is written fresh in Nifla against
+`Compiler.swift` as the sole standard, reusing
+the front file's helper layer (`numText`,
+`CRCHAR`, the result objects) the way the
+checker did. The self-host keeps its own way
+and stays untouched.
+
+Ported whole: the statement and expression
+walks line for line — one counter for every
+fresh name (`__s`, `__v`, `__b`, `__o`, `__t`,
+`__n`, `__d`, `__xs`, `__i`, `__e`), called for
+in exactly Swift's order; the floor blocks
+gathered in the order the walk meets them, a
+block entered *before* its handed values are
+translated; the header, the do/catch frame, and
+the floor declarations at the foot; the emitted
+lines gathered in a list and joined once, as
+Swift joins them.
+
+**The scope boundary, recorded honestly.** What
+stands here is the translator — the generator
+of the emitted Swift text, which is this leg's
+identity claim. `compileMain`'s driver half —
+the flag words, the file writing, the scratch
+folder, the running of `swiftc` and of the
+assembler, and the floor blocks' `.s` wrapper
+text — is not emitted Swift text and is not
+ported in this leg; it belongs to the
+bootstrap's story, when a Nifla program must
+drive a build and not only speak its text.
+`findAssembler`, which `Compiler.swift` also
+hosts and `BareCompiler.swift` uses, belongs to
+the bare legs' story, as Stone 50's ledger
+already noted of the oracle's link. The
+oracle's link is the same seven `src/` files
+as the check oracle's.
+
+**The two renderings that carry the risk** —
+both pinned by fixtures in `compile-examples/`
+(10 files, each confirmed against the oracle):
+
+- *Numbers.* Swift's `swiftNumber` writes a
+  whole number under 9.0e15 in magnitude as its
+  digits plus ".0", and everything else as
+  Swift's own Double text. The host's
+  number-to-text (`formatNumber`, reached by
+  the front file's `numText`) is that same
+  Double text everywhere except a whole number
+  under 1e15, whose ".0" it drops; and across
+  1e15..9e15 Swift's Double text for a whole
+  number is exactly its digits plus ".0" (Swift
+  turns to exponent writing only at 1e16 —
+  probed against this workspace's `swiftc`
+  across the range, 2^53−1 and 2^53+1 included,
+  before the rule was written). So the port's
+  whole rendering is `numText` with one patch:
+  whole and under 1e15, put the ".0" back. The
+  battery stands in `numbers.nifla` (literals
+  straddling both thresholds) and
+  `number-extremes.nifla` (a 412-digit literal
+  read as infinity, written `inf`; a fraction
+  with 393 zeros read as zero, written `0.0`).
+- *Text.* Swift's `swiftText` walks a value
+  scalar by scalar: the five named escapes,
+  every other scalar under 0x20 — and 0x7F —
+  written `\u{hex}` (lowercase, no leading
+  zero), the rest passed through. The port
+  walks the value character by character, in
+  grapheme clusters, which passes ordinary
+  characters through byte-identically. Two
+  shapes are named and pinned: a carriage
+  return and a line feed standing together are
+  one cluster here but two scalars to Swift, so
+  the pair is tested for as a pair and written
+  `\r\n` (`text-crlf.nifla`, its raw CR written
+  into the file byte by byte; a lone raw CR
+  stands beside it, where the pair rule must
+  not fire); and the control characters are
+  found by lookup in a control text built from
+  bytes at startup (`makebytes` + `astext`: the
+  codes 0..31 in order, then 127) — the
+  language gives no way to ask a character for
+  its code point (the front end's standing
+  boundary), but the 33 control characters can
+  be *built*, and a character equal to one of
+  them is that control character, control
+  characters always standing alone as clusters,
+  the CR/LF pair apart (`text-control.nifla`:
+  raw 0x01, 0x0B, 0x1F, 0x7F in literals, written
+  byte by byte).
+
+**A fact about the language, found by a
+fixture and recorded, not worked around.** A
+floor block cannot stand inside another floor's
+handed values: the Swift lexer reads a floor's
+values by collecting tokens itself, and a
+nested floor-with-values assigns the
+pending-token queue as it finishes (the
+behaviour Stone 47's header records), stranding
+the outer collection, which reports its '(' as
+never closed. Both sides refuse the shape in
+the same words — `floors-nested-refused.nifla`
+pins the refusal in the corpus — and the
+expressible ordering shapes (floors handed to
+one call, floors chained by an operator, the
+continuation on the next line, since a floor's
+closing line holds only '}') stand in
+`floors.nifla`, pinning the block numbering
+across an expression.
+
+**Proof:** `tools/compile-oracle.swift` (a
+proof-only Swift main in the check oracle's
+pattern) and `run-compile.sh`, comparing
+stdout, stderr and exit byte for byte across
+the whole corpus in `compile` mode: examples
+60/60, checker 45/45 (each refuses, and the
+agreed refusal equals its `.error` file byte
+for byte), floor 4/4, voice 3/3, selfhost 2/2,
+tools 1/1, primer 58/58, tutorial 86/86,
+fixtures 102/102, checkfix 64/64, cmpfix 10/10,
+bare 16/16, cardnull 21/21; boundary 3 noted
+(the front-examples boundary fixtures diverge
+at the lex stage in compile mode too, verified
+divergent). The bare and Cardnull groups run
+in the hosted picture, where the compiled door
+refuses most of them at the check stage — the
+claim there is refusal identity, and it holds
+on every file. No disagreement was found
+anywhere, so no port fix was needed and none
+was made.
+
+**The diagnostics measurement, per Stone 50's
+pipe finding.** The new section is written in
+the front file's prevailing style, and the
+whole file's generated Swift — re-measured in
+this stone's scratch beside Stone 52's file
+under the same method and path shape — stands
+at 58 warnings / 48,149 bytes of diagnostics,
+against the Stone 52 file's 56 warnings /
+46,727 bytes: a growth of two warnings, still
+well under the swiftc-stderr pipe's 64 KB, and
+`niflac` compiles the enlarged front end as
+every proof requires.
+
+No PRIMER change: the language's surface did
+not change in this leg.
+
+Behavior unchanged everywhere else: the full
+suite sweep on this tree — every run-*.sh plus
+run_tests.sh, 29 scripts in all with this
+stone's proof among them, each exit 0 —
+interpreted 60/60, compiled 159/159, voice
+6/6, self-hosted 60/60, primer and tutorial
+books true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every
+bare proof green, with the front leg's proofs
+and gate and the checker leg's corpus proof,
+sweep and gate passing whole on the enlarged
+front end.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

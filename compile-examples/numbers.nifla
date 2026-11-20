@@ -1,0 +1,37 @@
+// Stone 53 fixture: the number battery. Every literal
+// shape the translator's number rendering (cmpSwiftNumber)
+// can meet — whole numbers below, at and past the two
+// thresholds (1e15, where the host's own rendering starts
+// keeping Swift's text whole, and 9e15, where
+// SwiftTranslator stops writing digits and hands the
+// value to Swift's Double text), fractions short and
+// long, and a fraction small enough to sit in Swift's
+// exponent range. The extremes a digit string can reach
+// stand in number-extremes.nifla.
+let a = 0
+let b = 5
+let c = 100
+let d = 999999999999999
+let e = 1000000000000000
+let f = 1000000000000001
+let g = 1234567890123456
+let h = 4503599627370495
+let i = 4503599627370496
+let j = 8999999999999999
+let k = 9000000000000000
+let l = 9007199254740991
+let m = 9007199254740993
+let n = 9999999999999999
+let o = 10000000000000000
+let p = 123456789012345678
+let q = 100000000000000000000
+let r = 0.5
+let s = 0.1
+let t = 3.141592653589793
+let u = 0.333333333333333333333333333
+let v = 123456.789
+let w = 1234567890.12345
+let x = 0.0001
+let y = 0.000000000000000000000000000001
+let z = 2.5
+say a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p + q + r + s + t + u + v + w + x + y + z

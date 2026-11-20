@@ -1,0 +1,16 @@
+// Stone 53 fixture: the text battery — every escape
+// the language knows, a raw tab standing in a literal,
+// and text from past the ASCII edge (accented letters,
+// a combining mark, CJK, an emoji with a joiner), all
+// of which SwiftTranslator passes through as it stands
+// while the escapes come back out as escapes.
+let a = "plain"
+let b = "line one\nline two"
+let c = "tab\there"
+let rawtab = "raw	tab"
+let d = "a \"quoted\" word"
+let e = "back\\slash"
+let f = "café — naïve — Αλφα — 中文 — é — 👨‍👩‍👧"
+let g = "trailing space "
+let h = ""
+say a + b + c + rawtab + d + e + f + g + h

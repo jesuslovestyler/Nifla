@@ -1,0 +1,13 @@
+// Stone 53 fixture: a carriage return and a line feed
+// standing side by side in one text value. The literal
+// below holds a raw carriage-return byte (written into
+// this file byte by byte) followed by the \n escape, so
+// the value is a, CR, LF, b. SwiftTranslator walks the
+// value scalar by scalar and writes \r\n; the port
+// walks it cluster by cluster, meets the pair as one
+// cluster, and must write the same \r\n. The second
+// literal holds a raw carriage return alone, between
+// two letters, where the pair rule must not fire.
+let pair = "a\nb"
+let lone = "xy"
+say pair + lone

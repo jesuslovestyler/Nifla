@@ -1,7 +1,8 @@
 // Nifla front — the Nifla toolchain's front end, written in
-// Nifla itself (Stones 47–50, the first stones of the
+// Nifla itself (Stones 47–53, the first stones of the
 // all-Nifla port: the lexer and parser in Stones 47–48,
-// the checker beginning in Stone 50).
+// the checker in Stones 50–52, the compiler's translator
+// beginning in Stone 53).
 //
 // Run it the way the toolchain's front half would be run:
 //
@@ -10,6 +11,7 @@
 //     nifla-front check <path>
 //     nifla-front check-bare <path>
 //     nifla-front check-guest <path>
+//     nifla-front compile <path>
 //
 // Stone 50 adds the check modes: lex, parse, then the
 // checker (the section below the tree dump), printing
@@ -18,6 +20,12 @@
 // bare and guest pictures — the bare/guest tool doors
 // and the bare floor-text rule stand in the checker
 // section beside the hosted walk.
+//
+// Stone 53 adds the compile mode: lex, parse, check
+// (the hosted picture), then the translator (the
+// section below the checker), printing the generated
+// Swift exactly as the toolchain's SwiftTranslator
+// (src/Compiler.swift) writes it.
 //
 // 'tokens' reads the file at <path> and prints its tokens,
 // one per line, in this dump:
@@ -4866,23 +4874,470 @@ make chkCheckProgram(stmts, forBare, forGuest) {
     give chkBlock(stmts, e, [])
 }
 
+// ---------- the compiler ----------
+// Stone 53: the compiler begins. The Swift translator
+// (SwiftTranslator in src/Compiler.swift — the part of
+// niflac that turns a checked program into Swift text)
+// ported into Nifla, fresh — a SUPERSESSION, not a
+// convergence, in Stone 50's pattern: the self-hosted
+// interpreter holds no translator to lift (it runs
+// programs; it never writes one out — its file holds
+// no occurrence of the translator's fingerprints, no
+// "Value.number(", no "__m."), so this section is
+// written against Compiler.swift as the sole standard,
+// reusing the front end's helpers (numText, CRCHAR)
+// and standing beside the checker as the front end's
+// new "compile" mode: lex, parse, check in the hosted
+// picture, then translate, printing the generated
+// Swift byte for byte as SwiftTranslator writes it.
+//
+// What stands here is the translator only.
+// compileMain's driver half — the flag words, the
+// file writing, the scratch folder, the running of
+// swiftc and of the assembler, and the floor blocks'
+// .s wrapper text — is not emitted Swift text and is
+// not this leg's claim; findAssembler, which
+// Compiler.swift also hosts, belongs to the bare
+// legs' story, as Stone 50's ledger already noted of
+// the oracle's link.
+//
+// Two renderings carry the whole risk, and both are
+// pinned by fixtures in compile-examples/:
+//
+//   * Numbers. SwiftTranslator writes a number the
+//     Swift way (swiftNumber): a whole number under
+//     9.0e15 in magnitude goes out as its digits plus
+//     ".0"; anything else goes out as Swift's own
+//     Double text. The host's number-to-text
+//     (formatNumber, reached by numText) is that same
+//     Double text everywhere EXCEPT a whole number
+//     under 1e15, whose ".0" it drops — and across
+//     1e15..9e15 Swift's Double text for a whole
+//     number is exactly its digits plus ".0" (Swift
+//     turns to exponent writing only at 1e16), so the
+//     one patch — whole and under 1e15: keep the
+//     digits and put the ".0" back — makes the two
+//     agree on every value a literal can hold.
+//   * Text. SwiftTranslator writes a text value as a
+//     Swift literal (swiftText), walking the value
+//     SCALAR by scalar: quote, backslash, newline,
+//     tab and carriage return are escaped, every
+//     other scalar under 0x20 — and 0x7F — is written
+//     \u{hex} with the hex in lowercase and no
+//     leading zero, and the rest passes through as it
+//     stands. This port walks the value the way the
+//     language walks text — character by character,
+//     in grapheme clusters — which passes every
+//     ordinary character through byte-identically,
+//     cluster or scalar. Two shapes need naming: a
+//     carriage return and a line feed standing
+//     together are ONE cluster here but two scalars
+//     to Swift, so the pair is tested for as a pair
+//     and written "\r\n"; and the control characters
+//     are found by lookup in a control text built
+//     from bytes at startup (the language gives no
+//     way to ask a character for its code point —
+//     the front end's standing boundary — but the 33
+//     control characters can be BUILT, from
+//     makebytes and astext, and a character equal to
+//     one of them is that control character: control
+//     characters always stand alone as clusters, the
+//     carriage-return/line-feed pair apart, so the
+//     lookup cannot mistake a longer cluster).
+//
+// The translator's moving parts mirror Swift's: one
+// counter for every fresh name, in the order the walk
+// calls for them; the floor blocks gathered in the
+// order the walk meets them, a block entered BEFORE
+// its handed values are translated (so a floor inside
+// a floor's values takes the later number); the
+// emitted lines gathered in a list and joined once.
+
+let gCmpLines = []
+let gCmpCounter = 0
+let gCmpFloors = []
+
+// The control characters, built from bytes: the codes
+// 0..31 in order, then 127 — 33 characters, each
+// standing alone as a cluster in this text, so a
+// character's place in it (found with find) is its
+// code's place: places 0..31 are the codes themselves,
+// place 32 is 127.
+make cmpCtrlTextBuild() {
+    let block = makebytes(33)
+    let i = 0
+    while i < 32 {
+        block[i] = i
+        i = i + 1
+    }
+    block[32] = 127
+    give astext(block)
+}
+
+let gCmpCtrlText = cmpCtrlTextBuild()
+let gCmpCRLF = CRCHAR + "\n"
+
+// A small whole number in lowercase hex, no leading
+// zero — the way Swift writes a scalar's value inside
+// \u{...} (String(value, radix: 16)).
+make cmpHex(n) {
+    let digits = "0123456789abcdef"
+    if n < 16 {
+        give part(digits, n, 1)
+    }
+    give part(digits, wholediv(n, 16), 1) + part(digits, leftover(n, 16), 1)
+}
+
+// A number written the way SwiftTranslator writes it
+// (see the section header for the one patch).
+make cmpSwiftNumber(n) {
+    let text = numText(n)
+    let patched = text
+    if n == rounddown(n) {
+        if absolute(n) < 1000000000000000 {
+            patched = text + ".0"
+        }
+    }
+    give patched
+}
+
+// A text value written as a Swift string literal, the
+// way SwiftTranslator writes it (see the section
+// header for the pair and the control lookup).
+make cmpSwiftText(s) {
+    let pieces = []
+    for c in s {
+        let piece = c
+        if c == "\\" {
+            piece = "\\\\"
+        }
+        if c == "\"" {
+            piece = "\\\""
+        }
+        if c == "\n" {
+            piece = "\\n"
+        }
+        if c == "\t" {
+            piece = "\\t"
+        }
+        if c == CRCHAR {
+            piece = "\\r"
+        }
+        if c == gCmpCRLF {
+            piece = "\\r\\n"
+        }
+        if piece == c {
+            let place = find(gCmpCtrlText, c)
+            if place >= 0 {
+                let code = place
+                if place == 32 {
+                    code = 127
+                }
+                piece = "\\u{" + cmpHex(code) + "}"
+            }
+        }
+        append(pieces, piece)
+    }
+    give "\"" + join(pieces, "") + "\""
+}
+
+make cmpFresh(prefix) {
+    gCmpCounter = gCmpCounter + 1
+    give "__" + prefix + gCmpCounter
+}
+
+make cmpEmit(indent, text) {
+    append(gCmpLines, indent + text)
+}
+
+// A block that runs in a fresh child scope: returns
+// the child scope's generated name.
+make cmpChildScope(parent, indent) {
+    let name = cmpFresh("s")
+    cmpEmit(indent, "let " + name + " = Scope(parent: " + parent + ")")
+    give name
+}
+
+// Call arguments handed over as little closures, the
+// interpreter's order preserved (see Compiler.swift).
+make cmpArgClosures(args, scope) {
+    let parts = []
+    for a in args {
+        append(parts, "{ " + cmpGenExpr(a, scope) + " }")
+    }
+    give join(parts, ", ")
+}
+
+make cmpGenExpr(e, scope) {
+    if e.type == "number" {
+        give "Value.number(" + cmpSwiftNumber(e.value) + ")"
+    }
+    if e.type == "text" {
+        give "Value.text(" + cmpSwiftText(e.value) + ")"
+    }
+    if e.type == "boolean" {
+        if e.flag {
+            give "Value.boolean(true)"
+        }
+        give "Value.boolean(false)"
+    }
+    if e.type == "nothing" {
+        give "Value.nothing"
+    }
+    if e.type == "variable" {
+        give "try __m.lookup(" + cmpSwiftText(e.name) + ", in: " + scope + ", line: " + e.line + ")"
+    }
+    if e.type == "call" {
+        give "try __m.callValue(" + cmpSwiftText(e.name) + ", args: [" + cmpArgClosures(e.args, scope) + "], line: " + e.line + ")"
+    }
+    if e.type == "object" {
+        let parts = []
+        let i = 0
+        while i < length(e.names) {
+            append(parts, "(" + cmpSwiftText(e.names[i]) + ", " + cmpGenExpr(e.values[i], scope) + ")")
+            i = i + 1
+        }
+        give "__m.makeObject([" + join(parts, ", ") + "])"
+    }
+    if e.type == "list" {
+        let parts = []
+        for item in e.items {
+            append(parts, cmpGenExpr(item, scope))
+        }
+        give "__m.makeList([" + join(parts, ", ") + "])"
+    }
+    if e.type == "field" {
+        give "try __m.readField(" + cmpGenExpr(e.base, scope) + ", " + cmpSwiftText(e.name) + ", line: " + e.line + ")"
+    }
+    if e.type == "index" {
+        give "try __m.readIndex(" + cmpGenExpr(e.base, scope) + ", " + cmpGenExpr(e.index, scope) + ", line: " + e.line + ")"
+    }
+    if e.type == "floor" {
+        let index = length(gCmpFloors)
+        append(gCmpFloors, e.asm)
+        let values = []
+        for a in e.args {
+            append(values, cmpGenExpr(a, scope))
+        }
+        give "try __m.runFloor(args: [" + join(values, ", ") + "], line: " + e.line + ") { __floor" + index + "($0, $1, $2, $3, $4, $5) }"
+    }
+    if e.type == "negate" {
+        give "try __m.negate(" + cmpGenExpr(e.inner, scope) + ", line: " + e.line + ")"
+    }
+    if e.type == "binary" {
+        give "try __m.apply(" + cmpSwiftText(e.op) + ", " + cmpGenExpr(e.left, scope) + ", " + cmpGenExpr(e.right, scope) + ", line: " + e.line + ")"
+    }
+    give ""
+}
+
+make cmpTranslateBlock(stmts, scope, inFunction, indent) {
+    for s in stmts {
+        cmpTranslateStmt(s, scope, inFunction, indent)
+    }
+}
+
+make cmpTranslateStmt(s, scope, inFunction, indent) {
+    if s.type == "declare" {
+        cmpEmit(indent, "try __m.checkDeclare(" + cmpSwiftText(s.name) + ", in: " + scope + ", line: " + s.line + ")")
+        if s.kindWord == "" {
+            cmpEmit(indent, scope + ".declare(" + cmpSwiftText(s.name) + ", " + cmpGenExpr(s.value, scope) + ")")
+        } else {
+            let value = cmpFresh("v")
+            cmpEmit(indent, "let " + value + " = " + cmpGenExpr(s.value, scope))
+            cmpEmit(indent, "try __m.checkAnnotation(name: " + cmpSwiftText(s.name) + ", kindWord: " + cmpSwiftText(s.kindWord) + ", value: " + value + ", line: " + s.line + ")")
+            cmpEmit(indent, scope + ".declare(" + cmpSwiftText(s.name) + ", " + value + ")")
+            cmpEmit(indent, scope + ".declareAnnotation(" + cmpSwiftText(s.name) + ", " + cmpSwiftText(s.kindWord) + ")")
+        }
+    }
+    if s.type == "assign" {
+        cmpEmit(indent, "try __m.assign(" + cmpSwiftText(s.name) + ", " + cmpGenExpr(s.value, scope) + ", in: " + scope + ", line: " + s.line + ")")
+    }
+    if s.type == "assignTarget" {
+        if s.target.type == "field" {
+            let base = cmpFresh("b")
+            let object = cmpFresh("o")
+            cmpEmit(indent, "let " + base + " = " + cmpGenExpr(s.target.base, scope))
+            cmpEmit(indent, "let " + object + " = try __m.fieldTarget(" + base + ", " + cmpSwiftText(s.target.name) + ", line: " + s.line + ")")
+            cmpEmit(indent, object + ".set(" + cmpSwiftText(s.target.name) + ", " + cmpGenExpr(s.value, scope) + ")")
+        }
+        if s.target.type == "index" {
+            let base = cmpFresh("b")
+            let slot = cmpFresh("t")
+            cmpEmit(indent, "let " + base + " = " + cmpGenExpr(s.target.base, scope))
+            cmpEmit(indent, "let " + slot + " = try __m.indexTarget(" + base + ", " + cmpGenExpr(s.target.index, scope) + ", line: " + s.target.line + ")")
+            cmpEmit(indent, "try " + slot + ".set(" + cmpGenExpr(s.value, scope) + ")")
+        }
+    }
+    if s.type == "say" {
+        cmpEmit(indent, "__m.say(" + cmpGenExpr(s.value, scope) + ")")
+    }
+    if s.type == "if" {
+        cmpEmit(indent, "if try __m.decide(" + cmpGenExpr(s.condition, scope) + ", kind: \"if\", line: " + s.line + ") {")
+        let thenScope = cmpChildScope(scope, indent + "    ")
+        cmpTranslateBlock(s.thenStmts, thenScope, inFunction, indent + "    ")
+        if s.hasElse {
+            cmpEmit(indent, "} else {")
+            let elseScope = cmpChildScope(scope, indent + "    ")
+            cmpTranslateBlock(s.elseStmts, elseScope, inFunction, indent + "    ")
+        }
+        cmpEmit(indent, "}")
+    }
+    if s.type == "while" {
+        cmpEmit(indent, "try __m.loopBudget {")
+        cmpEmit(indent + "    ", "while true {")
+        cmpEmit(indent + "        ", "guard try __m.decide(" + cmpGenExpr(s.condition, scope) + ", kind: \"while\", line: " + s.line + ") else { break }")
+        cmpEmit(indent + "        ", "try __m.tickLoop(line: " + s.line + ")")
+        let bodyScope = cmpChildScope(scope, indent + "        ")
+        cmpTranslateBlock(s.body, bodyScope, inFunction, indent + "        ")
+        cmpEmit(indent + "    ", "}")
+        cmpEmit(indent, "}")
+    }
+    if s.type == "repeat" {
+        let count = cmpFresh("n")
+        let done = cmpFresh("d")
+        cmpEmit(indent, "try __m.loopBudget {")
+        cmpEmit(indent + "    ", "let " + count + " = try __m.repeatCount(" + cmpGenExpr(s.count, scope) + ", line: " + s.line + ")")
+        cmpEmit(indent + "    ", "var " + done + " = 0.0")
+        cmpEmit(indent + "    ", "while " + done + " < " + count + " {")
+        cmpEmit(indent + "        ", "try __m.tickLoop(line: " + s.line + ")")
+        let bodyScope = cmpChildScope(scope, indent + "        ")
+        cmpTranslateBlock(s.body, bodyScope, inFunction, indent + "        ")
+        cmpEmit(indent + "        ", done + " += 1")
+        cmpEmit(indent + "    ", "}")
+        cmpEmit(indent, "}")
+    }
+    if s.type == "for" {
+        let items = cmpFresh("xs")
+        let pos = cmpFresh("i")
+        cmpEmit(indent, "try __m.loopBudget {")
+        cmpEmit(indent + "    ", "let " + items + " = try __m.forItems(" + cmpGenExpr(s.over, scope) + ", line: " + s.line + ")")
+        cmpEmit(indent + "    ", "var " + pos + " = 0")
+        cmpEmit(indent + "    ", "while " + pos + " < " + items + ".count {")
+        cmpEmit(indent + "        ", "try __m.tickLoop(line: " + s.line + ")")
+        let bodyScope = cmpChildScope(scope, indent + "        ")
+        cmpEmit(indent + "        ", bodyScope + ".declare(" + cmpSwiftText(s.name) + ", " + items + "[" + pos + "])")
+        cmpTranslateBlock(s.body, bodyScope, inFunction, indent + "        ")
+        cmpEmit(indent + "        ", pos + " += 1")
+        cmpEmit(indent + "    ", "}")
+        cmpEmit(indent, "}")
+    }
+    if s.type == "define" {
+        let paramParts = []
+        for p in s.params {
+            append(paramParts, cmpSwiftText(p))
+        }
+        let kindParts = []
+        let ki = 0
+        while ki < length(s.params) {
+            if s.paramKinds[ki] == "" {
+                append(kindParts, "nil")
+            } else {
+                append(kindParts, cmpSwiftText(s.paramKinds[ki]))
+            }
+            ki = ki + 1
+        }
+        let retKind = "nil"
+        if s.returnKind != "" {
+            retKind = cmpSwiftText(s.returnKind)
+        }
+        cmpEmit(indent, "try __m.define(" + cmpSwiftText(s.name) + ", params: [" + join(paramParts, ", ") + "], paramKinds: [" + join(kindParts, ", ") + "], returnKind: " + retKind + ", home: " + scope + ", line: " + s.line + ") { __m, __call in")
+        cmpTranslateBlock(s.body, "__call", true, indent + "    ")
+        cmpEmit(indent, "}")
+    }
+    if s.type == "give" {
+        if inFunction {
+            cmpEmit(indent, "throw NiflaReturn(value: " + cmpGenExpr(s.value, scope) + ", line: " + s.line + ")")
+        } else {
+            cmpEmit(indent, "try __m.giveOutside(line: " + s.line + ")")
+        }
+    }
+    if s.type == "attempt" {
+        let errorName = cmpFresh("e")
+        cmpEmit(indent, "do {")
+        let bodyScope = cmpChildScope(scope, indent + "    ")
+        cmpTranslateBlock(s.body, bodyScope, inFunction, indent + "    ")
+        cmpEmit(indent, "} catch let " + errorName + " as NiflaError {")
+        let recoveryScope = cmpChildScope(scope, indent + "    ")
+        cmpEmit(indent + "    ", recoveryScope + ".declare(\"problem\", Value.text(" + errorName + ".message))")
+        cmpTranslateBlock(s.recovery, recoveryScope, inFunction, indent + "    ")
+        cmpEmit(indent, "}")
+    }
+    if s.type == "doCall" {
+        cmpEmit(indent, "try __m.callStatement(" + cmpSwiftText(s.name) + ", args: [" + cmpArgClosures(s.args, scope) + "], line: " + s.line + ")")
+    }
+    if s.type == "doExpr" {
+        cmpEmit(indent, "_ = " + cmpGenExpr(s.expr, scope))
+    }
+}
+
+// The translator's door: a header, the translated
+// statements inside the do/catch, the floor
+// declarations when the program holds floor blocks —
+// SwiftTranslator.translate, line for line.
+make cmpTranslate(stmts, sourceName) {
+    gCmpLines = []
+    gCmpCounter = 0
+    gCmpFloors = []
+    append(gCmpLines, "// Translated from " + sourceName + " by niflac (Nifla Stone 5).")
+    append(gCmpLines, "// This file was made by a program; the Nifla source is the one to read and change.")
+    append(gCmpLines, "import Foundation")
+    append(gCmpLines, "")
+    append(gCmpLines, "let __m = Machine()")
+    append(gCmpLines, "let __top = Scope()")
+    append(gCmpLines, "do {")
+    cmpTranslateBlock(stmts, "__top", false, "    ")
+    append(gCmpLines, "} catch let error as NiflaError {")
+    append(gCmpLines, "    FileHandle.standardError.write(Data((error.spoken + \"\\n\").utf8))")
+    append(gCmpLines, "    exit(1)")
+    append(gCmpLines, "}")
+    if length(gCmpFloors) > 0 {
+        append(gCmpLines, "")
+        append(gCmpLines, "// The floor blocks (Stones 7 and 9): raw processor")
+        append(gCmpLines, "// instructions, assembled separately and linked into")
+        append(gCmpLines, "// this program. Each is called through the runtime's")
+        append(gCmpLines, "// desk (Machine.runFloor): the handed numbers, the one")
+        append(gCmpLines, "// block of bytes, and the results area are laid out")
+        append(gCmpLines, "// for its instructions, which give back the number")
+        append(gCmpLines, "// left in the processor's return register (rax).")
+        let i = 0
+        while i < length(gCmpFloors) {
+            append(gCmpLines, "@_silgen_name(\"nifla_floor_" + i + "\")")
+            append(gCmpLines, "func __floor" + i + "(_ inputs: UnsafePointer<Int64>?, _ inputCount: Int64, _ memory: UnsafeMutablePointer<UInt8>?, _ memoryCount: Int64, _ results: UnsafeMutablePointer<Int64>, _ resultCount: UnsafeMutablePointer<Int64>) -> Int64")
+            i = i + 1
+        }
+    }
+    give join(gCmpLines, "\n") + "\n"
+}
+
+// The source's name the way compileMain names it for
+// the header: the file's last path component.
+make cmpSourceName(path) {
+    let pieces = split(path, "/")
+    give pieces[length(pieces) - 1]
+}
+
 // ---------- the program itself ----------
 // What running this front end does: take the mode and the
 // file path from the words it was started with, read the
 // file, and print what the mode asks for — the tokens
 // ('tokens', Stone 47), the parse tree on one line
-// ('tree', Stone 48), or the checker's verdict ('check',
+// ('tree', Stone 48), the checker's verdict ('check',
 // 'check-bare', 'check-guest', Stones 50–51: lex, parse,
 // then the checker walk above, in the mode's picture —
 // hosted, bare, or guest; an accepted program prints
-// exactly "checked"). A problem is spoken on the error channel,
+// exactly "checked"), or the generated Swift ('compile',
+// Stone 53: lex, parse, check in the hosted picture,
+// then the translator above; an accepted program prints
+// the generated Swift exactly as SwiftTranslator writes
+// it, its one closing newline carried by the printing
+// itself). A problem is spoken on the error channel,
 // leaving with the contract's parting numbers: 2 when the
 // file itself can't be opened (or the mode is not one this
 // program knows), 1 when the lexer refuses the program —
-// or, in 'tree' and the check modes, when the parser does,
-// or in the check modes when the checker does (a lex
-// refusal is reported exactly as in 'tokens'; no partial
-// output is printed either way).
+// or, in 'tree', the check modes and 'compile', when the
+// parser does, or in the check modes and 'compile' when
+// the checker does (a lex refusal is reported exactly as
+// in 'tokens'; no partial output is printed either way).
 
 let allArgs = arguments()
 if length(allArgs) < 2 {
@@ -4894,8 +5349,10 @@ if length(allArgs) < 2 {
             if allArgs[0] != "check" {
                 if allArgs[0] != "check-bare" {
                     if allArgs[0] != "check-guest" {
-                        sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare' and 'check-guest', like: nifla-front tokens program.nifla")
-                        exitwith(2)
+                        if allArgs[0] != "compile" {
+                            sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest' and 'compile', like: nifla-front tokens program.nifla")
+                            exitwith(2)
+                        }
                     }
                 }
             }
@@ -4929,12 +5386,23 @@ if length(allArgs) < 2 {
                 if allArgs[0] == "tree" {
                     say dumpProgram(parsed.value)
                 } else {
-                    let checked = chkCheckProgram(parsed.value, allArgs[0] != "check", allArgs[0] == "check-guest")
-                    if checked.ok == false {
-                        sayerr(checked.message)
-                        exitwith(1)
+                    if allArgs[0] == "compile" {
+                        let checked = chkCheckProgram(parsed.value, false, false)
+                        if checked.ok == false {
+                            sayerr(checked.message)
+                            exitwith(1)
+                        } else {
+                            let generated = cmpTranslate(parsed.value, cmpSourceName(path))
+                            say part(generated, 0, length(generated) - 1)
+                        }
                     } else {
-                        say "checked"
+                        let checked = chkCheckProgram(parsed.value, allArgs[0] != "check", allArgs[0] == "check-guest")
+                        if checked.ok == false {
+                            sayerr(checked.message)
+                            exitwith(1)
+                        } else {
+                            say "checked"
+                        }
                     }
                 }
             }

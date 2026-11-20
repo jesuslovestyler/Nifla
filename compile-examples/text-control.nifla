@@ -1,0 +1,12 @@
+// Stone 53 fixture: raw control bytes standing in
+// literals (written into this file byte by byte):
+// 0x01, 0x0B and 0x1F in the first, 0x7F in the
+// second. SwiftTranslator writes each as \u{hex} -
+// lowercase hex, no leading zero - and the port
+// finds them by lookup in its byte-built control
+// text. A tab escape stands beside them to show the
+// named escapes keep their own road.
+let a = "xyzw"
+let b = "pq"
+let c = "tab\there"
+say a + b + c

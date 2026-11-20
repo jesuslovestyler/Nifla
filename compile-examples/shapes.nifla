@@ -1,0 +1,42 @@
+// Stone 53 fixture: the translator's shapes — every
+// statement kind and the expression shapes the corpus
+// spreads thin, gathered so the fresh-name counter's
+// order is pinned across them all: annotated and plain
+// declares, field and index targets, nested loops with
+// their own scopes, a define with mixed marks (some
+// parameters annotated, some not, a promised kind),
+// an attempt inside a function with a give in both
+// blocks, and calls nested in calls in lists in
+// objects.
+
+make marked(a: number, b, c: text) -> number {
+    let total: number = a + length(c)
+    attempt {
+        if b == nothing {
+            give total
+        }
+    } if it fails {
+        give 0 - 1
+    }
+    give total
+}
+
+let person = { name: "Tyler", scores: [10, 20, 30] }
+person.name = "T"
+person.scores[1] = person.scores[0] + person.scores[2]
+let grid = [[1, 2], [3, 4]]
+grid[1][0] = grid[0][1]
+
+let i = 0
+while i < 2 {
+    repeat 2 {
+        for ch in "ab" {
+            say ch
+        }
+    }
+    i = i + 1
+}
+
+say marked(5, nothing, "abc")
+say -person.scores[1]
+say [marked(1, 2, "x"), { deep: [true, nothing] }][0]

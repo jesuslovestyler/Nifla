@@ -3316,6 +3316,70 @@ feathercheck, selfmade, web-floor and every bare
 proof green, the full sweep run on this stone's
 own tree.
 
+## Stone 45 — the Bible-window proof on the healed system
+
+The chain's last witness: Cardnull OS 2's Stone
+41 (the Bible window, the whole book of Jonah)
+rebuilt in a scratch tree with the healed
+doorman — and with this chain's healed compilers
+beside it, for completeness, though Stones 40–41
+proved the compilers were never the wound — and
+its own proof, prove-stone41.sh, run whole,
+fresh for this stone. Nothing was committed in
+the OS repo; its chain takes the doorman fix and
+the proof's corrections home itself.
+
+- **Boot 1 passes, whole.** The typed word
+  `bible` opens the window on its contents page;
+  the picks are chosen and Jonah 1 is read word
+  for word, pages 1–3; the down arrow pages
+  forward; the foot **More** press, the foot
+  **Back** press, and the **First page** press
+  all land — the pointer road that used to reset
+  the machine at any press now simply works;
+  Jonah 4 is reached at page 30; Escape closes
+  the window. This is the road the phantom close
+  haunted, and it stands healed end to end.
+- **Boot 2 fails the same two checks it failed
+  at Stone 41 — both in the proof, not the OS,**
+  each proved directly at Stone 41 and recorded
+  in the OS's resume note (Addendum 3): the proof
+  expects the ninth icon's name to stand clear
+  where the terminal window standing open at the
+  rising covers every icon's name alike (the
+  icon's picture and gold cross stand clear, and
+  a press on the icon opens the window — that
+  check passes); and it clicks the window's
+  close mark one cell to the right of the cell
+  the window draws it in, so the window never
+  closes under its hand and the menu check after
+  it runs against the still-open window. Pressed
+  on its drawn cell, arrow verified, the close
+  mark closes the window (desk flag 1→0); from a
+  plain desktop the start press opens the menu
+  with all ten choices standing, Bible ninth;
+  the proof's own menu-choice and Escape checks
+  pass as written. The OS chain corrects the
+  proof's aim; the verdict of this stone does
+  not wait on it: every behavior boot 2 reaches
+  for has been proved standing on the healed
+  system, one by one, at its true place.
+
+So the Bible window stands proved on the healed
+system: opened by word, icon, and menu; read
+forward and back by keys and presses; closed by
+Escape and by its close mark; and no press
+anywhere in it costs the machine its life
+anymore.
+
+Proofs: no Nifla code changes at this stone and
+no suite count changes — interpreted 60/60,
+compiled 159/159, voice 6/6, self-hosted 60/60,
+primer and tutorial books true, web corpus byte
+for byte, feather, feathercheck, selfmade,
+web-floor and every bare proof green (the full
+sweep of Stone 44, the tree unchanged since).
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

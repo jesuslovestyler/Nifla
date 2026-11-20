@@ -3776,6 +3776,171 @@ whole corpus. The port's later legs (the
 checker, then the compilers, piece by piece,
 as decided Nov 19, 2026) are future stones.
 
+## Stone 49 — identity, proved whole: the leg closes
+
+The all-Nifla port's first leg — the front
+end — closes here. The lexer (Stone 47) and
+the parser (Stone 48) stand in Nifla in
+`selfhost/nifla-front.nifla`, proved identical
+to the untouched Swift originals across the
+whole corpus and the fixture sets. This stone
+adds no machinery of its own: it proves the
+identity whole, against generated cases no
+one hand-picked, and gives the leg its single
+gate. Nothing under `src/` is touched, and
+`selfhost/nifla-in-nifla.nifla` is untouched.
+PRIMER.md is not edited either: the
+language's surface did not change anywhere in
+this leg, and this entry says so plainly.
+
+**The sweep** is `./run-front-sweep.sh`, in
+the established proof shape: the oracle and
+the front end built fresh into a scratch
+folder, and every generated case compared on
+stdout, stderr and exit code, each run wrapped
+in a thirty-second timeout. The generator is
+seeded — python's `random.Random` on fixed
+seeds (49047, 49048, 49049) — so the same
+cases are made on every run and any failure
+reproduces exactly, from its family and index.
+Three families:
+
+- **Numbers — 300 cases, tokens mode.** Random
+  digit strings of length 1–40, a decimal
+  point placed at a random position or none,
+  leading zeros allowed, some with long
+  fraction tails (up to 37 digits after the
+  point) and some long whole numbers (up to 40
+  digits). Each literal stands in its own
+  small `say <lit>` file, so a disagreement
+  would name its literal. All 300 were
+  accepted, and every token dump agreed byte
+  for byte — the Stone 47 number reader holds
+  on generated long literals, not only on the
+  hand-picked fixtures.
+- **Programs — 200 cases, tree mode.** Complete
+  programs from a seeded grammar: `make`
+  definitions (some with kind annotations on
+  their parameters and `->` returns, some
+  plain), `let` with and without annotations
+  (valid kinds, `maybe` kinds), `say` lines,
+  `if`/`else` (sometimes a present-but-empty
+  else), `while`, `repeat`, `for`, `attempt`
+  blocks, plain and target assignments, floor
+  statements and floor-with-values expressions,
+  and expressions built recursively to depth
+  five — number literals (some long), short
+  texts (some with escapes), `true`/`false`/
+  `nothing`, names, unary minus, all ten binary
+  operators, calls with 0–3 arguments, list
+  literals, object literals (field names unique
+  within each object), field and index postfix
+  chains, parentheses. The grammar aims at
+  mostly-valid programs so tree shapes
+  dominate — in the event all 200 parsed, and
+  every tree agreed byte for byte. (A generated
+  program that earns a refusal would be
+  compared identically — agreement is
+  agreement; none was needed for the count.)
+- **Token soup — 200 cases, tokens mode.**
+  Short files of 5–200 characters drawn from a
+  Nifla-flavored alphabet: ASCII letters and
+  digits, the language's symbols, backslash,
+  space, tab, newline, carriage return, and
+  keyword fragments (`let`, `flo`, `say`, `//`,
+  `/*`). No non-ASCII characters — that is the
+  boundary's territory — and no control
+  characters. 98 of the 200 lexed as token
+  streams and 102 were refused; acceptances
+  and refusals alike agreed byte for byte.
+  Identical refusals are exactly what this
+  family proves.
+
+**The gate** is `./run-front.sh`: it runs
+`run-front-lexer.sh`, `run-front-parser.sh`
+and `run-front-sweep.sh` in order, stops at
+the first failure, and on success prints one
+closing summary naming the whole claim — the
+corpus and the 102 fixtures in both modes,
+the generated sweep, boundary 3 noted. It is
+the one command future work runs to prove the
+front end whole.
+
+**The convergence decision, for the record.**
+The port converges with the self-hosted
+interpreter's front-end machinery — extracted
+into the standalone front-end program and
+corrected to Swift identity — rather than
+superseding it, because that machinery was
+already the language's own proven reading of
+the grammar. The toolchain needs the front
+end as a standalone stage with a canonical
+dump a proof can compare, which an
+interpreter's main loop cannot offer; the
+self-host keeps its embedded copy, single-
+file by Stone 8's design. Nothing was
+rewritten from scratch in this leg, and
+nothing needed to be.
+
+**The inheritance note.** The corrections
+Stones 47–48 made to the extracted copy
+enumerate, between them, the latent
+divergences the self-host's embedded copy
+still carries. Stone 47's: the pending-token
+shape; the floor missing-'{' refusal's line;
+the floor closing-line trim taking a carriage
+return Swift does not trim; the end of the
+text read as a digit and a letter both; the
+comment handling's recursion depth; and the
+number fold's drift on long literals. Stone
+48's four: the statement fallthrough refusal's
+word order ('attempt' last, after 'give');
+the `attempt` missing-'{' refusal's wording
+("the block that tries", not "tries
+something"); the 'if it fails' shape and its
+extra message (Swift tests by clamped
+lookahead and speaks one refusal; the
+self-host consumed step by step and spoke a
+second message Swift never speaks); and
+`parseFloorExpr`'s '(' check and message (the
+self-host checked for '(' first and asked for
+the block in its own words; Swift's argument
+reading is called unconditionally and the
+block is asked for afterwards, in Swift's
+words). A future stone that reconciles the
+interpreter with the toolchain front end
+inherits this list, whole.
+
+**The boundary stands as recorded.** Swift's
+word characters are the full Unicode letter
+and number classes, and Nifla gives a program
+no way to ask a character for its code point,
+so those tables cannot be expressed in the
+language today. The port's letters cover
+ASCII and the Latin-1 supplement; three
+fixtures stand verified-divergent in
+`front-examples/BOUNDARY.txt`, confirmed
+divergent on every run of the leg's proofs.
+Closing the boundary would take a language
+stone; that is future work, for Tyler's word,
+not this leg.
+
+Behavior unchanged everywhere else: the full
+suite sweep on this stone's tree — interpreted
+60/60, compiled 159/159, voice 6/6, self-hosted
+60/60, primer and tutorial books true, web
+corpus byte for byte, feather, feathercheck,
+selfmade, web-floor and every bare proof
+green, with the front leg's own three proofs
+and its gate standing among them. The front
+end leg is complete: lexer and parser stand
+in Nifla, identical to Swift across the whole
+corpus, the fixture sets, and the generated
+sweep, the one boundary standing as recorded.
+The port's next leg — the checker, carried
+into Nifla the same way, piece by piece — is
+future work, named here and not started.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

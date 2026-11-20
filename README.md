@@ -3380,6 +3380,62 @@ for byte, feather, feathercheck, selfmade,
 web-floor and every bare proof green (the full
 sweep of Stone 44, the tree unchanged since).
 
+## Stone 46 — no drift: the chain closes
+
+The chain's final reckoning, in two parts.
+
+**Byte-stability.** Two independent builds of
+this tree were made in two separate worktrees,
+each building its own compilers from source, and
+each compiling the whole corpus: every
+bare-examples program on both bare doors, and
+every examples program on the compiled door —
+217 output files from each build, hashed and
+compared. Every bare-metal and ARM binary, and
+every assembly the bare compilers wrote, is
+byte-identical across the two builds. Every
+Swift file the compiled door generated is
+byte-identical too. The compiled door's final
+binaries are identical in size and in code,
+differing only in a 32-byte span the system
+Swift toolchain stamps its own mark into (a
+UUID the linker derives at the link, no byte of
+it the compiler's), and their build logs differ
+only in the directory names they honestly print.
+Every acceptance and every refusal — the three
+checker-stopped examples, the door-specific bare
+examples — fell the same way in both builds. The
+compilers do not drift: what they made on one
+build they make, byte for byte, on another.
+
+**Behavior unchanged.** The full suite sweep was
+run once more on the chain's final tree: Stones
+1–39's proved behaviors stand as they were
+proved — interpreted 60/60, compiled 159/159,
+voice 6/6, self-hosted 60/60, primer and tutorial
+books true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green — with this chain's own additions
+standing among them: the nested-shapes armor of
+Stone 43 and the tools proof's `astext` parts of
+Stone 44.
+
+So the chain Stones 40–46 closes where its
+evidence led: the phantom close was the OS
+doorman's, not the compilers' (40); the fix
+stands in the doorman, and on the healed loader
+the running kernel is the compiler's own bytes
+(41); the interleave loss is a separate defect
+of the woven shape at the OS's scale, remedied
+there since OS Stone 38 and unnamed below the
+source (42); the suspected shapes now stand
+under armor on both bare doors (43); `astext`
+came to bare metal with its hosted meaning
+whole, the last word answered (44); the Bible
+window stands proved on the healed system (45);
+and the compilers, twice built and fully swept,
+do not drift (46).
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

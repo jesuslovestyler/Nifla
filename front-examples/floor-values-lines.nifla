@@ -1,0 +1,4 @@
+say floor(1,
+2) {
+mov a, b
+}

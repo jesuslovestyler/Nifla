@@ -1,0 +1,967 @@
+// Nifla front — the Nifla toolchain's front end, written in
+// Nifla itself (Stone 47, the first stone of the all-Nifla port).
+//
+// Run it the way the toolchain's front half would be run:
+//
+//     nifla-front tokens <path>
+//
+// It reads the file at <path> and prints its tokens, one per
+// line, in this dump:
+//
+//     number <VALUE> @<line>     VALUE written the way Nifla
+//                                writes numbers for people
+//     text "<ESC>" @<line>
+//     name <word> @<line>
+//     keyword <word> @<line>
+//     symbol <sym> @<line>
+//     floor "<ESC of asm>" @<line>
+//     end @<line>
+//
+// ESC replaces, in this order: backslash -> \\, " -> \",
+// newline -> \n, tab -> \t, carriage return -> \r; every other
+// character passes through as it stands. The escaping is an
+// explicit character loop (escText below), mirrored by the
+// proof oracle's own loop — no library escaping on either side.
+//
+// Leaving: 0 on success (the dump on the screen, nothing on
+// the error channel); 1 on a lex refusal (nothing on the
+// screen, "Line N: <message>" on the error channel); 2 when
+// the file itself can't be read (a plain message on the error
+// channel).
+//
+// The lexer below is the self-hosted interpreter's lexer
+// (selfhost/nifla-in-nifla.nifla) lifted out and made to stand
+// on its own — then corrected wherever the self-host's habits
+// diverge from the Swift lexer (src/Lexer.swift), because the
+// standard for this program is identity with Swift, token for
+// token and refusal for refusal. The corrections:
+//
+//   * Pending tokens: Swift's tokenize() drains the pending
+//     queue before each nextToken() call, nextToken() itself
+//     never looks at the queue, the floor-values collection
+//     loop calls nextToken() directly, and a completed
+//     floor-with-values ASSIGNS the queue (discarding whatever
+//     a nested floor-with-values stranded there). So this
+//     lexer has a raw next-token function (lexRaw) with no
+//     pending logic in it — comment handling loops back to
+//     the raw function's top instead of recursing (the same
+//     walk, without spending call depth), collection reads
+//     through the raw function — and lexAll's loop does the
+//     draining.
+//   * The missing-'{' refusal after floor values is spoken at
+//     the 'floor' word's line (Swift's startLine), not at
+//     whatever line the values wandered to.
+//   * A floor block's closing line is told apart the way
+//     Swift tells it: trimmed of spaces and tabs (and the
+//     other space separators Swift's CharacterSet.whitespaces
+//     holds) — a carriage return is NOT trimmed, so a line
+//     holding '}' and a carriage return is an instruction
+//     line, not a closing line. (Whitespace skipping between
+//     tokens still skips space, tab, carriage return and
+//     newline, exactly as Swift's nextToken does.)
+//   * Numbers are read by a dedicated reader (numberFromDigits
+//     below), not by the self-host's digit fold and not by
+//     asnumber: the fold drifts on long digit strings, and
+//     asnumber refuses overflow where Swift's lexer reads a
+//     400-digit literal as the number inf. The reader keeps an
+//     exact whole-number mantissa while the keeping is exact,
+//     carries the next digits as a second, smaller mantissa,
+//     and scales the pair by exact powers of ten with every
+//     step's rounding error carried along (Dekker's
+//     two-product), never rounded away. It matches Swift's
+//     correctly rounded reading on the whole proved corpus
+//     and the fixture set in front-examples/; it is not a
+//     proof for every conceivable 17+-digit pattern — that
+//     would take arbitrary precision — and any pattern found
+//     to miss by an ulp belongs in front-examples/BOUNDARY.txt
+//     with its pattern named, never silently absorbed.
+//   * Word characters: Swift takes any Unicode letter or
+//     number into a word. Nifla gives a program no way to ask
+//     a character for its code point, so the full Unicode
+//     tables cannot be written in the language — a finding,
+//     not something to fake. This lexer's letter test covers
+//     ASCII and the Latin-1 supplement letters (the
+//     LATIN1LETTERS string below); digits stay ASCII-only.
+//     Words written in letters beyond Latin-1, and non-ASCII
+//     digits, diverge from Swift for that reason and are
+//     named, with fixtures, in front-examples/BOUNDARY.txt.
+//
+// The parser joins this program in Stone 48; this stone is
+// the lexer and the token dump alone. run-front-lexer.sh
+// proves the identity against the Swift lexer (through the
+// proof-only oracle, tools/front-oracle.swift) over the whole
+// corpus: every example suite, the self-host and feathercheck
+// sources, every nifla block in PRIMER.md and TUTORIAL.md,
+// the Cardnull OS 2 sources, and the fixtures.
+//
+// Part of Nifla, a public-domain programming language by Tyler
+// Kovalevich. See the Unlicense in the LICENSE file at the root
+// of this repository.
+
+// ---------- small shared helpers ----------
+
+// Every lexer function hands back a result instead of failing
+// — Nifla has no errors to throw:
+//   { ok: true, value: ... }        — it worked
+//   { ok: false, message: "..." }   — the plain-words error,
+//                                     already wearing its
+//                                     "Line N:" (it also
+//                                     carries "bare" and
+//                                     "line", as the
+//                                     self-host's results do)
+make errAt(line, message) {
+    give { ok: false, message: "Line " + line + ": " + message, bare: message, line: line }
+}
+
+make okVal(value) {
+    give { ok: true, value: value }
+}
+
+// Is this character a digit, a letter, or part of a name?
+// Digits are ASCII only (see the header: Swift also takes
+// non-ASCII digits into a number and then refuses the number
+// as unreadable — a divergence named in BOUNDARY.txt).
+// The empty text — lexPeek's way of saying the end of the
+// program — is none of these: find() reports an empty piece
+// as found at 0, so without the guard the end of the program
+// would read as a digit and a letter both, and the reading
+// loops would walk past the end forever. Swift's peek()
+// hands back nothing there and its loops simply stop; the
+// guard is what makes these tests stop the same way.
+make isDigitCh(c) {
+    if c == "" {
+        give false
+    }
+    give find("0123456789", c) >= 0
+}
+
+make digitVal(c) {
+    give find("0123456789", c)
+}
+
+// The Latin-1 supplement letters: U+00C0–U+00D6, U+00D8–U+00F6,
+// U+00F8–U+00FF — 62 characters. (The two signs among them,
+// × U+00D7 and ÷ U+00F7, are not letters and are not here.)
+let LATIN1LETTERS = "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ"
+
+make isLetterCh(c) {
+    if c == "" {
+        give false
+    }
+    if find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", c) >= 0 {
+        give true
+    }
+    give find(LATIN1LETTERS, c) >= 0
+}
+
+make isNameCh(c) {
+    if isLetterCh(c) {
+        give true
+    }
+    if isDigitCh(c) {
+        give true
+    }
+    give c == "_"
+}
+
+// A number written the way Nifla writes numbers for people —
+// the host's own rendering, reached by joining the number onto
+// text. (On the Swift side this is formatNumber; the host's
+// number-to-text is that very function, so the two agree.)
+make numText(n) {
+    give "" + n
+}
+
+// ---------- the number reader ----------
+
+// 10^k, for a small whole k (0 to 22 in every use here). Each
+// power up to 10^22 is a whole number a Double holds exactly,
+// and each step multiplies by ten exactly, so the power this
+// gives back is exact.
+make pow10n(k) {
+    let p = 1
+    let i = 0
+    while i < k {
+        p = p * 10
+        i = i + 1
+    }
+    give p
+}
+
+// x scaled by 10^e, the brief's way: while e is 22 or more,
+// multiply by 1e22 and take 22 off e; then multiply by the
+// remaining exact power (e at most 21). Downward the same,
+// dividing. Overflow on the way up gives inf, as Swift's
+// reading of an enormous literal does.
+make scalePow10(x, e) {
+    let v = x
+    let ee = e
+    let p22 = pow10n(22)
+    while ee >= 22 {
+        v = v * p22
+        ee = ee - 22
+    }
+    if ee > 0 {
+        v = v * pow10n(ee)
+    }
+    while ee <= -22 {
+        v = v / p22
+        ee = ee + 22
+    }
+    if ee < 0 {
+        v = v / pow10n(0 - ee)
+    }
+    give v
+}
+
+// Splitting a number into a head and a tail that add back to
+// it exactly (Veltkamp's split, the constant 2^27 + 1), and
+// the exact product of two numbers as a head and a tail
+// (Dekker's two-product): prod.hi is the rounded product and
+// prod.lo is its exact error, so hi + lo is the true product.
+// The number reader scales by pairs like these so that no
+// step's rounding is ever lost — a rounded head with its
+// error carried along, never a rounded head alone.
+make splitNum(x) {
+    let c = 134217729 * x
+    let hi = c - (c - x)
+    give { hi: hi, lo: x - hi }
+}
+
+make twoProduct(a, b) {
+    let p = a * b
+    let sa = splitNum(a)
+    let sb = splitNum(b)
+    let err = ((sa.hi * sb.hi - p) + sa.hi * sb.lo + sa.lo * sb.hi) + sa.lo * sb.lo
+    give { hi: p, lo: err }
+}
+
+// The pair (h, l) — h the head, l its small correction, the
+// two together worth h + l — scaled by 10^e, pair-corrected
+// at every chunk: a multiply carries the product's exact
+// error into the tail, a divide carries the division's exact
+// remainder (found through the two-product of the quotient)
+// into the tail. While the head stays in the wide safe band
+// between 1e-290 and 1e290 every one of those steps is
+// exact-headed; outside the band — a value within reach of
+// overflow, or down among the subnormals — the remaining
+// scale is applied plainly, and a literal whose true value
+// lives out there can miss Swift's reading in its last ulps.
+// No literal in the corpus or the fixtures lives out there.
+make scalePairPow10(h, l, e) {
+    let head = h
+    let tail = l
+    let ee = e
+    let p22 = pow10n(22)
+    let safeHi = scalePow10(1, 290)
+    let safeLo = scalePow10(1, -290)
+    while ee >= 22 {
+        if head > safeHi {
+            give scalePow10(head + tail, ee)
+        }
+        let tp = twoProduct(head, p22)
+        tail = tail * p22 + tp.lo
+        head = tp.hi
+        ee = ee - 22
+    }
+    if ee > 0 {
+        let p = pow10n(ee)
+        if head <= safeHi {
+            let tp = twoProduct(head, p)
+            tail = tail * p + tp.lo
+            head = tp.hi
+        } else {
+            head = scalePow10(head + tail, ee)
+            tail = 0
+        }
+        ee = 0
+    }
+    while ee <= -22 {
+        if head < safeLo {
+            give scalePow10(head + tail, ee)
+        }
+        let q = head / p22
+        let tp = twoProduct(q, p22)
+        let r = (head - tp.hi) - tp.lo
+        tail = (r + tail) / p22
+        head = q
+        ee = ee + 22
+    }
+    if ee < 0 {
+        let p = pow10n(0 - ee)
+        if head >= safeLo {
+            let q = head / p
+            let tp = twoProduct(q, p)
+            let r = (head - tp.hi) - tp.lo
+            tail = (r + tail) / p
+            head = q
+        } else {
+            head = scalePow10(head + tail, ee)
+            tail = 0
+        }
+    }
+    give head + tail
+}
+
+// A number built out of its digit text: `digits` is the whole
+// and fraction digits joined into one string, and `fracCount`
+// says how many of them stood after the decimal point, so the
+// value is digits × 10^(−fracCount) before the digits that
+// don't fit are accounted. The first mantissa is accumulated
+// while the accumulation stays exact — digits are taken while
+// m ≤ 900719925474098 before the step, so m*10+d stays under
+// 2^53 and exact; every digit not taken adds 1 to the
+// exponent. The next fifteen digits are accumulated the same
+// way into a second mantissa, held as the fraction f of one
+// unit in the first mantissa's last place, and the pair
+// (m, f) is scaled together by scalePairPow10, so the tail
+// is never rounded away against a head that was rounded the
+// other way. What remains beyond the second mantissa is
+// worth less than 1e-30 of the whole and cannot move the
+// result; a pattern that still misses belongs in
+// front-examples/BOUNDARY.txt with its pattern named.
+make numberFromDigits(digits, fracCount) {
+    let total = length(digits)
+    let m = 0
+    let taken = 0
+    let i = 0
+    let taking = true
+    while taking {
+        if i >= total {
+            taking = false
+        }
+        if taking {
+            if m > 900719925474098 {
+                taking = false
+            }
+        }
+        if taking {
+            m = m * 10 + digitVal(digits[i])
+            taken = taken + 1
+            i = i + 1
+        }
+    }
+    let m2 = 0
+    let taken2 = 0
+    taking = true
+    while taking {
+        if i >= total {
+            taking = false
+        }
+        if taking {
+            if taken2 >= 15 {
+                taking = false
+            }
+        }
+        if taking {
+            m2 = m2 * 10 + digitVal(digits[i])
+            taken2 = taken2 + 1
+            i = i + 1
+        }
+    }
+    let eMain = (total - taken) - fracCount
+    if m2 == 0 {
+        give scalePow10(m, eMain)
+    }
+    give scalePairPow10(m, m2 / pow10n(taken2), eMain)
+}
+
+// ---------- the lexer ----------
+// Turns the program's text into tokens, remembering the line
+// each came from. The state walks the text as a list of
+// one-character texts.
+
+let gChars = []
+let gPos = 0
+let gLine = 1
+
+// Tokens already read and waiting their turn (Stone 9): when
+// a floor block is handed values — floor(value, ...) { ... }
+// — the values' tokens are read while the word 'floor' is
+// being read, so the block itself can be captured right after
+// them; they wait here, behind the 'floor' keyword token, and
+// lexAll hands them out before any new reading. A completed
+// floor-with-values ASSIGNS this queue, as Swift assigns
+// pendingTokens — whatever a nested floor-with-values left
+// stranded here is discarded, exactly as Swift discards it.
+let gPending = []
+
+make lexPeek() {
+    if gPos < length(gChars) {
+        give gChars[gPos]
+    }
+    give ""
+}
+
+make lexPeek2() {
+    if gPos + 1 < length(gChars) {
+        give gChars[gPos + 1]
+    }
+    give ""
+}
+
+// The carriage-return character, held in a text of its own. It
+// is written here as the character itself, between the quotes,
+// because Nifla text has no escape for it.
+let CRCHAR = ""
+
+make isSpaceCh(c) {
+    if c == " " {
+        give true
+    }
+    if c == "\t" {
+        give true
+    }
+    if c == CRCHAR {
+        give true
+    }
+    give false
+}
+
+// The characters Swift's CharacterSet.whitespaces trims from
+// a floor block's closing line: the tab and the Unicode space
+// separators. A carriage return is NOT among them — that is
+// the whole point (see the header). The space itself is
+// tested alongside, in isFloorTrimCh.
+let FLOORTRIM = "               　"
+
+make isFloorTrimCh(c) {
+    if c == " " {
+        give true
+    }
+    if c == "\t" {
+        give true
+    }
+    give find(FLOORTRIM, c) >= 0
+}
+
+// Text with the floor-closing trim taken off both ends — for
+// telling a floor block's closing line from an instruction.
+make trimFloorLine(t) {
+    let lo = 0
+    let scanning = true
+    while scanning {
+        if lo >= length(t) {
+            scanning = false
+        }
+        if scanning {
+            if isFloorTrimCh(t[lo]) {
+                lo = lo + 1
+            } else {
+                scanning = false
+            }
+        }
+    }
+    let hi = length(t)
+    scanning = true
+    while scanning {
+        if hi <= lo {
+            scanning = false
+        }
+        if scanning {
+            if isFloorTrimCh(t[hi - 1]) {
+                hi = hi - 1
+            } else {
+                scanning = false
+            }
+        }
+    }
+    give part(t, lo, hi - lo)
+}
+
+make isKeywordWord(w) {
+    let words = ["let", "say", "if", "else", "while", "repeat", "for", "in", "make", "give", "true", "false", "floor", "attempt", "nothing"]
+    for word in words {
+        if word == w {
+            give true
+        }
+    }
+    give false
+}
+
+// Takes the whole program's text apart into tokens:
+// { ok: true, value: [tokens] }, or the lexer's plain-words
+// error. The pending queue is drained here, before each raw
+// reading — Swift's tokenize() shape.
+make lexAll(source) {
+    gChars = []
+    for c in source {
+        append(gChars, c)
+    }
+    gPos = 0
+    gLine = 1
+    let tokens = []
+    let done = false
+    while done == false {
+        if length(gPending) > 0 {
+            let waiting = gPending[0]
+            removeat(gPending, 0)
+            append(tokens, waiting)
+            if waiting.kind == "end" {
+                done = true
+            }
+        } else {
+            let r = lexRaw()
+            if r.ok == false {
+                give r
+            }
+            append(tokens, r.value)
+            if r.value.kind == "end" {
+                done = true
+            }
+        }
+    }
+    give okVal(tokens)
+}
+
+// One token, read raw from wherever the lexer stands —
+// Swift's nextToken(). The pending queue is never consulted
+// here. Swift's comment handling calls nextToken() again for
+// the token after the comment; this one loops back to the top
+// instead, which is the same walk and spends no call depth:
+// cardnull.nifla opens with a 786-line run of comments, and
+// the host's five-hundred-call guard would have stopped a
+// recursion that deep, while Swift's native stack sails on.
+make lexRaw() {
+    let again = true
+    while again {
+        again = false
+        // Skip spaces and blank lines; remember line numbers.
+        let skipping = true
+        while skipping {
+            let c = lexPeek()
+            if c == "\n" {
+                gLine = gLine + 1
+                gPos = gPos + 1
+            } else {
+                if isSpaceCh(c) {
+                    gPos = gPos + 1
+                } else {
+                    skipping = false
+                }
+            }
+        }
+        let startLine = gLine
+        let c = lexPeek()
+        if c == "" {
+            give okVal({ kind: "end", line: startLine })
+        }
+        // A // comment runs to the end of the line; when one
+        // is eaten, go around again for the token after it.
+        if c == "/" {
+            if lexPeek2() == "/" {
+                let eating = true
+                while eating {
+                    let ch = lexPeek()
+                    if ch == "\n" {
+                        eating = false
+                    }
+                    if ch == "" {
+                        eating = false
+                    }
+                    if eating {
+                        gPos = gPos + 1
+                    }
+                }
+                again = true
+            }
+        }
+        if again == false {
+            if isDigitCh(c) {
+                give lexNumberTok(startLine)
+            }
+            if c == "\"" {
+                give lexTextTok(startLine)
+            }
+            if isLetterCh(c) {
+                give lexWordTok(startLine)
+            }
+            if c == "_" {
+                give lexWordTok(startLine)
+            }
+            // Two-character symbols first, so "=" and "==" stay distinct.
+            let pair = c + lexPeek2()
+            if pair == "==" {
+                gPos = gPos + 2
+                give okVal({ kind: "symbol", symbol: pair, line: startLine })
+            }
+            if pair == "!=" {
+                gPos = gPos + 2
+                give okVal({ kind: "symbol", symbol: pair, line: startLine })
+            }
+            if pair == "<=" {
+                gPos = gPos + 2
+                give okVal({ kind: "symbol", symbol: pair, line: startLine })
+            }
+            if pair == ">=" {
+                gPos = gPos + 2
+                give okVal({ kind: "symbol", symbol: pair, line: startLine })
+            }
+            if pair == "->" {
+                gPos = gPos + 2
+                give okVal({ kind: "symbol", symbol: pair, line: startLine })
+            }
+            if find("+-*/(){}[]=<>.,:", c) >= 0 {
+                gPos = gPos + 1
+                give okVal({ kind: "symbol", symbol: c, line: startLine })
+            }
+            if c == "!" {
+                give errAt(startLine, "I found a '!' on its own. To say 'not equal', write '!=' — an exclamation mark followed by an equals sign.")
+            }
+            give errAt(startLine, "I don't understand the character '" + c + "'. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } [ ] , . : = == != < <= > >=.")
+        }
+    }
+    // Unreachable: every pass through the loop either gives a
+    // token or an error, or goes around again for a comment.
+    give errAt(gLine, "I don't understand the character ''. Nifla programs are made of words, numbers, text in \"quotes\", and the signs + - * / ( ) { } [ ] , . : = == != < <= > >=.")
+}
+make lexNumberTok(startLine) {
+    let whole = ""
+    let eating = true
+    while eating {
+        let c = lexPeek()
+        if isDigitCh(c) {
+            whole = whole + c
+            gPos = gPos + 1
+        } else {
+            eating = false
+        }
+    }
+    // A decimal point counts only when a digit follows it.
+    let frac = ""
+    if lexPeek() == "." {
+        if isDigitCh(lexPeek2()) {
+            gPos = gPos + 1
+            eating = true
+            while eating {
+                let c = lexPeek()
+                if isDigitCh(c) {
+                    frac = frac + c
+                    gPos = gPos + 1
+                } else {
+                    eating = false
+                }
+            }
+        }
+    }
+    give okVal({ kind: "number", num: numberFromDigits(whole + frac, length(frac)), line: startLine })
+}
+
+make lexTextTok(startLine) {
+    gPos = gPos + 1  // the opening quote
+    let value = ""
+    let eating = true
+    while eating {
+        let c = lexPeek()
+        if c == "" {
+            eating = false
+            give errAt(startLine, "This text never ends. Add a closing \" to finish it.")
+        }
+        if c == "\"" {
+            gPos = gPos + 1
+            eating = false
+            give okVal({ kind: "text", text: value, line: startLine })
+        }
+        if c == "\n" {
+            eating = false
+            give errAt(startLine, "This text never ends — it runs into the end of the line. Add a closing \" to finish it.")
+        }
+        if c == "\\" {
+            gPos = gPos + 1
+            let esc = lexPeek()
+            if esc == "" {
+                eating = false
+                give errAt(startLine, "This text never ends. Add a closing \" to finish it.")
+            }
+            if esc == "n" {
+                value = value + "\n"
+            } else {
+                if esc == "t" {
+                    value = value + "\t"
+                } else {
+                    if esc == "\"" {
+                        value = value + "\""
+                    } else {
+                        if esc == "\\" {
+                            value = value + "\\"
+                        } else {
+                            eating = false
+                            give errAt(startLine, "I don't know the escape '\\" + esc + "' inside text. The ones I know are \\n (new line), \\t (tab), \\\" (a quote), and \\\\ (a backslash).")
+                        }
+                    }
+                }
+            }
+            gPos = gPos + 1
+        } else {
+            value = value + c
+            gPos = gPos + 1
+        }
+    }
+    give errAt(startLine, "This text never ends. Add a closing \" to finish it.")
+}
+
+make lexWordTok(startLine) {
+    let word = ""
+    let eating = true
+    while eating {
+        let c = lexPeek()
+        if isNameCh(c) {
+            word = word + c
+            gPos = gPos + 1
+        } else {
+            eating = false
+        }
+    }
+    if word == "floor" {
+        // A floor block: 'floor' followed on the same line by
+        // '{' opens a stretch of raw lines — processor
+        // instructions, taken exactly as written — until a
+        // line holding only '}'. Those lines are never lexed
+        // as Nifla. Since Stone 9 the block can be handed
+        // values first: 'floor' then '( ... )' then '{'. The
+        // values are ordinary Nifla, so their tokens are read
+        // now — through the raw reading, as Swift's lexWord
+        // calls nextToken() directly — and wait in gPending
+        // behind the 'floor' keyword token this gives back.
+        let savedPos = gPos
+        let skipping = true
+        while skipping {
+            let c = lexPeek()
+            if c == " " {
+                gPos = gPos + 1
+            } else {
+                if c == "\t" {
+                    gPos = gPos + 1
+                } else {
+                    skipping = false
+                }
+            }
+        }
+        if lexPeek() == "(" {
+            let collected = []
+            let depth = 0
+            let collecting = true
+            while collecting {
+                let r = lexRaw()
+                if r.ok == false {
+                    give r
+                }
+                if r.value.kind == "end" {
+                    give errAt(startLine, "The '(' after 'floor' is never closed. Close the values being handed to the block with ')', then give the block itself: floor(values) { ... }.")
+                }
+                append(collected, r.value)
+                if r.value.kind == "symbol" {
+                    if r.value.symbol == "(" {
+                        depth = depth + 1
+                    }
+                    if r.value.symbol == ")" {
+                        depth = depth - 1
+                        if depth == 0 {
+                            collecting = false
+                        }
+                    }
+                }
+            }
+            skipping = true
+            while skipping {
+                let c = lexPeek()
+                if c == " " {
+                    gPos = gPos + 1
+                } else {
+                    if c == "\t" {
+                        gPos = gPos + 1
+                    } else {
+                        skipping = false
+                    }
+                }
+            }
+            if lexPeek() != "{" {
+                give errAt(startLine, "After the values handed to 'floor' I need the block itself: '{' on the same line, then the processor instructions on the lines below, until a line holding only '}'.")
+            }
+            gPos = gPos + 1  // the '{'
+            let rest = lexFloorRest(startLine)
+            if rest.ok == false {
+                give rest
+            }
+            gPending = collected
+            append(gPending, rest.value)
+            give okVal({ kind: "keyword", word: "floor", line: startLine })
+        }
+        if lexPeek() == "{" {
+            gPos = gPos + 1  // the '{'
+            give lexFloorRest(startLine)
+        }
+        gPos = savedPos
+    }
+    if isKeywordWord(word) {
+        give okVal({ kind: "keyword", word: word, line: startLine })
+    }
+    give okVal({ kind: "name", name: word, line: startLine })
+}
+
+// The rest of a floor block, once its '{' has been read:
+// nothing else on the opening line but an optional comment,
+// then the raw lines, one per line, until a line holding
+// only '}'. Gives back the floor token.
+make lexFloorRest(startLine) {
+    let skipping = true
+    while skipping {
+        let c = lexPeek()
+        if c == " " {
+            gPos = gPos + 1
+        } else {
+            if c == "\t" {
+                gPos = gPos + 1
+            } else {
+                skipping = false
+            }
+        }
+    }
+    if lexPeek() == "/" {
+        if lexPeek2() == "/" {
+            let eatingComment = true
+            while eatingComment {
+                let ch = lexPeek()
+                if ch == "\n" {
+                    eatingComment = false
+                }
+                if ch == "" {
+                    eatingComment = false
+                }
+                if eatingComment {
+                    gPos = gPos + 1
+                }
+            }
+        }
+    }
+    if lexPeek() == "\n" {
+        gPos = gPos + 1
+        gLine = gLine + 1
+    } else {
+        if lexPeek() != "" {
+            give errAt(startLine, "After 'floor {' the processor instructions go on the lines below it, one per line, until a line holding only '}'. Take anything else off this line.")
+        }
+    }
+    let asmLines = []
+    let capturing = true
+    while capturing {
+        if lexPeek() == "" {
+            give errAt(startLine, "This 'floor' block is never closed. Add a line holding only '}' to finish it.")
+        }
+        let lineText = ""
+        let eatingLine = true
+        while eatingLine {
+            let ch = lexPeek()
+            if ch == "\n" {
+                eatingLine = false
+            }
+            if ch == "" {
+                eatingLine = false
+            }
+            if eatingLine {
+                lineText = lineText + ch
+                gPos = gPos + 1
+            }
+        }
+        if lexPeek() == "\n" {
+            gPos = gPos + 1
+            gLine = gLine + 1
+        }
+        if trimFloorLine(lineText) == "}" {
+            capturing = false
+        } else {
+            append(asmLines, lineText)
+        }
+    }
+    give okVal({ kind: "floor", asm: join(asmLines, "\n"), line: startLine })
+}
+
+// ---------- the token dump ----------
+
+// ESC, as an explicit character loop: backslash first, then
+// quote, newline, tab, carriage return; every other character
+// passes through as it stands.
+make escText(s) {
+    let pieces = []
+    for c in s {
+        let piece = c
+        if c == "\\" {
+            piece = "\\\\"
+        }
+        if c == "\"" {
+            piece = "\\\""
+        }
+        if c == "\n" {
+            piece = "\\n"
+        }
+        if c == "\t" {
+            piece = "\\t"
+        }
+        if c == CRCHAR {
+            piece = "\\r"
+        }
+        append(pieces, piece)
+    }
+    give join(pieces, "")
+}
+
+make dumpToken(t) {
+    if t.kind == "number" {
+        give "number " + numText(t.num) + " @" + t.line
+    }
+    if t.kind == "text" {
+        give "text \"" + escText(t.text) + "\" @" + t.line
+    }
+    if t.kind == "name" {
+        give "name " + t.name + " @" + t.line
+    }
+    if t.kind == "keyword" {
+        give "keyword " + t.word + " @" + t.line
+    }
+    if t.kind == "symbol" {
+        give "symbol " + t.symbol + " @" + t.line
+    }
+    if t.kind == "floor" {
+        give "floor \"" + escText(t.asm) + "\" @" + t.line
+    }
+    give "end @" + t.line
+}
+
+// ---------- the program itself ----------
+// What running this front end does: take the mode and the
+// file path from the words it was started with, read the
+// file, take it apart into tokens, and print the dump. A
+// problem is spoken on the error channel, leaving with the
+// dump contract's parting numbers: 2 when the file itself
+// can't be opened, 1 when the lexer refuses the program.
+
+let allArgs = arguments()
+if length(allArgs) < 2 {
+    sayerr("Give me a mode and a file, like: nifla-front tokens program.nifla")
+    exitwith(2)
+} else {
+    if allArgs[0] != "tokens" {
+        sayerr("I don't know the mode '" + allArgs[0] + "'. The mode I know is 'tokens', like: nifla-front tokens program.nifla")
+        exitwith(2)
+    } else {
+        let path = allArgs[1]
+        let source = ""
+        attempt {
+            source = readfile(path)
+        } if it fails {
+            sayerr("I couldn't open the file '" + path + "'. Check the name and the folder, and try again.")
+            exitwith(2)
+        }
+        let lexed = lexAll(source)
+        if lexed.ok == false {
+            sayerr(lexed.message)
+            exitwith(1)
+        } else {
+            let lines = []
+            for t in lexed.value {
+                append(lines, dumpToken(t))
+            }
+            say join(lines, "\n")
+        }
+    }
+}

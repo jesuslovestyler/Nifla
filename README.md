@@ -3436,6 +3436,179 @@ window stands proved on the healed system (45);
 and the compilers, twice built and fully swept,
 do not drift (46).
 
+## Stone 47 — the lexer stands in Nifla: the port begins
+
+The all-Nifla port — decided Nov 19, 2026, the
+compiler and everything still in Swift carried
+into Nifla piece by piece — opens here, with its
+first leg: the front end. This stone is the
+front end's first half, the lexer. The parser
+joins it in Stone 48. Nothing under `src/` is
+touched: the Swift originals stand untouched
+the whole leg, as the standard the port is
+measured against.
+
+The port did not start from a blank page. The
+self-hosted interpreter (`selfhost/nifla-in-nifla.nifla`,
+Stone 8) already held a lexer written in Nifla,
+and this stone's work is convergence: that
+machinery lifted out into a standalone front-end
+program, `selfhost/nifla-front.nifla`, and then
+corrected wherever the self-host's habits
+diverge from the Swift lexer — because the
+standard for this program is identity with
+Swift, token for token and refusal for refusal,
+not with the self-host. Run as
+`nifla-front tokens <path>`, it prints one line
+per token (`number`, `text`, `name`, `keyword`,
+`symbol`, `floor`, and the closing `end`, each
+with its line), leaves with 0 on success, 1 on
+a lex refusal with the plain-words error on the
+error channel and nothing on the screen, and 2
+when the file itself can't be read.
+
+The corrections, each pinned by a fixture in
+`front-examples/`:
+
+- **Pending tokens, Swift's shape.** Swift's
+  `tokenize()` drains the pending queue before
+  each `nextToken()` call; `nextToken()` itself
+  never looks at the queue; the floor-values
+  collection reads through `nextToken()`
+  directly; and a completed floor-with-values
+  *assigns* the queue, discarding whatever a
+  nested floor-with-values stranded in it. The
+  self-host drained inside its one-token
+  function and appended. The port is rebuilt to
+  Swift's shape — a raw next-token function with
+  no pending logic, a tokenize loop that drains,
+  collection through the raw function, assignment
+  on completion — and a fixture nesting one
+  floor-with-values inside another's values
+  proves the strange consequence faithfully:
+  the inner block's values and instructions are
+  read, then discarded with the stranded queue,
+  and the dump shows the outer block standing
+  where they were.
+- **The missing-`{` refusal** after floor values
+  is spoken at the `floor` word's line, as
+  Swift's `startLine` has it, not at whatever
+  line the values wandered to — pinned by a
+  fixture whose values span lines.
+- **A floor block's closing line** is trimmed
+  the way Swift trims it: spaces, tabs and the
+  other space separators are taken off, a
+  carriage return is *not* — so a line holding
+  `}` and a carriage return is an instruction
+  line, not a closing line. The self-host's
+  trim took the carriage return too. A fixture
+  with such a line, and a true `}` line after
+  it, pins the difference.
+- **Comment handling loops back** to the raw
+  function's top instead of recursing as Swift
+  does — the same walk, spending no call depth.
+  This one is load-bearing, not tidiness:
+  Cardnull OS 2's `cardnull.nifla` opens with a
+  786-line run of comments, deeper than the
+  five-hundred-call guard a compiled Nifla
+  program runs under, where Swift's native
+  stack sails on.
+- **The end of the program is not a character.**
+  Nifla's `find` reports an empty piece as found
+  at 0, so an unguarded digit or letter test
+  reads the lexer's end-of-text marker as both —
+  and a program ending in a number or a name,
+  with no newline after it, would be read
+  forever. Two fixtures ending exactly so, and
+  guards in the character tests, pin the stop.
+
+**Numbers are read by a dedicated reader** —
+not the self-host's digit fold, and not
+`asnumber`. The fold drifts on long digit
+strings (for `123456789012345678901234567890`
+it gives 1.2345678901234566e+29 where Swift's
+correctly rounded reading gives
+1.2345678901234568e+29), and `asnumber` refuses
+overflow where Swift's lexer reads a 400-digit
+literal as the number `inf`. The reader
+accumulates an exact whole-number mantissa
+while the accumulation stays exact (each step
+under 2^53), carries the next fifteen digits
+as a second mantissa, and scales the pair by
+exact powers of ten with every step's rounding
+error carried along — Dekker's two-product for
+the multiplies, the exact remainder for the
+divides — so no rounding is ever rounded away
+against another. It matches Swift's reading on
+the whole proved corpus and the fixture set,
+long literals included (the 30-digit integer,
+the 25-digit π, 0.30000000000000004, the
+100-digit integer, the 400-digit `inf`). It is
+not a proof for every conceivable 17+-digit
+pattern — that would take arbitrary precision —
+and a pattern found to miss by an ulp belongs
+in the boundary list with its pattern named,
+never silently absorbed.
+
+**The boundary, stated plainly.** Swift's word
+characters are the full Unicode letter and
+number classes. A Nifla program cannot ask a
+character for its code point, so those tables
+cannot be expressed in the language at all —
+a finding about what the language can say
+today, not something to fake. The port's
+letter test covers ASCII and the Latin-1
+supplement letters (62 characters; `let café = 1`
+passes), and its digits are ASCII only.
+Beyond that, three fixtures stand in
+`front-examples/BOUNDARY.txt` as
+*verified-divergent*: a Greek-letter name and
+a CJK name (Swift lexes them as names; the
+port refuses the character), and an
+Arabic-Indic digit (Swift starts a number and
+refuses it as unreadable; the port refuses the
+character — both refuse, in different words).
+The proof does not assume the boundary: it
+runs both lexers on those fixtures and
+*confirms* the disagreement, and fails if one
+ever agrees, so the list can never go stale
+in silence.
+
+**The proof** is `./run-front-lexer.sh`. The
+Swift side is spoken for by a proof-only
+oracle, `tools/front-oracle.swift`, linking
+the untouched `src/Lexer.swift` (and
+`src/Parser.swift`, riding along for Stone
+48), dumping tokens in the identical format —
+the escaping written as an explicit character
+loop on both sides. Across the whole corpus —
+every example suite, the self-host and
+feathercheck sources, every `nifla` block in
+PRIMER.md and TUTORIAL.md, the Cardnull OS 2
+sources read-only, and the fixtures — stdout,
+stderr and exit code are compared byte for
+byte: examples 60/60, checker 45/45, floor
+4/4, voice 3/3, bare 16/16, selfhost 2/2,
+primer 58/58, tutorial 86/86, cardnull 21/21,
+fixtures 42/42, boundary 3 noted. The 42
+fixtures include one per refusal the Swift
+lexer speaks (the unreadable-number refusal
+stands among the boundary fixtures, where it
+belongs), the floor shapes, the long
+numbers, CRLF code (which both sides refuse
+identically, the CR and LF being one character
+to both), and the two end-of-file pins.
+
+Behavior unchanged everywhere else: the full
+suite sweep on this stone's tree — interpreted
+60/60, compiled 159/159, voice 6/6, self-hosted
+60/60, primer and tutorial books true, web
+corpus byte for byte, feather, feathercheck,
+selfmade, web-floor and every bare proof
+green. This stone's changes are new files
+only; no existing file but this README was
+touched.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

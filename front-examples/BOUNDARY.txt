@@ -1,0 +1,22 @@
+# BOUNDARY — the verified-divergent fixtures (Stone 47).
+#
+# Each fixture named below is one where the Nifla-written lexer
+# (selfhost/nifla-front.nifla) and the Swift lexer
+# (src/Lexer.swift, through tools/front-oracle.swift) are known
+# to DISAGREE, and run-front-lexer.sh proves the disagreement
+# on every run: if a fixture named here ever agrees, the proof
+# FAILS — the list is stale and must be revisited, never
+# quietly kept.
+#
+# Why these diverge: Swift's word characters are the full
+# Unicode letter and number classes. A Nifla program cannot
+# ask a character for its code point, so those tables cannot
+# be expressed in the language at all — the port's letter test
+# covers ASCII and the Latin-1 supplement letters, and its
+# digits are ASCII only. That is a limit of what the language
+# can say today, recorded here plainly rather than faked.
+# Every fixture outside this list must match byte for byte.
+
+boundary-greek.nifla # a name written in a Greek letter (α): a letter beyond Latin-1 — Swift lexes it as a name; the port refuses the character.
+boundary-cjk.nifla # a name written in a CJK character (猫): a letter beyond Latin-1 — Swift lexes it as a name; the port refuses the character.
+boundary-arabic-digit.nifla # an Arabic-Indic digit (٣): a non-ASCII digit — Swift starts a number and refuses it as unreadable ("I couldn't read '٣' as a number."); the port refuses the character itself. Both refuse; the words differ.

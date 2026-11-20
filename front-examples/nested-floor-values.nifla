@@ -1,0 +1,6 @@
+say floor(floor(1) {
+inner
+}
+) {
+outer
+}

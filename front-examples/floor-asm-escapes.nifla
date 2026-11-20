@@ -1,0 +1,5 @@
+floor {
+mov "x", \path
+
+ret
+}

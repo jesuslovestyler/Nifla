@@ -4378,6 +4378,237 @@ corpus, and the checker's leg of the port is
 complete. What leg follows is future work, not
 started.
 
+## Stone 52 — identity, proved whole: the checker leg closes
+
+The all-Nifla port's second leg — the checker
+— closes here. The hosted walk (Stone 50) and
+the bare and guest doors (Stone 51) stand in
+Nifla in `selfhost/nifla-front.nifla`, proved
+identical to the untouched Swift checker across
+the whole corpus and the 64 fixtures in
+`check-examples/`. This stone adds no checker
+machinery of its own: it proves the identity
+whole, against generated cases no one
+hand-picked, and gives the leg its single gate.
+Nothing under `src/` is touched, and
+`selfhost/nifla-in-nifla.nifla` is untouched —
+indeed `selfhost/nifla-front.nifla` itself is
+untouched in this stone: the sweep found no
+disagreement anywhere, so no port fix was
+needed and none was made. PRIMER.md is not
+edited either: the language's surface did not
+change anywhere in this leg, and this entry
+says so plainly.
+
+**The sweep** is `./run-check-sweep.sh`, in
+the front sweep's established shape: build via
+`build.sh`; the oracle and the front end built
+fresh into a scratch folder (the oracle
+compiled from its seven-file link, the front
+end compiled with `./niflac`); a python3
+generator embedded as a heredoc; every
+generated case written to its own file and
+compared on stdout, stderr and exit code, each
+run wrapped in a thirty-second timeout; and
+all generation from fixed seeds (python's
+`random.Random` on 52050, 52051, 52052), so
+the same cases are made on every run and any
+failure reproduces exactly, from its family
+and index — on a disagreement the script
+prints the family, the index, the case and
+both sides' outputs, and fails. Three
+families:
+
+- **Verdicts — 300 cases, `check` mode.**
+  Complete programs from a seeded grammar
+  aimed at checker verdicts, mixing acceptances
+  and refusals: typed and untyped lets with
+  literal and computed values; binary
+  operations over kind-known and kind-unknown
+  operands; calls to made functions (right and
+  wrong counts, annotated parameters honoured
+  and violated); built-in calls (right and
+  wrong kinds, wrong counts, and proven-range
+  violations — division by a tracked zero,
+  a negative repeat, index/`part`/`removeat`/
+  `makebytes`/`exitwith` ranges); annotations
+  on let, assign and give, satisfied and
+  violated; maybe-typed variables used raw
+  (refused) and narrowed through
+  `if x == nothing`, `if x != nothing` and
+  `while x != nothing` (accepted); if/while
+  merges changing kinds (a merge to maybe
+  refused raw and accepted narrowed, a merge
+  to unknown accepted); function bodies using
+  outer names made later (forgiven) and names
+  made nowhere (refused); and floor blocks
+  (empty, handed numbers, a block of bytes,
+  a piece of text, a list, two blocks of
+  bytes). Each case is built aiming at
+  acceptance or at refusal; in the event the
+  oracle accepted 138 and refused 162, and
+  every verdict agreed byte for byte.
+- **Door soup — 200 cases, each run in both
+  `check-bare` and `check-guest`.** Small
+  programs calling bare, guest, built-in, made
+  and unknown names with 0–3 arguments of
+  mixed kinds (numbers, texts, booleans,
+  nothing, lists, blocks of bytes, computed
+  values), as statements, `let`s and `say`s —
+  so crossings, arities and unknown names are
+  compared in the modes where they differ.
+  Two-fifths of the cases are a single clean
+  call (the right name, count and kinds for
+  its own mode), so accepted door verdicts
+  stand beside the crossings. In `check-bare`
+  the oracle accepted 64 and refused 136; in
+  `check-guest` it accepted 38 and refused
+  162 (the asymmetry is the door itself: the
+  clean bare calls are crossings in a guest,
+  and the guest's own clean calls are fewer);
+  every verdict in both modes agreed byte
+  for byte.
+- **Number-heavy verdicts — 250 cases,
+  `check` mode.** Programs whose verdict
+  turns on tracked constants and lengths:
+  a literal-initialized variable, arithmetic
+  over it (`+`, `-`, `*` over small literals),
+  and the result feeding a divisor (plain `/`,
+  `wholediv`, `leftover`), a repeat count, a
+  list index, a text index or `part` span, a
+  `removeat` index, a `makebytes` count (the
+  bases straddle the 16,777,216 limit) or an
+  `exitwith` code (the bases straddle 0 and
+  255, some halved to a fraction). The values
+  are chosen near the boundaries where the
+  verdict flips, so `constNumber` and
+  `literalLength` fidelity decides. The
+  oracle accepted 150 and refused 100; every
+  verdict agreed byte for byte.
+
+No disagreement was found in any family, so
+there is no minimized case to record and no
+boundary was earned: the generated cases
+stand as pure confirmation.
+
+**The gate** is `./run-check.sh`, re-shaped
+the way `run-front.sh` stands over its three
+scripts: it runs the corpus proof (Stones
+50–51, as it stands, per-file PASS/FAIL output
+kept whole) and then `run-check-sweep.sh`, in
+order, stopping at the first failure, and on
+success prints one closing summary naming the
+whole claim — the corpus counts, the fixtures,
+the three modes, the generated sweep, boundary
+3 noted. It is the one command future work
+runs to prove the checker whole, and it passes
+whole on this tree.
+
+**The leg is complete.** The checker stands
+in Nifla, identical to Swift in all three
+modes — hosted `check`, `check-bare` and
+`check-guest` — across the whole corpus, the
+64 fixtures, and the generated sweep of 750
+generated programs (950 mode-runs, the door
+family running in both bare pictures).
+
+**The convergence note, restated briefly.**
+Stone 50's decision stands: SUPERSEDE — no
+embedded checker existed in the self-host to
+converge with (it runs no static pre-pass; its
+guards are runtime guards), so the checker was
+written fresh in Nifla against `Checker.swift`
+as the sole standard, and the shared helper
+layer — the front file's result objects,
+`editDistance`, `nameIndex`, `numText`, and
+the kind-word wording — was reused. The
+self-host keeps its own way and stays
+untouched.
+
+**The inheritance note.** What a future
+reconciliation stone or the compiler leg
+should know from this leg: (1) The oracle's
+link is seven `src/` files, not five —
+`tools/check-oracle.swift` links Lexer,
+Parser, Interpreter, BareCompiler and Checker
+plus `src/Compiler.swift` and
+`src/BareCompilerARM.swift`, which the link
+pulls in (the bare compiler reaches
+`findAssembler` in Compiler.swift, and
+Compiler.swift reaches the ARM bare compiler);
+no `src/` file was restructured for it. (2)
+The assignment-style writing rule from Stone
+50's pipe finding stands and binds any future
+growth of `nifla-front.nifla`: guard-style
+blocks took the generated Swift's diagnostics
+past the 64 KB pipe `niflac` reads only after
+its compiler exits, and the compile deadlocked;
+the checker section is written in assignment
+style, and the whole front file's generated
+Swift stands — the file unchanged in this
+stone, so Stone 51's measurement stands — at
+56 warnings / 46,223 bytes of diagnostics,
+well under the pipe. (3) One shared-body
+deviation from Swift's shape still stands in
+the port: where Swift duplicates its
+expression and call walks (plain and
+forgiving), the port shares one body,
+`chkExprAny`, with the forgiving flag choosing
+at exactly the places Swift's twins differ
+(the variable case and the recursion itself);
+the statement walks, whose twins differ in
+their child handling, are duplicated as
+Swift's are. (4) The bare validator's text
+counting is NOT the checker's business and
+remains unported with the bare compilers:
+on bare metal the checker lets a floor be
+handed a piece of text and does not count
+them — counting them is the bare validator's
+work, in the bare-compiler leg, whenever it
+comes.
+
+**The boundary stands as inherited, and no
+checker-specific boundary was found.** The
+front end's Unicode boundary is inherited at
+the lex stage: Swift's word characters are
+the full Unicode letter and number classes,
+Nifla gives a program no way to ask a
+character for its code point, and the port's
+letters cover ASCII and the Latin-1
+supplement. The same three fixtures in
+`front-examples/BOUNDARY.txt` stand
+verified-divergent in the check modes too
+(the corpus proof confirms the divergence on
+every run). The generated sweep stays inside
+ASCII by design — that is the boundary's
+territory, already recorded — and within it
+no case, generated or hand-written, exposed
+any further expressibility gap in the
+checker. Closing the boundary would take a
+language stone; that is future work, for
+Tyler's word, not this leg.
+
+No PRIMER change: the language's surface did
+not change in this stone.
+
+Behavior unchanged everywhere else: the full
+suite sweep on this stone's tree — every
+run-*.sh plus run_tests.sh, 28 scripts in all
+with this stone's sweep among them, each exit
+0 — interpreted 60/60, compiled 159/159, voice
+6/6, self-hosted 60/60, primer and tutorial
+books true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every
+bare proof green, with the front leg's proofs
+and gate and the checker leg's corpus proof,
+sweep and gate passing whole. The checker leg
+is complete: the hosted walk and the bare and
+guest doors are one checker in Nifla, proved
+identical to Swift whole. What leg follows —
+the compiler, carried into Nifla the same way,
+piece by piece — is future work, named here
+and not started.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

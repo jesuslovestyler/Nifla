@@ -1,7 +1,15 @@
 #!/bin/sh
-# Stone 51 proof: the checker stands whole in every
-# mode — the hosted walk of Stone 50, and the bare and
-# guest doors.
+# Stone 52 gate: the checker leg's single command.
+#
+# This script is the gate for the whole checker leg: it
+# runs the corpus proof (Stones 50–51, as it stands —
+# the checker stands whole in every mode: the hosted
+# walk of Stone 50, and the bare and guest doors) and
+# then the generated sweep (run-check-sweep.sh, Stone
+# 52), stopping at the first failure, and on success
+# prints one closing summary naming the whole claim.
+#
+# The corpus proof:
 #
 # selfhost/nifla-front.nifla — the toolchain front end
 # written in Nifla, this stone carrying the checker beside
@@ -236,3 +244,9 @@ else
     echo "FAIL check: $fail failure(s)"
     exit 1
 fi
+
+# Stone 52: the generated sweep, after the corpus proof.
+# The gate stops at the first failure.
+./run-check-sweep.sh || { echo "FAIL check-gate: the generated sweep failed — the gate stops here"; exit 1; }
+
+echo "PASS check-gate (Stone 52: the Nifla-written checker is byte-identical to the Swift checker in all three modes — check, check-bare and check-guest — across the whole corpus:$GROUP_RESULTS and the 64 fixtures in check-examples/, and across the generated sweep of 300 verdict programs, 200 door-soup programs in each of the bare and guest modes, and 250 number-heavy programs, boundary $boundary_count noted)"

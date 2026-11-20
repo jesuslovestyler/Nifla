@@ -3609,6 +3609,173 @@ green. This stone's changes are new files
 only; no existing file but this README was
 touched.
 
+## Stone 48 — the parser joins the front end
+
+The all-Nifla port's first leg completes its
+second half: the parser. `selfhost/nifla-front.nifla`
+now carries Stone 47's lexer and a parser beside
+it, run as `nifla-front tree <path>`: lex, then
+parse, and print the parse tree as ONE line —
+`(program ...)` around the statements, each
+statement and expression in the contract's
+bracketed shape with its kind annotations
+(`none`, or the kind in quotes) and its line.
+It leaves with 0 on success; 1 on a lex refusal
+or a parse refusal, the plain-words error on
+the error channel and nothing on the screen (a
+lex failure in `tree` is reported exactly as in
+`tokens`; no partial dump either way); 2 when
+the file itself can't be read, as before. Both
+sides build the line by accumulating fragments
+in a list and joining once — the Cardnull OS 2
+sources' trees run to megabytes on the one
+line, and joining text onto text in a loop
+would crawl. Nothing under `src/` is touched,
+and `selfhost/nifla-in-nifla.nifla` is untouched
+too: the Swift originals stand as the standard
+the whole leg is measured against, and the
+self-host as the quarry the port is lifted from.
+
+Convergence again, the Stone 47 pattern. Lines
+1027–1902 of the self-host held a complete
+Nifla parser — the same tagged-object tree, the
+same two globals walking the token list — and
+this stone lifts that machinery into the front
+end (with a fresh copy of its `nameIndex`
+helper, which the front file did not yet have)
+and corrects it wherever it diverges from
+`src/Parser.swift`. The corrections, each
+pinned by fixtures in `front-examples/`:
+
+- **The statement fallthrough refusal** now
+  speaks Swift's words in Swift's order — "I
+  expected a line to start with 'let', 'say',
+  'if', 'while', 'repeat', 'for', 'make',
+  'give', 'attempt', or the name of a variable
+  to set" — where the self-host named 'attempt'
+  early, after 'if'.
+- **The `attempt` missing-`{` refusal**: the
+  block "that tries", in Swift's words, not the
+  self-host's "that tries something".
+- **The `if it fails` shape is tested the way
+  Swift tests it**: by lookahead, not by
+  consuming. After the attempt's body block,
+  Swift reads the tokens one, two and three
+  places ahead — each clamped to the last token
+  — and the shape holds only if the current
+  token is the keyword 'if', the next the name
+  'it', then 'fails', then the symbol '{'. Any
+  miss is ONE refusal, spoken at the 'if'
+  token's line however deep in the lookahead
+  the wrong token stands. The self-host
+  consumed step by step and spoke a second
+  refusal Swift never speaks ("After 'if it
+  fails' I need a '{'..."); that message is
+  removed, and a clamped peek-at-offset helper
+  (`pPeekAt`) serves the test. Fixtures pin the
+  shape refused for a wrong word in the second
+  place and in the third, for a missing '{'
+  after 'fails' (the generic refusal, not the
+  removed one), and for a program that ends
+  right after the block — the clamped lookahead
+  reading the end token three times over.
+- **Floor expressions are read the Swift way.**
+  Swift's floor case in the atom calls its
+  argument reading *unconditionally*: that
+  reading advances first, taking whatever token
+  stands where '(' should be, reads values
+  while the token after them is not ')', and
+  asks for ')' in its own words; only then does
+  Swift ask for the block itself, in its words
+  ("After the values handed to 'floor' I need
+  the block itself: ... Instead I found X.").
+  The self-host checked for '(' first and asked
+  for the block in different words. Both the
+  atom path and the statement path now mirror
+  Swift — the statement road going through
+  `parseExpression`, as Swift's does. The
+  strange consequence is pinned, not smoothed
+  over: `say floor` and `say floor 5` are both
+  refused in the atom refusal's words at the end
+  of the program, because the argument reading
+  advances past whatever stood where '(' should
+  be and the value reading after it meets the
+  end.
+
+Every other refusal was checked word by word
+against `Parser.swift` as the machinery was
+lifted, and already matched — the kind-word
+refusals in all their shapes, the `make`
+signature refusals, the target chain's and the
+postfix walk's two different '.' wordings
+(`x.years` in the chain, `person.name` in the
+postfix — Swift's own difference, kept), the
+never-closed block spoken at its '{' line. No
+further drift was found.
+
+**The fixtures**: 60 new files in
+`front-examples/`, prefix `parse-`. Fifty are
+one per refusal the Swift parser speaks — the
+`let` and kind-word family, `if`/`while`/
+`repeat`/`for`/`make` openings, the `attempt`
+shapes above, the name-start and target-chain
+refusals, the unclosed '(', '[', '{' and ']',
+the atom refusal, the never-closed block (two:
+one pinning the error at the '{' line across
+lines), and the two floor pins — each run
+against the oracle first to confirm it triggers
+the intended refusal, then held to the port
+byte for byte. Ten are structural pins:
+precedence and associativity (`1 + 2 * 3 -
+4 / 2`, `1 - 2 - 3`, `1 < 2 == true`,
+`a == b != c`, `-x.y[0]`), deep nesting (calls
+in lists in objects in calls), an empty program
+(a comment alone, printing `(program)`), an
+`if` with a present-but-empty else — `(else)` —
+against one with no else — `(else none)` — a
+fully annotated `make`, a `maybe` declaration,
+a working `attempt`, a floor statement standing
+alone, and a floor handed a value. The fixtures
+group now holds 102 files. The boundary stands
+as Stone 47 left it: the three fixtures in
+`front-examples/BOUNDARY.txt` diverge at the
+lex stage in tree mode, and the proof confirms
+the disagreement on every run, as before.
+
+**The proof** is `./run-front-parser.sh`. The
+oracle (`tools/front-oracle.swift`) gains the
+`tree` mode, walking the untouched Swift
+`Expr`/`Stmt` enums in the identical format,
+numbers by `formatNumber` as the port's by
+`numText`. Across the whole corpus — every
+example suite, both self-host sources
+(`nifla-in-nifla.nifla` and `nifla-front.nifla`
+itself), feathercheck, every `nifla` block in
+PRIMER.md and TUTORIAL.md, the Cardnull OS 2
+sources read-only, and the fixtures — stdout,
+stderr and exit code are compared byte for
+byte: examples 60/60, checker 45/45, floor
+4/4, voice 3/3, bare 16/16, selfhost 2/2,
+tools 1/1, primer 58/58, tutorial 86/86,
+cardnull 21/21, fixtures 102/102, boundary 3
+noted. `./run-front-lexer.sh`, re-run on the
+final tree, still passes whole (fixtures
+102/102 there too — the parser fixtures lex
+identically, as they must).
+
+Behavior unchanged everywhere else: the full
+suite sweep on this stone's tree — interpreted
+60/60, compiled 159/159, voice 6/6, self-hosted
+60/60, primer and tutorial books true, web
+corpus byte for byte, feather, feathercheck,
+selfmade, web-floor and every bare proof
+green. The front end now stands whole in
+Nifla — lexer and parser, token for token and
+tree for tree identical to Swift across the
+whole corpus. The port's later legs (the
+checker, then the compilers, piece by piece,
+as decided Nov 19, 2026) are future stones.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

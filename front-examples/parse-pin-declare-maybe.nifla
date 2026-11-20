@@ -1,0 +1,2 @@
+let x: maybe number = 3
+say x

@@ -1,12 +1,14 @@
 // Nifla front — the Nifla toolchain's front end, written in
-// Nifla itself (Stone 47, the first stone of the all-Nifla port).
+// Nifla itself (Stones 47–48, the first stones of the
+// all-Nifla port).
 //
 // Run it the way the toolchain's front half would be run:
 //
 //     nifla-front tokens <path>
+//     nifla-front tree <path>
 //
-// It reads the file at <path> and prints its tokens, one per
-// line, in this dump:
+// 'tokens' reads the file at <path> and prints its tokens,
+// one per line, in this dump:
 //
 //     number <VALUE> @<line>     VALUE written the way Nifla
 //                                writes numbers for people
@@ -23,10 +25,14 @@
 // explicit character loop (escText below), mirrored by the
 // proof oracle's own loop — no library escaping on either side.
 //
-// Leaving: 0 on success (the dump on the screen, nothing on
-// the error channel); 1 on a lex refusal (nothing on the
-// screen, "Line N: <message>" on the error channel); 2 when
-// the file itself can't be read (a plain message on the error
+// 'tree' lexes and parses the file and prints the parse
+// tree as ONE line (the format is written out in full above
+// the tree-dump section below, and mirrored by the oracle).
+// Leaving, both modes: 0 on success (the dump on the screen,
+// nothing on the error channel); 1 on a lex refusal or — in
+// 'tree' — a parse refusal (nothing on the screen,
+// "Line N: <message>" on the error channel); 2 when the file
+// itself can't be read (a plain message on the error
 // channel).
 //
 // The lexer below is the self-hosted interpreter's lexer
@@ -86,13 +92,25 @@
 //     digits, diverge from Swift for that reason and are
 //     named, with fixtures, in front-examples/BOUNDARY.txt.
 //
-// The parser joins this program in Stone 48; this stone is
-// the lexer and the token dump alone. run-front-lexer.sh
-// proves the identity against the Swift lexer (through the
-// proof-only oracle, tools/front-oracle.swift) over the whole
-// corpus: every example suite, the self-host and feathercheck
-// sources, every nifla block in PRIMER.md and TUTORIAL.md,
-// the Cardnull OS 2 sources, and the fixtures.
+// Stone 48 adds the parser: the self-host's parser lifted
+// the same way and corrected to identity with the Swift
+// parser (src/Parser.swift) — the statement fallthrough and
+// the 'attempt' missing-'{' refusal in Swift's exact words
+// and order, the 'if it fails' shape tested by clamped
+// lookahead without consuming and refused in one message at
+// the 'if' token's line, and floor expressions read the
+// Swift way (the argument reading called unconditionally,
+// the block asked for afterwards in Swift's words, the
+// statement road going through parseExpression as Swift's
+// does); every other refusal was checked word by word
+// against Parser.swift as it was lifted and already
+// matched. run-front-lexer.sh proves the token identity
+// and run-front-parser.sh the tree identity against the
+// Swift front end (through the proof-only oracle,
+// tools/front-oracle.swift) over the whole corpus: every
+// example suite, the self-host and feathercheck sources,
+// every nifla block in PRIMER.md and TUTORIAL.md, the
+// Cardnull OS 2 sources, and the fixtures.
 //
 // Part of Nifla, a public-domain programming language by Tyler
 // Kovalevich. See the Unlicense in the LICENSE file at the root
@@ -170,6 +188,20 @@ make isNameCh(c) {
 // number-to-text is that very function, so the two agree.)
 make numText(n) {
     give "" + n
+}
+
+// Where a name lives in a names list, or -1 when it isn't
+// there. (The parser asks it of parameter names, object
+// field names, and its table of operator signs.)
+make nameIndex(names, name) {
+    let i = 0
+    while i < length(names) {
+        if names[i] == name {
+            give i
+        }
+        i = i + 1
+    }
+    give -1
 }
 
 // ---------- the number reader ----------
@@ -876,6 +908,926 @@ make lexFloorRest(startLine) {
     give okVal({ kind: "floor", asm: join(asmLines, "\n"), line: startLine })
 }
 
+// ---------- the parser ----------
+// Reads the tokens and builds a tree of statements and
+// expressions, as tagged objects:
+//   statements: { type: "declare", name, kindWord, value, line }
+//               { type: "assign", name, value, line }
+//               { type: "assignTarget", target, value, line }
+//               { type: "say", value, line }
+//               { type: "if", condition, thenStmts, elseStmts, hasElse, line }
+//               { type: "while", condition, body, line }
+//               { type: "repeat", count, body, line }
+//               { type: "for", name, over, body, line }
+//               { type: "define", name, params, paramKinds, returnKind, body, line }
+//               { type: "give", value, line }
+//               { type: "attempt", body, recovery, line }
+//               { type: "doCall", name, args, line }
+//               { type: "doExpr", expr, line }
+//   expressions: { type: "number", value, line }
+//               { type: "text", value, line }
+//               { type: "boolean", flag, line }
+//               { type: "nothing", line }
+//               { type: "variable", name, line }
+//               { type: "call", name, args, line }
+//               { type: "object", names, values, line }
+//               { type: "list", items, line }
+//               { type: "field", base, name, line }
+//               { type: "index", base, index, line }
+//               { type: "floor", asm, args, line }
+//               { type: "negate", inner, line }
+//               { type: "binary", op, left, right, line }
+//
+// Ported into the front end in Stone 48 and corrected to
+// identity with the Swift parser (src/Parser.swift) wherever
+// the self-host's habits diverged: the statement fallthrough
+// and the 'attempt' missing-'{' refusal in Swift's exact
+// words and order; the 'if it fails' shape tested by clamped
+// lookahead without consuming, refused in one message at the
+// 'if' token's line; and floor expressions read the Swift
+// way — the argument reading called unconditionally, the
+// block asked for afterwards in Swift's words, the statement
+// road going through parseExpression as Swift's does. Every
+// other refusal was checked word by word against
+// Parser.swift as it was lifted and already matched.
+
+let gToks = []
+let gP = 0
+
+make pCur() {
+    give gToks[gP]
+}
+
+make pNext() {
+    if gP + 1 < length(gToks) {
+        give gToks[gP + 1]
+    }
+    give gToks[gP]
+}
+
+// The token k places ahead of the current one, clamped to
+// the last token — Swift's 'attempt' lookahead reads pos+1,
+// pos+2 and pos+3 each clamped the same way, and consumes
+// none of them by the reading.
+make pPeekAt(k) {
+    let idx = gP + k
+    if idx >= length(gToks) {
+        idx = length(gToks) - 1
+    }
+    give gToks[idx]
+}
+
+make pAdvance() {
+    if gP < length(gToks) - 1 {
+        gP = gP + 1
+    }
+}
+
+make pIsSym(s) {
+    let t = pCur()
+    if t.kind == "symbol" {
+        give t.symbol == s
+    }
+    give false
+}
+
+make pIsKw(w) {
+    let t = pCur()
+    if t.kind == "keyword" {
+        give t.word == w
+    }
+    give false
+}
+
+// How a token reads in an error message.
+make pSpoken(t) {
+    if t.kind == "number" {
+        give "the number " + numText(t.num)
+    }
+    if t.kind == "text" {
+        give "the text \"" + t.text + "\""
+    }
+    if t.kind == "name" {
+        give "the name '" + t.name + "'"
+    }
+    if t.kind == "keyword" {
+        give "'" + t.word + "'"
+    }
+    if t.kind == "symbol" {
+        give "'" + t.symbol + "'"
+    }
+    if t.kind == "floor" {
+        give "a 'floor' block"
+    }
+    give "the end of the program"
+}
+
+make parseProgramAll(tokens) {
+    gToks = tokens
+    gP = 0
+    let stmts = []
+    let going = true
+    while going {
+        if pCur().kind == "end" {
+            going = false
+        }
+        if going {
+            let r = parseStatement()
+            if r.ok == false {
+                give r
+            }
+            append(stmts, r.value)
+        }
+    }
+    give okVal(stmts)
+}
+
+make parseBlock(openLine) {
+    let stmts = []
+    let going = true
+    while going {
+        if pIsSym("}") {
+            going = false
+        }
+        if going {
+            if pCur().kind == "end" {
+                give errAt(openLine, "This '{' is never closed. Add a '}' to finish the block it starts.")
+            }
+            let r = parseStatement()
+            if r.ok == false {
+                give r
+            }
+            append(stmts, r.value)
+        }
+    }
+    pAdvance()  // the closing '}'
+    give okVal(stmts)
+}
+
+// Stone 18: reads one kind word where an annotation puts
+// one — after a ':' in a 'let' or a 'make', or after the
+// arrow of a 'make'. The words are the checker's own kind
+// vocabulary; anything else is refused in plain words, in
+// the Swift parser's own wording.
+make isKindWord(word) {
+    if word == "number" {
+        give true
+    }
+    if word == "text" {
+        give true
+    }
+    if word == "boolean" {
+        give true
+    }
+    if word == "list" {
+        give true
+    }
+    if word == "object" {
+        give true
+    }
+    if word == "bytes" {
+        give true
+    }
+    if word == "nothing" {
+        give true
+    }
+    give false
+}
+
+make parseKindWord(after) {
+    let t = pCur()
+    // Stone 19: 'nothing' is a word of the language now, so
+    // it arrives as a keyword token, not a name — it is a
+    // kind word all the same, in the plain position.
+    if t.kind == "keyword" {
+        if t.word == "nothing" {
+            pAdvance()
+            give okVal("nothing")
+        }
+    }
+    if t.kind != "name" {
+        give errAt(t.line, "After the " + after + " I need a kind — one of: number, text, boolean, list, object, bytes, nothing. Instead I found " + pSpoken(t) + ".")
+    }
+    let word = t.name
+    // Stone 19: 'maybe' may stand before a kind.
+    if word == "maybe" {
+        pAdvance()
+        let t2 = pCur()
+        if t2.kind == "keyword" {
+            if t2.word == "nothing" {
+                give errAt(t2.line, "'maybe nothing' says no more than 'nothing' itself — a value that may be nothing or nothing is just nothing. Write 'nothing' alone, or 'maybe' before a real kind, like: maybe number.")
+            }
+        }
+        if t2.kind != "name" {
+            give errAt(t2.line, "After 'maybe' I need a kind — one of: number, text, boolean, list, object, bytes. Instead I found " + pSpoken(t2) + ".")
+        }
+        let inner = t2.name
+        if isKindWord(inner) == false {
+            give errAt(t2.line, "I don't know a kind called '" + inner + "'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing — and 'maybe' can stand before any of them but 'nothing', like: maybe number.")
+        }
+        pAdvance()
+        give okVal("maybe " + inner)
+    }
+    if isKindWord(word) == false {
+        give errAt(t.line, "I don't know a kind called '" + word + "'. The kinds a value can be marked as are: number, text, boolean, list, object, bytes, nothing.")
+    }
+    pAdvance()
+    give okVal(word)
+}
+
+make parseStatement() {
+    let token = pCur()
+
+    // A floor block standing on its own.
+    if token.kind == "floor" {
+        pAdvance()
+        give okVal({ type: "doExpr", expr: { type: "floor", asm: token.asm, args: [], line: token.line }, line: token.line })
+    }
+
+    // A floor block handed values, standing on its own:
+    // floor(values) { ... } — the same expression, run for
+    // what it does to the memory it was handed. Swift reads
+    // it through parseExpression, and so does this port: the
+    // expression road leads to the same floor case in
+    // parseAtom.
+    if pIsKw("floor") {
+        let f = parseExpression()
+        if f.ok == false {
+            give f
+        }
+        give okVal({ type: "doExpr", expr: f.value, line: token.line })
+    }
+
+    if pIsKw("let") {
+        pAdvance()
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After 'let' I need a name for the new variable, like: let years = 29. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let name = pCur().name
+        pAdvance()
+        let kindWord = ""
+        if pIsSym(":") {
+            pAdvance()
+            let k = parseKindWord("':' after 'let " + name + "'")
+            if k.ok == false {
+                give k
+            }
+            kindWord = k.value
+        }
+        if pIsSym("=") == false {
+            give errAt(pCur().line, "After 'let " + name + "' I need an '=' and then a value, like: let " + name + " = 29. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()
+        let v = parseExpression()
+        if v.ok == false {
+            give v
+        }
+        give okVal({ type: "declare", name: name, kindWord: kindWord, value: v.value, line: token.line })
+    }
+
+    if pIsKw("say") {
+        pAdvance()
+        let v = parseExpression()
+        if v.ok == false {
+            give v
+        }
+        give okVal({ type: "say", value: v.value, line: token.line })
+    }
+
+    if pIsKw("if") {
+        pAdvance()
+        let cond = parseExpression()
+        if cond.ok == false {
+            give cond
+        }
+        if pIsSym("{") == false {
+            if pIsSym("=") {
+                give errAt(pCur().line, "After the 'if' condition I expected '{' but found '='. To compare two things, use '==' — two equals signs. A single '=' sets a variable.")
+            }
+            give errAt(pCur().line, "After the 'if' condition I need a '{' to start the block that runs when it's true. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let thenR = parseBlock(openLine)
+        if thenR.ok == false {
+            give thenR
+        }
+        let elseStmts = []
+        let hasElse = false
+        if pIsKw("else") {
+            pAdvance()
+            if pIsSym("{") == false {
+                give errAt(pCur().line, "After 'else' I need a '{' to start the block that runs when the condition is false. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let elseOpen = pCur().line
+            pAdvance()
+            let elseR = parseBlock(elseOpen)
+            if elseR.ok == false {
+                give elseR
+            }
+            elseStmts = elseR.value
+            hasElse = true
+        }
+        give okVal({ type: "if", condition: cond.value, thenStmts: thenR.value, elseStmts: elseStmts, hasElse: hasElse, line: token.line })
+    }
+
+    if pIsKw("while") {
+        pAdvance()
+        let cond = parseExpression()
+        if cond.ok == false {
+            give cond
+        }
+        if pIsSym("{") == false {
+            if pIsSym("=") {
+                give errAt(pCur().line, "After the 'while' condition I expected '{' but found '='. To compare two things, use '==' — two equals signs. A single '=' sets a variable.")
+            }
+            give errAt(pCur().line, "After the 'while' condition I need a '{' to start the block that runs again and again while it's true. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "while", condition: cond.value, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("repeat") {
+        pAdvance()
+        let count = parseExpression()
+        if count.ok == false {
+            give count
+        }
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After the 'repeat' count I need a '{' to start the block that runs that many times, like: repeat 3 { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "repeat", count: count.value, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("for") {
+        pAdvance()
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After 'for' I need a name for each item the loop walks through, like: for item in items { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let name = pCur().name
+        pAdvance()
+        if pIsKw("in") == false {
+            give errAt(pCur().line, "After 'for " + name + "' I need 'in' and then the list or text to walk through, like: for " + name + " in items { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()
+        let over = parseExpression()
+        if over.ok == false {
+            give over
+        }
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'for " + name + " in ...' I need a '{' to start the block that runs for each item. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "for", name: name, over: over.value, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("make") {
+        pAdvance()
+        if pCur().kind != "name" {
+            give errAt(pCur().line, "After 'make' I need a name for the new function, like: make greet(name) { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let name = pCur().name
+        pAdvance()
+        if pIsSym("(") == false {
+            give errAt(pCur().line, "After the function's name I need '(' and the names of the values it takes, like: make " + name + "(name) { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()  // the '('
+        let params = []
+        let paramKinds = []
+        if pIsSym(")") == false {
+            let collecting = true
+            while collecting {
+                if pCur().kind != "name" {
+                    give errAt(pCur().line, "Inside the parentheses of 'make " + name + "' I need names for the values, separated by commas, like: make " + name + "(a, b) { ... }. Instead I found " + pSpoken(pCur()) + ".")
+                }
+                let param = pCur().name
+                if nameIndex(params, param) >= 0 {
+                    give errAt(pCur().line, "The function '" + name + "' uses the name '" + param + "' twice in its list of values. Each value needs its own name.")
+                }
+                append(params, param)
+                pAdvance()
+                let pkind = ""
+                if pIsSym(":") {
+                    pAdvance()
+                    let k = parseKindWord("':' after '" + param + "'")
+                    if k.ok == false {
+                        give k
+                    }
+                    pkind = k.value
+                }
+                append(paramKinds, pkind)
+                if pIsSym(",") {
+                    pAdvance()
+                } else {
+                    collecting = false
+                }
+            }
+        }
+        if pIsSym(")") == false {
+            give errAt(pCur().line, "I expected a ')' to close the list of values for '" + name + "', but I found " + pSpoken(pCur()) + ".")
+        }
+        pAdvance()  // the ')'
+        let returnKind = ""
+        if pIsSym("->") {
+            pAdvance()
+            let k = parseKindWord("'->' in 'make " + name + "'")
+            if k.ok == false {
+                give k
+            }
+            returnKind = k.value
+        }
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'make " + name + "(...)' I need a '{' to start the block that runs when the function is called. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        give okVal({ type: "define", name: name, params: params, paramKinds: paramKinds, returnKind: returnKind, body: bodyR.value, line: token.line })
+    }
+
+    if pIsKw("give") {
+        pAdvance()
+        let v = parseExpression()
+        if v.ok == false {
+            give v
+        }
+        give okVal({ type: "give", value: v.value, line: token.line })
+    }
+
+    if pIsKw("attempt") {
+        pAdvance()
+        if pIsSym("{") == false {
+            give errAt(pCur().line, "After 'attempt' I need a '{' to start the block that tries, like: attempt { ... } if it fails { ... }. Instead I found " + pSpoken(pCur()) + ".")
+        }
+        let openLine = pCur().line
+        pAdvance()
+        let bodyR = parseBlock(openLine)
+        if bodyR.ok == false {
+            give bodyR
+        }
+        // Swift's shape test: with the current token the
+        // keyword 'if', the tokens one, two and three places
+        // ahead — each read clamped to the last token, none
+        // of them consumed by the test — must be the name
+        // 'it', the name 'fails', and the symbol '{'. Any
+        // miss is the one refusal below, spoken at the
+        // current token's line however deep in the lookahead
+        // the wrong token stands.
+        let itTok = pPeekAt(1)
+        let failsTok = pPeekAt(2)
+        let braceTok = pPeekAt(3)
+        let shape = false
+        if pIsKw("if") {
+            if itTok.kind == "name" {
+                if itTok.name == "it" {
+                    if failsTok.kind == "name" {
+                        if failsTok.name == "fails" {
+                            if braceTok.kind == "symbol" {
+                                if braceTok.symbol == "{" {
+                                    shape = true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if shape == false {
+            give errAt(pCur().line, "After an 'attempt' block I need 'if it fails' and a block saying what to do when something goes wrong, like: attempt { ... } if it fails { ... }.")
+        }
+        pAdvance()  // 'if'
+        pAdvance()  // 'it'
+        pAdvance()  // 'fails'
+        let recoveryOpen = pCur().line
+        pAdvance()  // '{
+        let recoveryR = parseBlock(recoveryOpen)
+        if recoveryR.ok == false {
+            give recoveryR
+        }
+        give okVal({ type: "attempt", body: bodyR.value, recovery: recoveryR.value, line: token.line })
+    }
+
+    // Lines that start with a name: setting a variable, setting a
+    // field or an item, or calling a function for what it does.
+    if token.kind == "name" {
+        let name = token.name
+        let next = pNext()
+        if next.kind == "symbol" {
+            if next.symbol == "=" {
+                pAdvance()  // the name
+                pAdvance()  // the '='
+                let v = parseExpression()
+                if v.ok == false {
+                    give v
+                }
+                give okVal({ type: "assign", name: name, value: v.value, line: token.line })
+            }
+            if next.symbol == "(" {
+                pAdvance()  // the name
+                let argsR = parseCallArgs(name)
+                if argsR.ok == false {
+                    give argsR
+                }
+                give okVal({ type: "doCall", name: name, args: argsR.value, line: token.line })
+            }
+            if next.symbol == "." {
+                let targetR = parseTargetChain(name, token.line)
+                if targetR.ok == false {
+                    give targetR
+                }
+                let v = parseExpression()
+                if v.ok == false {
+                    give v
+                }
+                give okVal({ type: "assignTarget", target: targetR.value, value: v.value, line: token.line })
+            }
+            if next.symbol == "[" {
+                let targetR = parseTargetChain(name, token.line)
+                if targetR.ok == false {
+                    give targetR
+                }
+                let v = parseExpression()
+                if v.ok == false {
+                    give v
+                }
+                give okVal({ type: "assignTarget", target: targetR.value, value: v.value, line: token.line })
+            }
+        }
+        give errAt(token.line, "I found the name '" + name + "' at the start of a line, but a line needs to do something: make a variable with 'let " + name + " = ...', set it with '" + name + " = ...', set a field with '" + name + ".field = ...', set an item with '" + name + "[0] = ...', show it with 'say " + name + "', or call a function with '" + name + "(...)'.")
+    }
+
+    give errAt(token.line, "I expected a line to start with 'let', 'say', 'if', 'while', 'repeat', 'for', 'make', 'give', 'attempt', or the name of a variable to set — but I found " + pSpoken(token) + ".")
+}
+
+// A floor expression: the 'floor' keyword, the values handed
+// to the block, and the block itself (which the lexer
+// captured whole, as one token). Swift calls its argument
+// reading unconditionally here: that reading advances first,
+// taking whatever token stands where '(' should be, reads
+// values while the token after them is not ')', and only
+// then asks for ')' in its own words — so a bare 'floor'
+// with nothing after it is refused by the value reading that
+// follows, in the atom refusal's words, exactly as Swift
+// refuses it. Only after the values does Swift ask for the
+// block itself, in the words below.
+make parseFloorExpr() {
+    let token = pCur()
+    pAdvance()  // the 'floor' keyword
+    let argsR = parseCallArgs("floor")
+    if argsR.ok == false {
+        give argsR
+    }
+    if pCur().kind != "floor" {
+        give errAt(pCur().line, "After the values handed to 'floor' I need the block itself: '{' on the same line, then the processor instructions. Instead I found " + pSpoken(pCur()) + ".")
+    }
+    let block = pCur()
+    pAdvance()
+    give okVal({ type: "floor", asm: block.asm, args: argsR.value, line: token.line })
+}
+
+// A target chain after a leading name — ".field" and "[...]"
+// steps — ending at the '=' of a setting line. The current token
+// is the name; the chain and the '=' are consumed here, so the
+// caller parses the value next.
+make parseTargetChain(name, line) {
+    pAdvance()  // the name
+    let target = { type: "variable", name: name, line: line }
+    let going = true
+    while going {
+        if pIsSym(".") {
+            let dotTok = pCur()
+            pAdvance()  // the '.'
+            if pCur().kind != "name" {
+                give errAt(pCur().line, "After '.' I need the name of a field, like: " + name + ".years. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let fieldName = pCur().name
+            pAdvance()
+            target = { type: "field", base: target, name: fieldName, line: dotTok.line }
+        } else {
+            if pIsSym("[") {
+                let bracketTok = pCur()
+                pAdvance()  // the '['
+                let idx = parseExpression()
+                if idx.ok == false {
+                    give idx
+                }
+                if pIsSym("]") == false {
+                    give errAt(pCur().line, "I expected a ']' to close the '[' from line " + bracketTok.line + ", but I found " + pSpoken(pCur()) + ".")
+                }
+                pAdvance()  // the ']'
+                target = { type: "index", base: target, index: idx.value, line: bracketTok.line }
+            } else {
+                going = false
+            }
+        }
+    }
+    if pIsSym("=") == false {
+        give errAt(pCur().line, "A line that starts with a field or an item like this needs to set it: write an '=' and the new value, like: " + name + ".years = 30 or " + name + "[0] = 30. To show it instead, write it after 'say'.")
+    }
+    pAdvance()  // the '='
+    give okVal(target)
+}
+
+// The "( value, value )" part of a call. The current token is
+// the '('.
+make parseCallArgs(name) {
+    pAdvance()  // the '('
+    let args = []
+    if pIsSym(")") == false {
+        let collecting = true
+        while collecting {
+            let a = parseExpression()
+            if a.ok == false {
+                give a
+            }
+            append(args, a.value)
+            if pIsSym(",") {
+                pAdvance()
+            } else {
+                collecting = false
+            }
+        }
+    }
+    if pIsSym(")") == false {
+        give errAt(pCur().line, "I expected a ')' to close the '(' in this call to '" + name + "', but I found " + pSpoken(pCur()) + ".")
+    }
+    pAdvance()  // the ')'
+    give okVal(args)
+}
+
+// ---------- expression parsing ----------
+
+make parseExpression() {
+    give parseEquality()
+}
+
+// One level of the precedence climb: parse a tighter level, then
+// fold in any of this level's signs, left to right.
+make parseBinaryLevel(tighter, ops) {
+    let leftR = giveTighter(tighter)
+    if leftR.ok == false {
+        give leftR
+    }
+    let left = leftR.value
+    let going = true
+    while going {
+        let t = pCur()
+        if t.kind == "symbol" {
+            if nameIndex(ops, t.symbol) >= 0 {
+                pAdvance()
+                let rightR = giveTighter(tighter)
+                if rightR.ok == false {
+                    give rightR
+                }
+                left = { type: "binary", op: t.symbol, left: left, right: rightR.value, line: t.line }
+            } else {
+                going = false
+            }
+        } else {
+            going = false
+        }
+    }
+    give okVal(left)
+}
+
+// Names the tighter level for parseBinaryLevel, so the four
+// levels can share one body of code.
+make giveTighter(which) {
+    if which == "comparison" {
+        give parseComparison()
+    }
+    if which == "sum" {
+        give parseSum()
+    }
+    if which == "term" {
+        give parseTerm()
+    }
+    give parseFactor()
+}
+
+make parseEquality() {
+    give parseBinaryLevel("comparison", ["==", "!="])
+}
+
+make parseComparison() {
+    give parseBinaryLevel("sum", ["<", "<=", ">", ">="])
+}
+
+make parseSum() {
+    give parseBinaryLevel("term", ["+", "-"])
+}
+
+make parseTerm() {
+    give parseBinaryLevel("factor", ["*", "/"])
+}
+
+make parseFactor() {
+    if pIsSym("-") {
+        let opTok = pCur()
+        pAdvance()
+        let inner = parseFactor()
+        if inner.ok == false {
+            give inner
+        }
+        give okVal({ type: "negate", inner: inner.value, line: opTok.line })
+    }
+    give parsePostfix()
+}
+
+// An atom followed by any number of steps: '.field' reads one
+// field of an object, and '[...]' reads one item of a list or
+// one character of some text.
+make parsePostfix() {
+    let exprR = parseAtom()
+    if exprR.ok == false {
+        give exprR
+    }
+    let expr = exprR.value
+    let going = true
+    while going {
+        if pIsSym(".") {
+            let dotTok = pCur()
+            pAdvance()  // the '.'
+            if pCur().kind != "name" {
+                give errAt(pCur().line, "After '.' I need the name of a field, like: person.name. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let fieldName = pCur().name
+            pAdvance()
+            expr = { type: "field", base: expr, name: fieldName, line: dotTok.line }
+        } else {
+            if pIsSym("[") {
+                let bracketTok = pCur()
+                pAdvance()  // the '['
+                let idx = parseExpression()
+                if idx.ok == false {
+                    give idx
+                }
+                if pIsSym("]") == false {
+                    give errAt(pCur().line, "I expected a ']' to close the '[' from line " + bracketTok.line + ", but I found " + pSpoken(pCur()) + ".")
+                }
+                pAdvance()  // the ']'
+                expr = { type: "index", base: expr, index: idx.value, line: bracketTok.line }
+            } else {
+                going = false
+            }
+        }
+    }
+    give okVal(expr)
+}
+
+make parseAtom() {
+    let token = pCur()
+    if token.kind == "number" {
+        pAdvance()
+        give okVal({ type: "number", value: token.num, line: token.line })
+    }
+    if token.kind == "text" {
+        pAdvance()
+        give okVal({ type: "text", value: token.text, line: token.line })
+    }
+    if token.kind == "keyword" {
+        if token.word == "true" {
+            pAdvance()
+            give okVal({ type: "boolean", flag: true, line: token.line })
+        }
+        if token.word == "false" {
+            pAdvance()
+            give okVal({ type: "boolean", flag: false, line: token.line })
+        }
+        if token.word == "nothing" {
+            pAdvance()
+            give okVal({ type: "nothing", line: token.line })
+        }
+        if token.word == "floor" {
+            give parseFloorExpr()
+        }
+    }
+    if token.kind == "name" {
+        pAdvance()
+        if pIsSym("(") {
+            let argsR = parseCallArgs(token.name)
+            if argsR.ok == false {
+                give argsR
+            }
+            give okVal({ type: "call", name: token.name, args: argsR.value, line: token.line })
+        }
+        give okVal({ type: "variable", name: token.name, line: token.line })
+    }
+    if token.kind == "symbol" {
+        if token.symbol == "(" {
+            pAdvance()
+            let inner = parseExpression()
+            if inner.ok == false {
+                give inner
+            }
+            if pIsSym(")") == false {
+                give errAt(pCur().line, "I expected a ')' to close the '(' from line " + token.line + ", but I found " + pSpoken(pCur()) + ".")
+            }
+            pAdvance()
+            give okVal(inner.value)
+        }
+        if token.symbol == "{" {
+            give parseObjectLiteral(token)
+        }
+        if token.symbol == "[" {
+            give parseListLiteral(token)
+        }
+    }
+    if token.kind == "floor" {
+        pAdvance()
+        give okVal({ type: "floor", asm: token.asm, args: [], line: token.line })
+    }
+    give errAt(token.line, "I expected a number, a piece of text, true, false, a variable name, an object like { name: \"Tyler\" }, a list like [1, 2, 3], or a floor block here, but I found " + pSpoken(token) + ".")
+}
+
+// A list literal: '[' then values separated by commas, then ']'.
+make parseListLiteral(openToken) {
+    pAdvance()  // the '['
+    let items = []
+    if pIsSym("]") == false {
+        let collecting = true
+        while collecting {
+            let item = parseExpression()
+            if item.ok == false {
+                give item
+            }
+            append(items, item.value)
+            if pIsSym(",") {
+                pAdvance()
+            } else {
+                collecting = false
+            }
+        }
+    }
+    if pIsSym("]") == false {
+        give errAt(pCur().line, "I expected a ']' to close the list that started on line " + openToken.line + ", but I found " + pSpoken(pCur()) + ".")
+    }
+    pAdvance()  // the ']'
+    give okVal({ type: "list", items: items, line: openToken.line })
+}
+
+// An object literal: '{' then name ':' value pairs separated by
+// commas, then '}'. A field named twice is refused here.
+make parseObjectLiteral(openToken) {
+    pAdvance()  // the '{'
+    let names = []
+    let values = []
+    if pIsSym("}") == false {
+        let collecting = true
+        while collecting {
+            if pCur().kind != "name" {
+                give errAt(pCur().line, "Inside an object I need field names with values, like: { name: \"Tyler\", years: 29 }. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            let fieldName = pCur().name
+            let fieldLine = pCur().line
+            pAdvance()
+            if pIsSym(":") == false {
+                give errAt(pCur().line, "After the field name '" + fieldName + "' I need a ':' and then its value, like: { " + fieldName + ": 29 }. Instead I found " + pSpoken(pCur()) + ".")
+            }
+            pAdvance()  // the ':'
+            if nameIndex(names, fieldName) >= 0 {
+                give errAt(fieldLine, "This object names the field '" + fieldName + "' twice. Each field needs its own name — take one of the two out.")
+            }
+            let v = parseExpression()
+            if v.ok == false {
+                give v
+            }
+            append(names, fieldName)
+            append(values, v.value)
+            if pIsSym(",") {
+                pAdvance()
+            } else {
+                collecting = false
+            }
+        }
+    }
+    if pIsSym("}") == false {
+        give errAt(pCur().line, "I expected a '}' to close the object that started on line " + openToken.line + ", but I found " + pSpoken(pCur()) + ".")
+    }
+    pAdvance()  // the '}'
+    give okVal({ type: "object", names: names, values: values, line: openToken.line })
+}
+
+
 // ---------- the token dump ----------
 
 // ESC, as an explicit character loop: backslash first, then
@@ -927,13 +1879,202 @@ make dumpToken(t) {
     give "end @" + t.line
 }
 
+// ---------- the tree dump ----------
+// The parse tree as ONE line, in the contract's format —
+// the oracle (tools/front-oracle.swift) prints exactly this
+// from the Swift tree, and run-front-parser.sh holds the two
+// byte for byte. <KIND> is 'none' when there is no
+// annotation, otherwise the kind string in double quotes;
+// <ESC> is the token dump's escaping.
+//
+//   Program: (program + for each statement " " + stmt + ")"
+//     — an empty program is (program)
+//   (number <value> @L)   (text "<ESC>" @L)
+//   (boolean true @L) / (boolean false @L)   (nothing @L)
+//   (variable <name> @L)
+//   (call <name> @L + args + ")"
+//   (object @L + for each field " (<name> " + expr + ")" + ")"
+//   (list @L + items + ")"
+//   (field <base> <name> @L)   (index <base> <idx> @L)
+//   (floor "<ESC>" @L + args + ")"
+//   (negate <expr> @L)   (binary <op> @L <left> <right>)
+//   (declare <name> <KIND> <expr> @L)   (assign <name> <expr> @L)
+//   (assign-target <target> <expr> @L)
+//   (say <expr> @L)   (give <expr> @L)
+//   (if <cond> @L (then + stmts + ") (else" + absent: " none",
+//     present: stmts + "))" — a present-but-empty else is (else)
+//   (while <cond> @L + body + ")"   (repeat <count> @L + body + ")"
+//   (for <name> <over> @L + body + ")"
+//   (define <name> @L (params + for each " (<pname> <KIND>)"
+//     + ") (returns <KIND>)" + body + ")"
+//   (attempt @L (body + stmts + ") (recovery" + stmts + "))"
+//   (do-call <name> @L + args + ")"   (do-expr <expr> @L)
+//
+// Each list of fragments is gathered in a list and joined
+// once, the oracle's way — the OS sources' trees run to
+// megabytes on the one line, and joining text onto text in
+// a loop would crawl.
+
+make kindText(kindWord) {
+    if kindWord == "" {
+        give "none"
+    }
+    give "\"" + kindWord + "\""
+}
+
+// " stmt stmt ..." — the fragments of a block, joined once.
+make dumpStmtsText(stmts) {
+    let parts = []
+    for s in stmts {
+        append(parts, " ")
+        append(parts, dumpStmt(s))
+    }
+    give join(parts, "")
+}
+
+// " expr expr ..." — the fragments of a call's values.
+make dumpArgsText(args) {
+    let parts = []
+    for a in args {
+        append(parts, " ")
+        append(parts, dumpExpr(a))
+    }
+    give join(parts, "")
+}
+
+make dumpExpr(e) {
+    if e.type == "number" {
+        give "(number " + numText(e.value) + " @" + e.line + ")"
+    }
+    if e.type == "text" {
+        give "(text \"" + escText(e.value) + "\" @" + e.line + ")"
+    }
+    if e.type == "boolean" {
+        if e.flag {
+            give "(boolean true @" + e.line + ")"
+        }
+        give "(boolean false @" + e.line + ")"
+    }
+    if e.type == "nothing" {
+        give "(nothing @" + e.line + ")"
+    }
+    if e.type == "variable" {
+        give "(variable " + e.name + " @" + e.line + ")"
+    }
+    if e.type == "call" {
+        give "(call " + e.name + " @" + e.line + dumpArgsText(e.args) + ")"
+    }
+    if e.type == "object" {
+        let parts = ["(object @" + e.line]
+        let i = 0
+        while i < length(e.names) {
+            append(parts, " (" + e.names[i] + " ")
+            append(parts, dumpExpr(e.values[i]))
+            append(parts, ")")
+            i = i + 1
+        }
+        append(parts, ")")
+        give join(parts, "")
+    }
+    if e.type == "list" {
+        let parts = ["(list @" + e.line]
+        for item in e.items {
+            append(parts, " ")
+            append(parts, dumpExpr(item))
+        }
+        append(parts, ")")
+        give join(parts, "")
+    }
+    if e.type == "field" {
+        give "(field " + dumpExpr(e.base) + " " + e.name + " @" + e.line + ")"
+    }
+    if e.type == "index" {
+        give "(index " + dumpExpr(e.base) + " " + dumpExpr(e.index) + " @" + e.line + ")"
+    }
+    if e.type == "floor" {
+        give "(floor \"" + escText(e.asm) + "\" @" + e.line + dumpArgsText(e.args) + ")"
+    }
+    if e.type == "negate" {
+        give "(negate " + dumpExpr(e.inner) + " @" + e.line + ")"
+    }
+    if e.type == "binary" {
+        give "(binary " + e.op + " @" + e.line + " " + dumpExpr(e.left) + " " + dumpExpr(e.right) + ")"
+    }
+    give "(unknown)"
+}
+
+make dumpStmt(s) {
+    if s.type == "declare" {
+        give "(declare " + s.name + " " + kindText(s.kindWord) + " " + dumpExpr(s.value) + " @" + s.line + ")"
+    }
+    if s.type == "assign" {
+        give "(assign " + s.name + " " + dumpExpr(s.value) + " @" + s.line + ")"
+    }
+    if s.type == "assignTarget" {
+        give "(assign-target " + dumpExpr(s.target) + " " + dumpExpr(s.value) + " @" + s.line + ")"
+    }
+    if s.type == "say" {
+        give "(say " + dumpExpr(s.value) + " @" + s.line + ")"
+    }
+    if s.type == "give" {
+        give "(give " + dumpExpr(s.value) + " @" + s.line + ")"
+    }
+    if s.type == "if" {
+        let elseText = " none"
+        if s.hasElse {
+            elseText = dumpStmtsText(s.elseStmts)
+        }
+        give "(if " + dumpExpr(s.condition) + " @" + s.line + " (then" + dumpStmtsText(s.thenStmts) + ") (else" + elseText + "))"
+    }
+    if s.type == "while" {
+        give "(while " + dumpExpr(s.condition) + " @" + s.line + dumpStmtsText(s.body) + ")"
+    }
+    if s.type == "repeat" {
+        give "(repeat " + dumpExpr(s.count) + " @" + s.line + dumpStmtsText(s.body) + ")"
+    }
+    if s.type == "for" {
+        give "(for " + s.name + " " + dumpExpr(s.over) + " @" + s.line + dumpStmtsText(s.body) + ")"
+    }
+    if s.type == "define" {
+        let parts = ["(define " + s.name + " @" + s.line + " (params"]
+        let i = 0
+        while i < length(s.params) {
+            append(parts, " (" + s.params[i] + " " + kindText(s.paramKinds[i]) + ")")
+            i = i + 1
+        }
+        append(parts, ") (returns " + kindText(s.returnKind) + ")")
+        append(parts, dumpStmtsText(s.body))
+        append(parts, ")")
+        give join(parts, "")
+    }
+    if s.type == "attempt" {
+        give "(attempt @" + s.line + " (body" + dumpStmtsText(s.body) + ") (recovery" + dumpStmtsText(s.recovery) + "))"
+    }
+    if s.type == "doCall" {
+        give "(do-call " + s.name + " @" + s.line + dumpArgsText(s.args) + ")"
+    }
+    if s.type == "doExpr" {
+        give "(do-expr " + dumpExpr(s.expr) + " @" + s.line + ")"
+    }
+    give "(unknown)"
+}
+
+make dumpProgram(stmts) {
+    give "(program" + dumpStmtsText(stmts) + ")"
+}
+
 // ---------- the program itself ----------
 // What running this front end does: take the mode and the
 // file path from the words it was started with, read the
-// file, take it apart into tokens, and print the dump. A
-// problem is spoken on the error channel, leaving with the
-// dump contract's parting numbers: 2 when the file itself
-// can't be opened, 1 when the lexer refuses the program.
+// file, and print the dump the mode asks for — the tokens
+// ('tokens', Stone 47) or the parse tree on one line
+// ('tree', Stone 48). A problem is spoken on the error
+// channel, leaving with the dump contract's parting numbers:
+// 2 when the file itself can't be opened (or the mode is
+// not one this program knows), 1 when the lexer refuses the
+// program — or, in 'tree', when the parser does (a lex
+// refusal in 'tree' is reported exactly as in 'tokens'; no
+// partial dump is printed either way).
 
 let allArgs = arguments()
 if length(allArgs) < 2 {
@@ -941,27 +2082,38 @@ if length(allArgs) < 2 {
     exitwith(2)
 } else {
     if allArgs[0] != "tokens" {
-        sayerr("I don't know the mode '" + allArgs[0] + "'. The mode I know is 'tokens', like: nifla-front tokens program.nifla")
-        exitwith(2)
-    } else {
-        let path = allArgs[1]
-        let source = ""
-        attempt {
-            source = readfile(path)
-        } if it fails {
-            sayerr("I couldn't open the file '" + path + "'. Check the name and the folder, and try again.")
+        if allArgs[0] != "tree" {
+            sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens' and 'tree', like: nifla-front tokens program.nifla")
             exitwith(2)
         }
-        let lexed = lexAll(source)
-        if lexed.ok == false {
-            sayerr(lexed.message)
-            exitwith(1)
-        } else {
+    }
+    let path = allArgs[1]
+    let source = ""
+    attempt {
+        source = readfile(path)
+    } if it fails {
+        sayerr("I couldn't open the file '" + path + "'. Check the name and the folder, and try again.")
+        exitwith(2)
+    }
+    let lexed = lexAll(source)
+    if lexed.ok == false {
+        sayerr(lexed.message)
+        exitwith(1)
+    } else {
+        if allArgs[0] == "tokens" {
             let lines = []
             for t in lexed.value {
                 append(lines, dumpToken(t))
             }
             say join(lines, "\n")
+        } else {
+            let parsed = parseProgramAll(lexed.value)
+            if parsed.ok == false {
+                sayerr(parsed.message)
+                exitwith(1)
+            } else {
+                say dumpProgram(parsed.value)
+            }
         }
     }
 }

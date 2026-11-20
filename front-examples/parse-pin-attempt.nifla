@@ -1,0 +1,1 @@
+attempt { say 1 } if it fails { say 2 }

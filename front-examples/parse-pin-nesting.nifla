@@ -1,0 +1,5 @@
+make pair(a, b) {
+    give { first: a, second: b }
+}
+let table = { rows: [pair(1, [2, 3]), pair({ deep: [4] }, 5)], name: "pins" }
+say table.rows[0]

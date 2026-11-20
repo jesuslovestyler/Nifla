@@ -1,0 +1,5 @@
+say 1 + 2 * 3 - 4 / 2
+say 1 - 2 - 3
+say 1 < 2 == true
+say a == b != c
+say -x.y[0]

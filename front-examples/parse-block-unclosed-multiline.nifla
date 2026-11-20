@@ -1,0 +1,4 @@
+say 0
+if true {
+    say 1
+    say 2

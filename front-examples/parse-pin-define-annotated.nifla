@@ -1,0 +1,1 @@
+make f(a: number, b: maybe text) -> boolean { give true }

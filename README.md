@@ -2941,6 +2941,112 @@ true, web corpus byte for byte, feather,
 feathercheck, selfmade, web-floor and every bare
 proof green.
 
+## Stone 40 — the phantom close hunted: the compilers stand innocent
+
+The chain Stones 40–46 was approved on November
+19, 2026 to hunt a defect believed to live in the
+bare compilers. In Cardnull OS 2's Bible window
+(its Stone 41, the whole book of Jonah), any
+pointer press closed the window, and with both
+source writers of the close disabled in scratch
+builds a press still closed it, with the identical
+desk diff — the compiled binary seemed to perform
+a close no source wrote. Stone 38's interleave
+flag pointed the same way, and the verdict carried
+into this chain was a codegen or control-flow
+defect in the bare compilers, in the deep press
+and Escape region.
+
+Stone 40's work was the smallest repro and the
+mechanism's name. The repro stands exactly as
+recorded: on the OS's bench, a press on open ground
+with the Bible window open flips the window's open
+flag (desk slot 424) 1→0 and the forward slot 11→1,
+and nothing else in the desk changes. But the
+mechanism the hunt exposed is not in the compilers
+at all, and this ledger corrects the verdict
+plainly: **the bare compilers are innocent, and so
+is the OS source. The fault is in the OS's own
+bootloader, and the "close" was a machine reset.**
+
+The evidence, in the order it fell:
+
+- Neutered sources and NOP-patched binaries alike
+  still "closed" the window — because no close ever
+  ran. A QEMU execution trace of the press window
+  shows the only (424, 0) store executed is the
+  boot's own desk init, and the machine's start
+  runs again in the middle of the press.
+- An interrupt trace shows what a press truly
+  does: a page fault where execution reaches
+  corrupted code, hundreds of unrecoverable faults
+  in the bare runtime's default handler, a double
+  fault, a triple fault — the machine resets. The
+  rebooted desktop's fresh desk (flag 0 and forward
+  1 by init) is what the monitor had been reading
+  as the close's own writes; only those two fields
+  differ, which is why the diff looked surgical.
+  Every earlier observation — layout flips, the
+  dead-function "heal," instrumentation moving the
+  fault — is the corruption spot moving as the
+  code's shape changed.
+- A byte diff of the running kernel against its
+  compiled ELF (the whole 360,059-byte segment)
+  shows exactly one fatal wound: eight bytes at
+  segment offset 0x4DFF8, inside the press chain's
+  compiled code, overwritten by two dwords the
+  bootloader itself pushed.
+- The mechanism: the bootloader stages the system
+  file at 0x40000; the file has grown to 483,936
+  bytes, so the stage ends at 0xB6260 — and the
+  bootloader's protected-mode stack top stands at
+  0x8F000, inside the stage. Its loader loop pushes
+  two dwords per program header at 0x8EFF8,
+  overwriting staged segment bytes before they are
+  copied into the running kernel. The bootloader
+  header's 352 KiB claim for the system stage is a
+  fiction the file outgrew; the same arithmetic
+  puts the module stages inside the segment's span
+  and explains the known tail splash, which
+  corrupts strings, not code.
+- The fix, proved in a scratch copy of the OS tree
+  (the OS's own chain carries it home): the stack
+  moved to 0x3F000 and the module stages to free
+  low ground below the system stage. On the healed
+  loader the press probe leaves the flag standing,
+  the running kernel is byte-identical to the
+  compiler's ELF across the whole segment (one
+  benign CPU-set GDT accessed bit aside), and the
+  OS's Bible-window proof passes its whole first
+  boot — the word, the contents, Jonah read forward
+  and back, the foot presses, Escape. Its second
+  boot's two failing checks were diagnosed as
+  mistakes in the proof itself (a close-mark click
+  one cell right of the mark the window draws, and
+  an icon name the standing terminal window covers,
+  as it covers every icon's name) — recorded in the
+  OS's resume note, Addendum 3, for the OS chain to
+  correct in the proof, not the OS.
+
+No Nifla code changes at this stone: there was no
+compiler defect to fix, and this ledger will not
+invent one. Stones 41 and 42 are re-aimed by the
+evidence — 41 records the byte-fidelity proof on
+the healed loader (the running kernel is the
+compiler's output, byte for byte), and 42 re-asks
+Stone 38's interleave question there, where the
+same splash family is the standing suspect. The
+full evidence stands in the OS's resume note
+(STONE41-RESUME.md, Addenda 2 and 3).
+
+Proofs: no suite count changes — the full sweep
+was run on the untouched tree for this stone:
+interpreted 60/60, compiled 159/159, voice 6/6,
+self-hosted 60/60, primer and tutorial books
+true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every bare
+proof green.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

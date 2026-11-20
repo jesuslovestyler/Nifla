@@ -1,0 +1,3 @@
+let n = 20000000
+let b = makebytes(n)
+say length(b)

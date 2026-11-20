@@ -1,0 +1,4 @@
+make shout(word: text) {
+    say word
+}
+shout(42)

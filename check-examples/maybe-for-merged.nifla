@@ -1,0 +1,7 @@
+let m = [1, 2]
+if 1 < 2 {
+    m = nothing
+}
+for item in m {
+    say item
+}

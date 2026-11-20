@@ -1,0 +1,9 @@
+let m = 1
+if 1 < 2 {
+    m = nothing
+}
+if m == nothing {
+    say "none"
+} else {
+    say m + 1
+}

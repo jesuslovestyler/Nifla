@@ -1,0 +1,2 @@
+let x: nothing = 5
+say x

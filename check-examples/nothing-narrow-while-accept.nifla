@@ -1,0 +1,8 @@
+make lookup() -> maybe number {
+    give 7
+}
+let v = lookup()
+while v != nothing {
+    say v + 1
+    v = nothing
+}

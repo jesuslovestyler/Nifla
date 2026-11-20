@@ -1,0 +1,6 @@
+let v: maybe number = nothing
+if v == nothing {
+    say "empty"
+} else {
+    say v + 1
+}

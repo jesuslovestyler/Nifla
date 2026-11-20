@@ -1,0 +1,3 @@
+let items = []
+let alias = items
+say items[0]

@@ -1,0 +1,5 @@
+make getx() {
+    give x
+}
+let x = 42
+say getx()

@@ -1,0 +1,4 @@
+make greet(name) {
+    say name
+}
+greet()

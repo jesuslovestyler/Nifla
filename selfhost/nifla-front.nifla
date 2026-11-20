@@ -1,11 +1,22 @@
 // Nifla front — the Nifla toolchain's front end, written in
-// Nifla itself (Stones 47–48, the first stones of the
-// all-Nifla port).
+// Nifla itself (Stones 47–50, the first stones of the
+// all-Nifla port: the lexer and parser in Stones 47–48,
+// the checker beginning in Stone 50).
 //
 // Run it the way the toolchain's front half would be run:
 //
 //     nifla-front tokens <path>
 //     nifla-front tree <path>
+//     nifla-front check <path>
+//     nifla-front check-bare <path>
+//     nifla-front check-guest <path>
+//
+// Stone 50 adds the check modes: lex, parse, then the
+// checker (the section below the tree dump), printing
+// exactly "checked" for an accepted program. In this
+// stone all three check modes run the one hosted walk —
+// the bare/guest tool doors and the bare floor-text rule
+// land in Stone 51.
 //
 // 'tokens' reads the file at <path> and prints its tokens,
 // one per line, in this dump:
@@ -2063,18 +2074,2682 @@ make dumpProgram(stmts) {
     give "(program" + dumpStmtsText(stmts) + ")"
 }
 
+// ---------- the checker ----------
+// Stone 50: the checker begins. The Swift checker
+// (src/Checker.swift) ported into Nifla, fresh — a
+// SUPERSESSION, not a convergence (the decision and its
+// reason are recorded in the README ledger for this
+// stone): the self-hosted interpreter has no static
+// checker to lift — it runs no pre-pass, and its guards
+// are runtime guards in the interpreter's own words — so
+// this section is written against Checker.swift as the
+// sole standard, reusing the front end's existing helpers
+// (errAt/okVal result objects, nameIndex, numText) and the
+// self-host's kind-word helpers' wording where they mirror
+// the checker's phrases. The self-host stays untouched.
+//
+// The walk mirrors Swift's, refusal for refusal: it walks
+// the parser's tagged-object trees in the order the
+// program would run, and the FIRST refusal in walk order
+// is the verdict, handed back as an errAt result. Kinds
+// are carried as text — "number", "text", "boolean",
+// "object", "list", "bytes", "unknown", "nothing", and
+// "maybe <inner>" for a maybe kind — and a kind word that
+// names no kind (Swift's nil from fromKindWord, which is
+// what the word "nothing" maps to there) is carried as "".
+//
+// In this stone the walk is the HOSTED walk only:
+// check-bare and check-guest run this same walk, and
+// chkBareTool below answers "not a bare tool" for every
+// name — the bare/guest tool doors and the bare floor-text
+// rule land in Stone 51, which extends chkBareTool in this
+// one place and teaches chkFloor its bare branches.
+//
+// A writing note, learned the hard way in this stone:
+// several tables and walks below are written in
+// assignment style (a result variable set inside 'if'
+// blocks, given once at the end) rather than the
+// guard-and-give style the rest of the file uses. The
+// compiled door's generated Swift warns once for every
+// block whose scope nothing uses (a block holding only a
+// 'give' of a constant is the common case), and niflac
+// reads its Swift compiler's error channel only after
+// the compiler exits — past the pipe's 64 KB the two
+// deadlock. The front end's diagnostics stood at 35 KB
+// before this stone; a first guard-style draft of this
+// section took them to 132 KB and no compile ever
+// finished. Assignment style keeps the whole file at
+// 44 KB. Keep new checker code in this style, and if a
+// future stone's compile ever hangs with the compiler
+// idle, count the warnings first.
+
+// Whether a kind is a maybe kind, and its inner kind.
+make chkIsMaybe(kind) {
+    if length(kind) > 6 {
+        give part(kind, 0, 6) == "maybe "
+    }
+    give false
+}
+
+make chkMaybeInner(kind) {
+    give part(kind, 6, length(kind) - 6)
+}
+
+// How a kind is named in a plain-words message —
+// StaticKind.phrase in Checker.swift.
+make chkPhrase(kind) {
+    let out = "a value"
+    if kind == "number" {
+        out = "a number"
+    }
+    if kind == "text" {
+        out = "some text"
+    }
+    if kind == "boolean" {
+        out = "a true/false value"
+    }
+    if kind == "object" {
+        out = "an object"
+    }
+    if kind == "list" {
+        out = "a list"
+    }
+    if kind == "bytes" {
+        out = "a block of bytes"
+    }
+    if kind == "nothing" {
+        out = "nothing"
+    }
+    if chkIsMaybe(kind) {
+        out = chkPhrase(chkMaybeInner(kind)) + " or nothing"
+    }
+    give out
+}
+
+// The kind an annotation word names, as kind text —
+// StaticKind.fromKindWord; "" stands for Swift's nil
+// (the word "nothing", and any word that names no kind).
+make chkFromWord(word) {
+    let out = ""
+    if word == "number" {
+        out = "number"
+    }
+    if word == "text" {
+        out = "text"
+    }
+    if word == "boolean" {
+        out = "boolean"
+    }
+    if word == "list" {
+        out = "list"
+    }
+    if word == "object" {
+        out = "object"
+    }
+    if word == "bytes" {
+        out = "bytes"
+    }
+    if length(word) > 6 {
+        if part(word, 0, 6) == "maybe " {
+            let inner = chkFromWord(part(word, 6, length(word) - 6))
+            if inner == "" {
+                out = ""
+            } else {
+                out = "maybe " + inner
+            }
+        }
+    }
+    give out
+}
+
+// How an annotation word itself is phrased —
+// StaticKind.phrase(forKindWord:).
+make chkPhraseForWord(word) {
+    let kind = chkFromWord(word)
+    if kind != "" {
+        give chkPhrase(kind)
+    }
+    give "nothing"
+}
+
+// How two proven kinds join where the program could have
+// gone either way — StaticKind.mergedKind, case for case.
+make chkMergedKind(a, b) {
+    if a == b {
+        give a
+    }
+    if a == "nothing" {
+        if chkIsMaybe(b) {
+            give b
+        }
+        if b != "unknown" {
+            give "maybe " + b
+        }
+        give "unknown"
+    }
+    if b == "nothing" {
+        if chkIsMaybe(a) {
+            give a
+        }
+        if a != "unknown" {
+            give "maybe " + a
+        }
+        give "unknown"
+    }
+    if chkIsMaybe(a) {
+        if chkMaybeInner(a) == b {
+            give a
+        }
+    }
+    if chkIsMaybe(b) {
+        if chkMaybeInner(b) == a {
+            give b
+        }
+    }
+    give "unknown"
+}
+
+// Edit distance between two words, for "Did you mean"
+// suggestions — the self-host's copy of the Swift
+// interpreter's measure, carried into the front end for
+// the checker (the front end's lexer and parser never
+// needed it).
+make chkEditDistance(a, b) {
+    let ac = []
+    for c in a {
+        append(ac, c)
+    }
+    let bc = []
+    for c in b {
+        append(bc, c)
+    }
+    if length(ac) == 0 {
+        give length(bc)
+    }
+    if length(bc) == 0 {
+        give length(ac)
+    }
+    let prev = []
+    let i0 = 0
+    while i0 <= length(bc) {
+        append(prev, i0)
+        i0 = i0 + 1
+    }
+    let i = 1
+    while i <= length(ac) {
+        let cur = [i]
+        let j = 1
+        while j <= length(bc) {
+            let cost = 1
+            if ac[i - 1] == bc[j - 1] {
+                cost = 0
+            }
+            let best = prev[j] + 1
+            if cur[j - 1] + 1 < best {
+                best = cur[j - 1] + 1
+            }
+            if prev[j - 1] + cost < best {
+                best = prev[j - 1] + cost
+            }
+            append(cur, best)
+            j = j + 1
+        }
+        prev = cur
+        i = i + 1
+    }
+    give prev[length(bc)]
+}
+
+// ---------- name maps ----------
+// A name map is an object with parallel lists —
+// { names: [...], vals: [...] } — because a Nifla object
+// can't build a field name from text (the front end's
+// nameIndex pattern, the self-host's shape). Absence from
+// the map is how a missing fact (Swift's nil) is carried:
+// no sentinel value is ever stored.
+
+make nmNew() {
+    give { names: [], vals: [] }
+}
+
+make nmHas(map, name) {
+    give nameIndex(map.names, name) >= 0
+}
+
+make nmGet(map, name) {
+    let i = nameIndex(map.names, name)
+    if i >= 0 {
+        give { found: true, value: map.vals[i] }
+    }
+    give { found: false, value: "" }
+}
+
+make nmSet(map, name, value) {
+    let i = nameIndex(map.names, name)
+    if i >= 0 {
+        map.vals[i] = value
+    } else {
+        append(map.names, name)
+        append(map.vals, value)
+    }
+}
+
+make nmRemove(map, name) {
+    let i = nameIndex(map.names, name)
+    if i >= 0 {
+        removeat(map.names, i)
+        removeat(map.vals, i)
+    }
+}
+
+make nmClear(map) {
+    while length(map.names) > 0 {
+        removeat(map.names, 0)
+        removeat(map.vals, 0)
+    }
+}
+
+make nmCopy(map) {
+    let out = nmNew()
+    let i = 0
+    while i < length(map.names) {
+        append(out.names, map.names[i])
+        append(out.vals, map.vals[i])
+        i = i + 1
+    }
+    give out
+}
+
+// The names of two maps joined, each name once, the first
+// map's order then the second's new names.
+make nmUnionNames(a, b) {
+    let out = []
+    for n in a.names {
+        append(out, n)
+    }
+    for n in b.names {
+        if nameIndex(out, n) < 0 {
+            append(out, n)
+        }
+    }
+    give out
+}
+
+// ---------- the static environment ----------
+// StaticEnv's twin: an object { scopes, annotations,
+// constants, emptyLists, lengths }, each a list of name
+// maps, one map per scope. Swift's StaticEnv is a value —
+// a copy is a snapshot — so where Swift copies, this port
+// deep-copies (envCopy) and where Swift reassigns its
+// variable, this port writes the new picture into the
+// same object (envBecome), because a Nifla function's
+// caller holds the object itself, not the variable.
+
+make envNew() {
+    give { scopes: [nmNew()], annotations: [nmNew()], constants: [nmNew()], emptyLists: [nmNew()], lengths: [nmNew()] }
+}
+
+make envCopyMaps(maps) {
+    let out = []
+    for m in maps {
+        append(out, nmCopy(m))
+    }
+    give out
+}
+
+make envCopy(e) {
+    give { scopes: envCopyMaps(e.scopes), annotations: envCopyMaps(e.annotations), constants: envCopyMaps(e.constants), emptyLists: envCopyMaps(e.emptyLists), lengths: envCopyMaps(e.lengths) }
+}
+
+make envBecome(e, other) {
+    let c = envCopy(other)
+    e.scopes = c.scopes
+    e.annotations = c.annotations
+    e.constants = c.constants
+    e.emptyLists = c.emptyLists
+    e.lengths = c.lengths
+}
+
+// A lookup down one of the env's pictures, scopes from the
+// innermost out — { found, value }, absence for nil.
+make envLookupIn(maps, name) {
+    let i = length(maps) - 1
+    while i >= 0 {
+        let g = nmGet(maps[i], name)
+        if g.found {
+            give g
+        }
+        i = i - 1
+    }
+    give { found: false, value: "" }
+}
+
+make envLookup(e, name) {
+    give envLookupIn(e.scopes, name)
+}
+
+make envLookupAnn(e, name) {
+    give envLookupIn(e.annotations, name)
+}
+
+make envLookupConst(e, name) {
+    give envLookupIn(e.constants, name)
+}
+
+make envLookupLength(e, name) {
+    give envLookupIn(e.lengths, name)
+}
+
+make envIsProvenEmpty(e, name) {
+    let g = envLookupIn(e.emptyLists, name)
+    if g.found {
+        give g.value
+    }
+    give false
+}
+
+make envIsDeclaredHere(e, name) {
+    give nmHas(e.scopes[length(e.scopes) - 1], name)
+}
+
+// A fact bundle for declare/assign: { found, value } for a
+// tracked constant or length, carried the same way.
+make envDeclare(e, name, kind, annWord, constObj, provenEmpty, lenObj) {
+    let top = length(e.scopes) - 1
+    nmSet(e.scopes[top], name, kind)
+    if annWord != "" {
+        nmSet(e.annotations[top], name, annWord)
+    }
+    if constObj.found {
+        nmSet(e.constants[top], name, constObj.value)
+    }
+    if provenEmpty {
+        nmSet(e.emptyLists[top], name, true)
+    }
+    if lenObj.found {
+        nmSet(e.lengths[top], name, lenObj.value)
+    }
+}
+
+// Sets the kind in whichever block made the name; true
+// when some block knows the name, as Swift's assign.
+make envAssign(e, name, kind, constObj, provenEmpty, lenObj) {
+    let i = length(e.scopes) - 1
+    while i >= 0 {
+        if nmHas(e.scopes[i], name) {
+            nmSet(e.scopes[i], name, kind)
+            if constObj.found {
+                nmSet(e.constants[i], name, constObj.value)
+            } else {
+                nmRemove(e.constants[i], name)
+            }
+            if provenEmpty {
+                nmSet(e.emptyLists[i], name, true)
+            } else {
+                nmRemove(e.emptyLists[i], name)
+            }
+            if lenObj.found {
+                nmSet(e.lengths[i], name, lenObj.value)
+            } else {
+                nmRemove(e.lengths[i], name)
+            }
+            give true
+        }
+        i = i - 1
+    }
+    give false
+}
+
+// Sets a name's kind where it was made and lets its
+// tracked facts go — the narrowing a check against
+// 'nothing' earns.
+make envNarrow(e, name, kind) {
+    let i = length(e.scopes) - 1
+    let done = false
+    while done == false {
+        if i < 0 {
+            done = true
+        }
+        if done == false {
+            if nmHas(e.scopes[i], name) {
+                nmSet(e.scopes[i], name, kind)
+                nmRemove(e.constants[i], name)
+                nmRemove(e.emptyLists[i], name)
+                nmRemove(e.lengths[i], name)
+                done = true
+            }
+            i = i - 1
+        }
+    }
+}
+
+// Takes away every tracked fact in every scope, keeping
+// kinds and annotations (a function body is checked with
+// only the facts the body itself establishes).
+make envDropFacts(e) {
+    for m in e.constants {
+        nmClear(m)
+    }
+    for m in e.emptyLists {
+        nmClear(m)
+    }
+    for m in e.lengths {
+        nmClear(m)
+    }
+}
+
+// Takes away the facts (not the kind, not the annotation)
+// for one name.
+make envForgetFacts(e, name) {
+    let i = length(e.scopes) - 1
+    let done = false
+    while done == false {
+        if i < 0 {
+            done = true
+        }
+        if done == false {
+            if nmHas(e.scopes[i], name) {
+                nmRemove(e.constants[i], name)
+                nmRemove(e.emptyLists[i], name)
+                nmRemove(e.lengths[i], name)
+                done = true
+            }
+            i = i - 1
+        }
+    }
+}
+
+make envAllNames(e) {
+    let out = []
+    for scope in e.scopes {
+        for n in scope.names {
+            append(out, n)
+        }
+    }
+    give out
+}
+
+make envPush(e) {
+    append(e.scopes, nmNew())
+    append(e.annotations, nmNew())
+    append(e.constants, nmNew())
+    append(e.emptyLists, nmNew())
+    append(e.lengths, nmNew())
+}
+
+make envPop(e) {
+    removeat(e.scopes, length(e.scopes) - 1)
+    removeat(e.annotations, length(e.annotations) - 1)
+    removeat(e.constants, length(e.constants) - 1)
+    removeat(e.emptyLists, length(e.emptyLists) - 1)
+    removeat(e.lengths, length(e.lengths) - 1)
+}
+
+// After a function call, forget every proven kind and
+// every fact; names and annotations stay.
+make envForgetKinds(e) {
+    for scope in e.scopes {
+        let i = 0
+        while i < length(scope.names) {
+            scope.vals[i] = "unknown"
+            i = i + 1
+        }
+    }
+    for m in e.constants {
+        nmClear(m)
+    }
+    for m in e.emptyLists {
+        nmClear(m)
+    }
+    for m in e.lengths {
+        nmClear(m)
+    }
+}
+
+// Merge two ways the program could have gone, exactly as
+// StaticEnv.merged: the result starts from a, and its
+// scopes 0..<min(count) are rewritten name by name —
+// scopes beyond the shorter count are a's, kept whole.
+make envMerged(a, b) {
+    let result = envCopy(a)
+    let count = length(a.scopes)
+    if length(b.scopes) < count {
+        count = length(b.scopes)
+    }
+    let idx = 0
+    while idx < count {
+        let scope = nmNew()
+        let names = nmUnionNames(a.scopes[idx], b.scopes[idx])
+        for name in names {
+            let ga = nmGet(a.scopes[idx], name)
+            let gb = nmGet(b.scopes[idx], name)
+            if ga.found {
+                if gb.found {
+                    nmSet(scope, name, chkMergedKind(ga.value, gb.value))
+                } else {
+                    nmSet(scope, name, ga.value)
+                }
+            } else {
+                nmSet(scope, name, gb.value)
+            }
+        }
+        result.scopes[idx] = scope
+        let anns = nmNew()
+        let annNames = nmUnionNames(a.annotations[idx], b.annotations[idx])
+        for name in annNames {
+            let ga2 = nmGet(a.annotations[idx], name)
+            if ga2.found {
+                nmSet(anns, name, ga2.value)
+            } else {
+                let gb2 = nmGet(b.annotations[idx], name)
+                nmSet(anns, name, gb2.value)
+            }
+        }
+        result.annotations[idx] = anns
+        let consts = nmNew()
+        let constNames = nmUnionNames(a.constants[idx], b.constants[idx])
+        for name in constNames {
+            let ga3 = nmGet(a.constants[idx], name)
+            let gb3 = nmGet(b.constants[idx], name)
+            if ga3.found {
+                if gb3.found {
+                    if ga3.value == gb3.value {
+                        nmSet(consts, name, ga3.value)
+                    }
+                }
+            }
+        }
+        result.constants[idx] = consts
+        let empties = nmNew()
+        let emptyNames = nmUnionNames(a.emptyLists[idx], b.emptyLists[idx])
+        for name in emptyNames {
+            let ga4 = nmGet(a.emptyLists[idx], name)
+            let gb4 = nmGet(b.emptyLists[idx], name)
+            if ga4.found {
+                if gb4.found {
+                    if ga4.value == true {
+                        if gb4.value == true {
+                            nmSet(empties, name, true)
+                        }
+                    }
+                }
+            }
+        }
+        result.emptyLists[idx] = empties
+        let lens = nmNew()
+        let lenNames = nmUnionNames(a.lengths[idx], b.lengths[idx])
+        for name in lenNames {
+            let ga5 = nmGet(a.lengths[idx], name)
+            let gb5 = nmGet(b.lengths[idx], name)
+            if ga5.found {
+                if gb5.found {
+                    if ga5.value == gb5.value {
+                        nmSet(lens, name, ga5.value)
+                    }
+                }
+            }
+        }
+        result.lengths[idx] = lens
+        idx = idx + 1
+    }
+    give result
+}
+
+// ---------- the built-in tools, as the checker sees them ----------
+// The checker's rules for the built-in tools: the kind a
+// call provably gives back, and for each value the tool
+// takes, the kinds that value may have and how the need is
+// phrased — builtinRules in Checker.swift, transcribed
+// exactly, needs-phrases included. A needs entry with
+// hasAllowed false is Swift's nil kind set: any kind will
+// do. The parameter names and the example come from
+// builtinTools in src/Interpreter.swift — only the COUNT
+// of parameters is used for checking, and the names and
+// example only for the count-mismatch message
+// (builtinCountMessage there, mirrored below).
+
+make chkNeed(allowed, need) {
+    give { hasAllowed: true, allowed: allowed, need: need }
+}
+
+make chkNeedAny() {
+    give { hasAllowed: false, allowed: [], need: "" }
+}
+
+make chkRule(result, needs) {
+    give { found: true, result: result, needs: needs }
+}
+
+make chkBuiltinRule(name) {
+    let result = { found: false, result: "unknown", needs: [] }
+    if name == "length" {
+        result = chkRule("number", [chkNeed(["text", "list", "object", "bytes"], "some text, a list, an object, or a block of bytes to measure")])
+    }
+    if name == "join" {
+        result = chkRule("text", [chkNeed(["list"], "a list to join"), chkNeed(["text"], "some text to join the items with")])
+    }
+    if name == "split" {
+        result = chkRule("list", [chkNeed(["text"], "some text to split"), chkNeed(["text"], "some text to split by")])
+    }
+    if name == "part" {
+        result = chkRule("text", [chkNeed(["text"], "some text to take a part of"), chkNeed(["number"], "a number saying which character to start at"), chkNeed(["number"], "a number saying how many characters to take")])
+    }
+    if name == "find" {
+        result = chkRule("number", [chkNeed(["text"], "some text to look in"), chkNeed(["text"], "some text to look for")])
+    }
+    if name == "append" {
+        result = chkRule("list", [chkNeed(["list"], "a list to add to"), chkNeedAny()])
+    }
+    if name == "readfile" {
+        result = chkRule("text", [chkNeed(["text"], "the name of a file, as text")])
+    }
+    if name == "readbytes" {
+        result = chkRule("bytes", [chkNeed(["text"], "the name of a file, as text")])
+    }
+    if name == "writefile" {
+        result = chkRule("number", [chkNeed(["text"], "the name of a file, as text"), chkNeed(["text"], "some text to write")])
+    }
+    if name == "arguments" {
+        result = chkRule("list", [])
+    }
+    if name == "makebytes" {
+        result = chkRule("bytes", [chkNeed(["number"], "a number saying how many bytes to make")])
+    }
+    if name == "sayerr" {
+        result = chkRule("number", [chkNeedAny()])
+    }
+    if name == "exitwith" {
+        result = chkRule("unknown", [chkNeed(["number"], "a whole number from 0 to 255 to end with")])
+    }
+    if name == "removeat" {
+        result = chkRule("unknown", [chkNeed(["list"], "a list to take an item from"), chkNeed(["number"], "a number saying which item to take out")])
+    }
+    if name == "insertat" {
+        result = chkRule("list", [chkNeed(["list"], "a list to put an item into"), chkNeed(["number"], "a number saying where to put the new item"), chkNeedAny()])
+    }
+    if name == "sorted" {
+        result = chkRule("list", [chkNeed(["list"], "a list to sort")])
+    }
+    if name == "fieldnames" {
+        result = chkRule("list", [chkNeed(["object"], "an object to list the field names of")])
+    }
+    if name == "removefield" {
+        result = chkRule("unknown", [chkNeed(["object"], "an object to take a field from"), chkNeed(["text"], "the name of a field, as text")])
+    }
+    if name == "asnumber" {
+        result = chkRule("number", [chkNeed(["text"], "some text to read a number from")])
+    }
+    if name == "bitand" {
+        result = chkRule("number", [chkNeed(["number"], "a whole number to work on"), chkNeed(["number"], "a whole number to work on")])
+    }
+    if name == "bitor" {
+        result = chkRule("number", [chkNeed(["number"], "a whole number to work on"), chkNeed(["number"], "a whole number to work on")])
+    }
+    if name == "bitxor" {
+        result = chkRule("number", [chkNeed(["number"], "a whole number to work on"), chkNeed(["number"], "a whole number to work on")])
+    }
+    if name == "astext" {
+        result = chkRule("text", [chkNeed(["bytes"], "a block of bytes to read as text")])
+    }
+    if name == "wholediv" {
+        result = chkRule("number", [chkNeed(["number"], "a whole number to divide"), chkNeed(["number"], "a whole number to divide by")])
+    }
+    if name == "leftover" {
+        result = chkRule("number", [chkNeed(["number"], "a whole number to divide"), chkNeed(["number"], "a whole number to divide by")])
+    }
+    if name == "rounddown" {
+        result = chkRule("number", [chkNeed(["number"], "a number to round")])
+    }
+    if name == "roundup" {
+        result = chkRule("number", [chkNeed(["number"], "a number to round")])
+    }
+    if name == "absolute" {
+        result = chkRule("number", [chkNeed(["number"], "a number to take the size of")])
+    }
+    if name == "smallest" {
+        result = chkRule("number", [chkNeed(["number"], "a number to choose between"), chkNeed(["number"], "a number to choose between")])
+    }
+    if name == "largest" {
+        result = chkRule("number", [chkNeed(["number"], "a number to choose between"), chkNeed(["number"], "a number to choose between")])
+    }
+    give result
+}
+
+make chkBuiltinDef(name) {
+    let result = { found: false, params: [], example: "" }
+    if name == "length" {
+        result = { found: true, params: ["value"], example: "length(\"Tyler\")" }
+    }
+    if name == "join" {
+        result = { found: true, params: ["list", "separator"], example: "join(words, \" \")" }
+    }
+    if name == "split" {
+        result = { found: true, params: ["text", "separator"], example: "split(\"a,b\", \",\")" }
+    }
+    if name == "part" {
+        result = { found: true, params: ["text", "start", "count"], example: "part(\"Tyler\", 0, 2)" }
+    }
+    if name == "find" {
+        result = { found: true, params: ["text", "piece"], example: "find(\"Tyler\", \"y\")" }
+    }
+    if name == "append" {
+        result = { found: true, params: ["list", "value"], example: "append(items, 4)" }
+    }
+    if name == "readfile" {
+        result = { found: true, params: ["path"], example: "readfile(\"notes.txt\")" }
+    }
+    if name == "readbytes" {
+        result = { found: true, params: ["path"], example: "readbytes(\"notes.txt\")" }
+    }
+    if name == "writefile" {
+        result = { found: true, params: ["path", "text"], example: "writefile(\"notes.txt\", \"Shalom\")" }
+    }
+    if name == "arguments" {
+        result = { found: true, params: [], example: "arguments()" }
+    }
+    if name == "makebytes" {
+        result = { found: true, params: ["count"], example: "makebytes(8)" }
+    }
+    if name == "sayerr" {
+        result = { found: true, params: ["value"], example: "sayerr(\"Mind the step.\")" }
+    }
+    if name == "exitwith" {
+        result = { found: true, params: ["code"], example: "exitwith(1)" }
+    }
+    if name == "removeat" {
+        result = { found: true, params: ["list", "index"], example: "removeat(items, 0)" }
+    }
+    if name == "insertat" {
+        result = { found: true, params: ["list", "index", "value"], example: "insertat(items, 0, 4)" }
+    }
+    if name == "sorted" {
+        result = { found: true, params: ["list"], example: "sorted(items)" }
+    }
+    if name == "fieldnames" {
+        result = { found: true, params: ["object"], example: "fieldnames(person)" }
+    }
+    if name == "removefield" {
+        result = { found: true, params: ["object", "name"], example: "removefield(person, \"town\")" }
+    }
+    if name == "asnumber" {
+        result = { found: true, params: ["text"], example: "asnumber(\"620\")" }
+    }
+    if name == "bitand" {
+        result = { found: true, params: ["first", "second"], example: "bitand(12, 10)" }
+    }
+    if name == "bitor" {
+        result = { found: true, params: ["first", "second"], example: "bitor(12, 10)" }
+    }
+    if name == "bitxor" {
+        result = { found: true, params: ["first", "second"], example: "bitxor(12, 10)" }
+    }
+    if name == "astext" {
+        result = { found: true, params: ["bytes"], example: "astext(block)" }
+    }
+    if name == "wholediv" {
+        result = { found: true, params: ["first", "second"], example: "wholediv(17, 5)" }
+    }
+    if name == "leftover" {
+        result = { found: true, params: ["first", "second"], example: "leftover(17, 5)" }
+    }
+    if name == "rounddown" {
+        result = { found: true, params: ["value"], example: "rounddown(3.5)" }
+    }
+    if name == "roundup" {
+        result = { found: true, params: ["value"], example: "roundup(3.5)" }
+    }
+    if name == "absolute" {
+        result = { found: true, params: ["value"], example: "absolute(-7)" }
+    }
+    if name == "smallest" {
+        result = { found: true, params: ["first", "second"], example: "smallest(3, 7)" }
+    }
+    if name == "largest" {
+        result = { found: true, params: ["first", "second"], example: "largest(3, 7)" }
+    }
+    give result
+}
+
+// "no values", "1 value (name)", "2 values (a, b)" — the
+// words both count messages use.
+make chkTakesText(params) {
+    if length(params) == 0 {
+        give "no values"
+    }
+    if length(params) == 1 {
+        give "1 value (" + params[0] + ")"
+    }
+    give "" + length(params) + " values (" + join(params, ", ") + ")"
+}
+
+// builtinCountMessage in src/Interpreter.swift, word for
+// word.
+make chkBuiltinCountMessage(name, def, given) {
+    give "The tool '" + name + "' takes " + chkTakesText(def.params) + ", but it was given " + given + ". Call it like: " + def.example + "."
+}
+
+// ---------- the functions the program makes ----------
+// Collected before checking, in a name map: each record is
+// { params, paramKinds, returnKind }, paramKinds a list of
+// kind words ("" for none) and returnKind a kind word or
+// "". The FIRST define of a name wins, as in Swift.
+
+let gChkFuncs = { names: [], vals: [] }
+let gChkReturnKind = ""
+let gChkFuncName = ""
+
+make chkCollectFunctions(stmts) {
+    for s in stmts {
+        if s.type == "define" {
+            if nmHas(gChkFuncs, s.name) == false {
+                nmSet(gChkFuncs, s.name, { params: s.params, paramKinds: s.paramKinds, returnKind: s.returnKind })
+            }
+            chkCollectFunctions(s.body)
+        }
+        if s.type == "attempt" {
+            chkCollectFunctions(s.body)
+            chkCollectFunctions(s.recovery)
+        }
+        if s.type == "if" {
+            chkCollectFunctions(s.thenStmts)
+            if s.hasElse {
+                chkCollectFunctions(s.elseStmts)
+            }
+        }
+        if s.type == "while" {
+            chkCollectFunctions(s.body)
+        }
+        if s.type == "repeat" {
+            chkCollectFunctions(s.body)
+        }
+        if s.type == "for" {
+            chkCollectFunctions(s.body)
+        }
+    }
+}
+
+// The names 'let' makes directly in a block.
+make chkDeclaredNames(stmts) {
+    let out = []
+    for s in stmts {
+        if s.type == "declare" {
+            append(out, s.name)
+        }
+    }
+    give out
+}
+
+make chkUnionNames(a, b) {
+    let out = []
+    for n in a {
+        append(out, n)
+    }
+    for n in b {
+        if nameIndex(out, n) < 0 {
+            append(out, n)
+        }
+    }
+    give out
+}
+
+make chkContainsName(names, name) {
+    give nameIndex(names, name) >= 0
+}
+
+// The closest made function's name, over the SORTED
+// candidate list, first strictly-smallest distance of at
+// most 2 winning — as Swift's closestFunctionName.
+make chkClosestFunction(name) {
+    let candidates = sorted(gChkFuncs.names)
+    let bestName = ""
+    let bestDist = 0
+    let hasBest = false
+    for candidate in candidates {
+        if candidate != name {
+            let d = chkEditDistance(name, candidate)
+            if d <= 2 {
+                if hasBest == false {
+                    bestName = candidate
+                    bestDist = d
+                    hasBest = true
+                } else {
+                    if d < bestDist {
+                        bestName = candidate
+                        bestDist = d
+                    }
+                }
+            }
+        }
+    }
+    if hasBest {
+        give { found: true, name: bestName }
+    }
+    give { found: false, name: "" }
+}
+
+// The closest name in an environment, the same shape —
+// Swift's closestName, over the sorted set of all names.
+make chkClosestName(name, e) {
+    let candidates = sorted(envAllNames(e))
+    let bestName = ""
+    let bestDist = 0
+    let hasBest = false
+    for candidate in candidates {
+        if candidate != name {
+            let d = chkEditDistance(name, candidate)
+            if d <= 2 {
+                if hasBest == false {
+                    bestName = candidate
+                    bestDist = d
+                    hasBest = true
+                } else {
+                    if d < bestDist {
+                        bestName = candidate
+                        bestDist = d
+                    }
+                }
+            }
+        }
+    }
+    if hasBest {
+        give { found: true, name: bestName }
+    }
+    give { found: false, name: "" }
+}
+
+// ---------- annotations and provable facts (Stone 18/19 helpers) ----------
+
+make chkAnnotationSatisfied(proven, wanted) {
+    let out = false
+    if proven == wanted {
+        out = true
+    }
+    if chkIsMaybe(wanted) {
+        if proven == chkMaybeInner(wanted) {
+            out = true
+        }
+        if proven == "nothing" {
+            out = true
+        }
+    }
+    give out
+}
+
+// The kind a name is recorded under — declaredKind.
+make chkDeclaredKind(kindWord, proven) {
+    let out = proven
+    let decided = false
+    if kindWord == "" {
+        decided = true
+    }
+    if decided == false {
+        if kindWord == "nothing" {
+            out = "nothing"
+            decided = true
+        }
+    }
+    if decided == false {
+        let wanted = chkFromWord(kindWord)
+        if wanted == "" {
+            out = "unknown"
+        } else {
+            out = wanted
+            if proven != "unknown" {
+                if chkAnnotationSatisfied(proven, wanted) {
+                    out = proven
+                }
+            }
+        }
+    }
+    give out
+}
+
+// The refusal for a use of a value that may be nothing,
+// where a value that is surely there is needed.
+make chkUnhandledMaybe(kind, line) {
+    give errAt(line, "This uses " + chkPhrase(kind) + " — a value that may be nothing — where a value that is surely there is needed, and nothing is the empty value: there is nothing there to use. Check the value first, like: if value == nothing { ... } else { ... } — in the 'else', the value is known to be there. I caught this before the program ran, so nothing ran.")
+}
+
+// Refuses when a proven kind can never satisfy an
+// annotation; silent when the kind can't be proven.
+make chkCheckAnnotation(kindWord, proven, line, wording) {
+    if kindWord == "nothing" {
+        if proven != "unknown" {
+            if proven != "nothing" {
+                give errAt(line, wording + " I caught this before the program ran, so nothing ran.")
+            }
+        }
+        give okVal("")
+    }
+    let wanted = chkFromWord(kindWord)
+    if wanted == "" {
+        give okVal("")
+    }
+    if proven != "unknown" {
+        if chkAnnotationSatisfied(proven, wanted) == false {
+            give errAt(line, wording + " I caught this before the program ran, so nothing ran.")
+        }
+    }
+    give okVal("")
+}
+
+// The annotation check at a call.
+make chkCheckCallAnnotations(name, record, argKinds, line) {
+    let i = 0
+    while i < length(record.paramKinds) {
+        let kindWord = record.paramKinds[i]
+        if kindWord != "" {
+            if i < length(argKinds) {
+                let proven = argKinds[i]
+                if proven != "unknown" {
+                    let r = chkCheckAnnotation(kindWord, proven, line, "The value handed to '" + name + "' for '" + record.params[i] + "' is " + chkPhrase(proven) + ", but '" + record.params[i] + "' is marked as " + chkPhraseForWord(kindWord) + " by its annotation. Change what the call hands over, or change the annotation.")
+                    if r.ok == false {
+                        give r
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    give okVal("")
+}
+
+// The annotation check at a 'give'.
+make chkCheckGive(kind, line) {
+    if gChkReturnKind == "" {
+        give okVal("")
+    }
+    give chkCheckAnnotation(gChkReturnKind, kind, line, "'" + gChkFuncName + "' is marked to give back " + chkPhraseForWord(gChkReturnKind) + " by its annotation, but this 'give' hands back " + chkPhrase(kind) + ". Change the value, or change the annotation.")
+}
+
+// The number an expression provably holds — { found,
+// value } — from literals and tracked facts only.
+make chkConstNumber(expr, e) {
+    if expr.type == "number" {
+        give { found: true, value: expr.value }
+    }
+    if expr.type == "negate" {
+        let inner = chkConstNumber(expr.inner, e)
+        if inner.found {
+            give { found: true, value: 0 - inner.value }
+        }
+        give { found: false, value: 0 }
+    }
+    if expr.type == "variable" {
+        let g = envLookupConst(e, expr.name)
+        if g.found {
+            give { found: true, value: g.value }
+        }
+        give { found: false, value: 0 }
+    }
+    if expr.type == "binary" {
+        let a = chkConstNumber(expr.left, e)
+        let b = chkConstNumber(expr.right, e)
+        if a.found {
+            if b.found {
+                if expr.op == "+" {
+                    give { found: true, value: a.value + b.value }
+                }
+                if expr.op == "-" {
+                    give { found: true, value: a.value - b.value }
+                }
+                if expr.op == "*" {
+                    give { found: true, value: a.value * b.value }
+                }
+                if expr.op == "/" {
+                    if b.value == 0 {
+                        give { found: false, value: 0 }
+                    }
+                    give { found: true, value: a.value / b.value }
+                }
+            }
+        }
+        give { found: false, value: 0 }
+    }
+    give { found: false, value: 0 }
+}
+
+// A tracked constant read as a whole number, when it is
+// one and its size is honest — Swift's Int conversion in
+// the range checks.
+make chkWholeOf(constObj) {
+    if constObj.found == false {
+        give { found: false, value: 0 }
+    }
+    let v = constObj.value
+    if v == rounddown(v) {
+        if absolute(v) < 1000000000000000 {
+            give { found: true, value: v }
+        }
+    }
+    give { found: false, value: 0 }
+}
+
+// The length an expression provably holds, when it is a
+// literal list or text — { found, value }.
+make chkLiteralLength(expr) {
+    if expr.type == "list" {
+        give { found: true, value: length(expr.items) }
+    }
+    if expr.type == "text" {
+        give { found: true, value: length(expr.value) }
+    }
+    give { found: false, value: 0 }
+}
+
+// Whether an expression provably holds an empty list.
+make chkIsEmptyListExpr(expr, e) {
+    if expr.type == "list" {
+        give length(expr.items) == 0
+    }
+    if expr.type == "variable" {
+        give envIsProvenEmpty(e, expr.name)
+    }
+    give false
+}
+
+// A list value handed on under a second name: the old
+// name's facts are given up.
+make chkNoteAliasing(expr, e) {
+    if expr.type == "variable" {
+        envForgetFacts(e, expr.name)
+    }
+}
+
+// A 'repeat' count the checker can prove is negative.
+make chkCheckRepeatCount(count, e, line) {
+    let v = chkConstNumber(count, e)
+    if v.found {
+        if v.value < 0 {
+            give errAt(line, "'repeat' was told to run " + numText(v.value) + " times, but a count can't be negative — a loop can't run less than zero times. Use zero or more, like: repeat 3 { ... } I caught this before the program ran, so nothing ran.")
+        }
+    }
+    give okVal("")
+}
+
+// A division whose second number is provably zero.
+make chkCheckDivisor(op, right, e, line) {
+    if op != "/" {
+        give okVal("")
+    }
+    let v = chkConstNumber(right, e)
+    if v.found {
+        if v.value == 0 {
+            give errAt(line, "I can't divide by zero. Dividing needs a second number that isn't zero. I caught this before the program ran, so nothing ran.")
+        }
+    }
+    give okVal("")
+}
+
+// An index the checker can prove lands outside.
+make chkCheckIndexRange(base, baseKind, index, e, line) {
+    let whole = chkWholeOf(chkConstNumber(index, e))
+    let suffix = " I caught this before the program ran, so nothing ran."
+    if base.type == "text" {
+        let len = length(base.value)
+        if len == 0 {
+            if whole.found {
+                give errAt(line, "This text has no characters yet, so there is no character " + numText(whole.value) + " to take from it." + suffix)
+            }
+            give errAt(line, "This text is empty — it has no characters — so no number can pick a character from it." + suffix)
+        }
+        if whole.found {
+            if whole.value < 0 {
+                give errAt(line, "This text has " + len + " characters, numbered 0 to " + (len - 1) + ", but I was asked for character " + numText(whole.value) + "." + suffix)
+            }
+            if whole.value >= len {
+                give errAt(line, "This text has " + len + " characters, numbered 0 to " + (len - 1) + ", but I was asked for character " + numText(whole.value) + "." + suffix)
+            }
+        }
+        give okVal("")
+    }
+    if base.type == "list" {
+        let count = length(base.items)
+        if count == 0 {
+            if whole.found {
+                give errAt(line, "This list has no items yet, so there is no item " + numText(whole.value) + " to take from it. Items can be added with append — like: append(items, ...)." + suffix)
+            }
+            give errAt(line, "This list is empty — it has no items — so no number can pick an item from it. Items can be added with append — like: append(items, ...)." + suffix)
+        }
+        if whole.found {
+            if whole.value < 0 {
+                give errAt(line, "This list has " + count + " items, numbered 0 to " + (count - 1) + ", but I was asked for item " + numText(whole.value) + "." + suffix)
+            }
+            if whole.value >= count {
+                give errAt(line, "This list has " + count + " items, numbered 0 to " + (count - 1) + ", but I was asked for item " + numText(whole.value) + "." + suffix)
+            }
+        }
+        give okVal("")
+    }
+    if base.type == "variable" {
+        if baseKind == "list" {
+            if envIsProvenEmpty(e, base.name) {
+                if whole.found {
+                    give errAt(line, "This list has no items yet, so there is no item " + numText(whole.value) + " to take from it. Items can be added with append — like: append(items, ...)." + suffix)
+                }
+                give errAt(line, "This list is empty — it has no items — so no number can pick an item from it. Items can be added with append — like: append(items, ...)." + suffix)
+            }
+        }
+        let tracked = envLookupLength(e, base.name)
+        if tracked.found {
+            if baseKind == "list" {
+                let len2 = tracked.value
+                if len2 == 0 {
+                    if whole.found {
+                        give errAt(line, "This list has no items yet, so there is no item " + numText(whole.value) + " to take from it. Items can be added with append — like: append(items, ...)." + suffix)
+                    }
+                    give errAt(line, "This list is empty — it has no items — so no number can pick an item from it. Items can be added with append — like: append(items, ...)." + suffix)
+                }
+                if whole.found {
+                    if whole.value < 0 {
+                        give errAt(line, "This list has " + len2 + " items, numbered 0 to " + (len2 - 1) + ", but I was asked for item " + numText(whole.value) + "." + suffix)
+                    }
+                    if whole.value >= len2 {
+                        give errAt(line, "This list has " + len2 + " items, numbered 0 to " + (len2 - 1) + ", but I was asked for item " + numText(whole.value) + "." + suffix)
+                    }
+                }
+                give okVal("")
+            }
+            if baseKind == "text" {
+                let len3 = tracked.value
+                if len3 == 0 {
+                    if whole.found {
+                        give errAt(line, "This text has no characters yet, so there is no character " + numText(whole.value) + " to take from it." + suffix)
+                    }
+                    give errAt(line, "This text is empty — it has no characters — so no number can pick a character from it." + suffix)
+                }
+                if whole.found {
+                    if whole.value < 0 {
+                        give errAt(line, "This text has " + len3 + " characters, numbered 0 to " + (len3 - 1) + ", but I was asked for character " + numText(whole.value) + "." + suffix)
+                    }
+                    if whole.value >= len3 {
+                        give errAt(line, "This text has " + len3 + " characters, numbered 0 to " + (len3 - 1) + ", but I was asked for character " + numText(whole.value) + "." + suffix)
+                    }
+                }
+                give okVal("")
+            }
+        }
+    }
+    if whole.found {
+        if whole.value < 0 {
+            if baseKind == "list" {
+                give errAt(line, "Items are numbered starting at 0, so item " + numText(whole.value) + " can never be taken — there is nothing before the first one." + suffix)
+            }
+            if baseKind == "text" {
+                give errAt(line, "Items are numbered starting at 0, so item " + numText(whole.value) + " can never be taken — there is nothing before the first one." + suffix)
+            }
+            if baseKind == "bytes" {
+                give errAt(line, "Items are numbered starting at 0, so item " + numText(whole.value) + " can never be taken — there is nothing before the first one." + suffix)
+            }
+        }
+    }
+    give okVal("")
+}
+
+// The ranges of the built-in tools the checker can prove.
+make chkCheckBuiltinRanges(name, args, e, line) {
+    let suffix = " I caught this before the program ran, so nothing ran."
+    if name == "makebytes" {
+        if length(args) == 1 {
+            let v = chkConstNumber(args[0], e)
+            if v.found {
+                if v.value < 0 {
+                    give errAt(line, "'makebytes' was told to make " + numText(v.value) + " bytes, but a count can't be less than 0." + suffix)
+                }
+                if v.value > 16777216 {
+                    give errAt(line, "'makebytes' was told to make " + numText(v.value) + " bytes, but one block can hold at most 16777216 bytes." + suffix)
+                }
+            }
+        }
+        give okVal("")
+    }
+    if name == "exitwith" {
+        if length(args) == 1 {
+            let v2 = chkConstNumber(args[0], e)
+            if v2.found {
+                if v2.value != rounddown(v2.value) {
+                    give errAt(line, "'exitwith' needs a whole number from 0 to 255, but it was given " + numText(v2.value) + "." + suffix)
+                }
+                if v2.value < 0 {
+                    give errAt(line, "'exitwith' needs a whole number from 0 to 255, but it was given " + numText(v2.value) + "." + suffix)
+                }
+                if v2.value > 255 {
+                    give errAt(line, "'exitwith' needs a whole number from 0 to 255, but it was given " + numText(v2.value) + "." + suffix)
+                }
+            }
+        }
+        give okVal("")
+    }
+    if name == "removeat" {
+        if length(args) == 2 {
+            let whole = chkWholeOf(chkConstNumber(args[1], e))
+            let lenObj = { found: false, value: 0 }
+            let provenEmpty = false
+            if args[0].type == "list" {
+                lenObj = { found: true, value: length(args[0].items) }
+                provenEmpty = length(args[0].items) == 0
+            }
+            if args[0].type == "variable" {
+                provenEmpty = envIsProvenEmpty(e, args[0].name)
+                lenObj = envLookupLength(e, args[0].name)
+            }
+            if provenEmpty {
+                if whole.found {
+                    give errAt(line, "This list has no items yet, so there is no item " + numText(whole.value) + " to remove." + suffix)
+                }
+                give errAt(line, "This list is empty — it has no items — so there is no item to remove from it." + suffix)
+            }
+            if lenObj.found {
+                if whole.found {
+                    if whole.value < 0 {
+                        give errAt(line, "This list has " + lenObj.value + " items, numbered 0 to " + (lenObj.value - 1) + ", but I was asked to remove item " + numText(whole.value) + "." + suffix)
+                    }
+                    if whole.value >= lenObj.value {
+                        give errAt(line, "This list has " + lenObj.value + " items, numbered 0 to " + (lenObj.value - 1) + ", but I was asked to remove item " + numText(whole.value) + "." + suffix)
+                    }
+                }
+            }
+        }
+        give okVal("")
+    }
+    if name == "part" {
+        if length(args) == 3 {
+            if args[0].type == "text" {
+                let len = length(args[0].value)
+                let start = chkWholeOf(chkConstNumber(args[1], e))
+                let count = chkWholeOf(chkConstNumber(args[2], e))
+                if start.found {
+                    if start.value < 0 {
+                        give errAt(line, "'part' was told to start at character " + numText(start.value) + ", but the first character is number 0 — a start can't be less than 0." + suffix)
+                    }
+                }
+                if count.found {
+                    if count.value < 0 {
+                        give errAt(line, "'part' was told to take " + numText(count.value) + " characters, but a count can't be less than 0." + suffix)
+                    }
+                }
+                if start.found {
+                    if start.value > len {
+                        if len == 0 {
+                            give errAt(line, "'part' was told to start at character " + numText(start.value) + ", but the text has no characters yet." + suffix)
+                        }
+                        give errAt(line, "'part' was told to start at character " + numText(start.value) + ", but the text has only " + len + " characters, numbered 0 to " + (len - 1) + "." + suffix)
+                    }
+                }
+                if start.found {
+                    if count.found {
+                        if len > 0 {
+                            if start.value + count.value > len {
+                                give errAt(line, "'part' was told to take " + numText(count.value) + " characters starting at character " + numText(start.value) + ", but the text has only " + len + " characters, numbered 0 to " + (len - 1) + " — that runs past the end." + suffix)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        give okVal("")
+    }
+    give okVal("")
+}
+
+// When a condition tests a 'maybe' variable against
+// 'nothing', the kind each road may narrow it to —
+// nothingTest. { found, name, thenKind, elseKind }.
+make chkNothingTest(condition, e) {
+    let none = { found: false, name: "", thenKind: "", elseKind: "" }
+    if condition.type != "binary" {
+        give none
+    }
+    if condition.op != "==" {
+        if condition.op != "!=" {
+            give none
+        }
+    }
+    let sides = [[condition.left, condition.right], [condition.right, condition.left]]
+    let si = 0
+    while si < 2 {
+        let varSide = sides[si][0]
+        let otherSide = sides[si][1]
+        if varSide.type == "variable" {
+            let looked = envLookup(e, varSide.name)
+            if looked.found {
+                let kind = looked.value
+                let inner = ""
+                let hasInner = false
+                if chkIsMaybe(kind) {
+                    inner = chkMaybeInner(kind)
+                    hasInner = true
+                } else {
+                    let ann = envLookupAnn(e, varSide.name)
+                    if ann.found {
+                        let marked = chkFromWord(ann.value)
+                        if marked != "" {
+                            if chkIsMaybe(marked) {
+                                if kind == "nothing" {
+                                    inner = chkMaybeInner(marked)
+                                    hasInner = true
+                                }
+                                if kind == chkMaybeInner(marked) {
+                                    inner = chkMaybeInner(marked)
+                                    hasInner = true
+                                }
+                            }
+                        }
+                    }
+                }
+                if hasInner {
+                    let otherIsNothing = false
+                    if otherSide.type == "nothing" {
+                        otherIsNothing = true
+                    }
+                    if otherSide.type == "variable" {
+                        let otherLooked = envLookup(e, otherSide.name)
+                        if otherLooked.found {
+                            if otherLooked.value == "nothing" {
+                                otherIsNothing = true
+                            }
+                        }
+                    }
+                    if otherIsNothing {
+                        if condition.op == "==" {
+                            give { found: true, name: varSide.name, thenKind: "nothing", elseKind: inner }
+                        }
+                        give { found: true, name: varSide.name, thenKind: inner, elseKind: "nothing" }
+                    }
+                }
+            }
+        }
+        si = si + 1
+    }
+    give none
+}
+
+// An index whose base or pick is proven nothing, or may
+// be — checkIndexKind.
+make chkCheckIndexKind(base, index, line) {
+    if base == "nothing" {
+        give errAt(line, "I can't take an item from nothing. Only a list or some text has items to take from — like [1, 2, 3], where [0] takes the first item, or \"abc\", where [0] takes the first character. I caught this before the program ran, so nothing ran.")
+    }
+    if chkIsMaybe(base) {
+        give chkUnhandledMaybe(base, line)
+    }
+    if index == "nothing" {
+        give errAt(line, "I can't use nothing to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+    }
+    if chkIsMaybe(index) {
+        give chkUnhandledMaybe(index, line)
+    }
+    if base == "list" {
+        if index != "unknown" {
+            if index != "number" {
+                give errAt(line, "I can't use " + chkPhrase(index) + " to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+            }
+        }
+        give okVal("")
+    }
+    if base == "text" {
+        if index != "unknown" {
+            if index != "number" {
+                give errAt(line, "I can't use " + chkPhrase(index) + " to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+            }
+        }
+        give okVal("")
+    }
+    if base == "bytes" {
+        if index != "unknown" {
+            if index != "number" {
+                give errAt(line, "I can't use " + chkPhrase(index) + " to pick an item. Items are picked by a whole number — 0 for the first one, 1 for the second, and so on. I caught this before the program ran, so nothing ran.")
+            }
+        }
+        give okVal("")
+    }
+    give okVal("")
+}
+
+// Reading a field of the empty value, or of a maybe —
+// checkFieldBase.
+make chkCheckFieldBase(base, fieldName, line) {
+    if base == "nothing" {
+        give errAt(line, "I can't read the field '" + fieldName + "' of nothing, because only an object has fields. Make an object first, like: let person = { name: \"Tyler\" } — then person." + fieldName + " works. I caught this before the program ran, so nothing ran.")
+    }
+    if chkIsMaybe(base) {
+        give chkUnhandledMaybe(base, line)
+    }
+    give okVal("")
+}
+
+make chkCheckCountKind(kind, line) {
+    if kind == "nothing" {
+        give errAt(line, "'repeat' needs a number saying how many times to run, but here it was given nothing. Write it like: repeat 3 { ... } I caught this before the program ran, so nothing ran.")
+    }
+    if chkIsMaybe(kind) {
+        give chkUnhandledMaybe(kind, line)
+    }
+    give okVal("")
+}
+
+make chkCheckWalkKind(kind, line) {
+    if kind == "nothing" {
+        give errAt(line, "'for' needs a list, some text, or a block of bytes to walk through, but here it was given nothing. Write it like: for item in items { ... } I caught this before the program ran, so nothing ran.")
+    }
+    if chkIsMaybe(kind) {
+        give chkUnhandledMaybe(kind, line)
+    }
+    give okVal("")
+}
+
+make chkCheckNegate(kind, line) {
+    if kind == "nothing" {
+        give errAt(line, "I can only put a minus sign in front of a number, but here it was in front of nothing. I caught this before the program ran, so nothing ran.")
+    }
+    if chkIsMaybe(kind) {
+        give chkUnhandledMaybe(kind, line)
+    }
+    give okVal("")
+}
+
+// The verb an arithmetic operator is refused with.
+make chkVerbOf(op) {
+    let verb = "divide"
+    if op == "-" {
+        verb = "subtract"
+    }
+    if op == "*" {
+        verb = "multiply"
+    }
+    give verb
+}
+
+// The refusal for an operation with the empty value on a
+// side — checkBinary's nothing road, message only (""
+// when the operator has no such refusal).
+make chkNothingBinaryMessage(op, left, right) {
+    let note = " Nothing is the empty value: there is nothing there to work with. If a value might be nothing, check it first — if value == nothing { ... } else { ... } — and use it in the 'else', where it is known to be there."
+    let msg = ""
+    if op == "+" {
+        msg = "I can't add " + chkPhrase(left) + " and " + chkPhrase(right) + ". '+' adds two numbers, or joins text together." + note + " I caught this before the program ran, so nothing ran."
+    }
+    if op == "-" {
+        msg = "I can't subtract " + chkPhrase(left) + " and " + chkPhrase(right) + ". '-' works on two numbers. (Only '+' joins text.)" + note + " I caught this before the program ran, so nothing ran."
+    }
+    if op == "*" {
+        msg = "I can't multiply " + chkPhrase(left) + " and " + chkPhrase(right) + ". '*' works on two numbers. (Only '+' joins text.)" + note + " I caught this before the program ran, so nothing ran."
+    }
+    if op == "/" {
+        msg = "I can't divide " + chkPhrase(left) + " and " + chkPhrase(right) + ". '/' works on two numbers. (Only '+' joins text.)" + note + " I caught this before the program ran, so nothing ran."
+    }
+    let isCmp = false
+    if op == "<" {
+        isCmp = true
+    }
+    if op == "<=" {
+        isCmp = true
+    }
+    if op == ">" {
+        isCmp = true
+    }
+    if op == ">=" {
+        isCmp = true
+    }
+    if isCmp {
+        msg = "I can't compare " + chkPhrase(left) + " and " + chkPhrase(right) + " with '" + op + "'. '" + op + "' compares two numbers. (Text and true/false values can be checked with == and !=.)" + note + " I caught this before the program ran, so nothing ran."
+    }
+    give msg
+}
+
+make chkPlusResult(left, right, line) {
+    let answer = okVal("unknown")
+    if left != "unknown" {
+        if right != "unknown" {
+            if left == "text" {
+                answer = okVal("text")
+            } else {
+                if right == "text" {
+                    answer = okVal("text")
+                } else {
+                    if left == "number" {
+                        if right == "number" {
+                            answer = okVal("number")
+                        } else {
+                            answer = errAt(line, "I can't add " + chkPhrase(left) + " and " + chkPhrase(right) + ". '+' adds two numbers, or joins text together. I caught this before the program ran, so nothing ran.")
+                        }
+                    } else {
+                        answer = errAt(line, "I can't add " + chkPhrase(left) + " and " + chkPhrase(right) + ". '+' adds two numbers, or joins text together. I caught this before the program ran, so nothing ran.")
+                    }
+                }
+            }
+        } else {
+            if left == "text" {
+                answer = okVal("text")
+            }
+            if right == "text" {
+                answer = okVal("text")
+            }
+        }
+    } else {
+        if left == "text" {
+            answer = okVal("text")
+        }
+        if right == "text" {
+            answer = okVal("text")
+        }
+    }
+    give answer
+}
+
+make chkArithResult(op, left, right, line) {
+    let answer = okVal("number")
+    if left != "unknown" {
+        if right != "unknown" {
+            if left != "number" {
+                answer = errAt(line, "I can't " + chkVerbOf(op) + " " + chkPhrase(left) + " and " + chkPhrase(right) + ". '" + op + "' works on two numbers. (Only '+' joins text.) I caught this before the program ran, so nothing ran.")
+            }
+            if right != "number" {
+                answer = errAt(line, "I can't " + chkVerbOf(op) + " " + chkPhrase(left) + " and " + chkPhrase(right) + ". '" + op + "' works on two numbers. (Only '+' joins text.) I caught this before the program ran, so nothing ran.")
+            }
+        }
+    }
+    give answer
+}
+
+make chkCompareResult(op, left, right, line) {
+    let answer = okVal("boolean")
+    if left != "unknown" {
+        if right != "unknown" {
+            if left != "number" {
+                answer = errAt(line, "I can't compare " + chkPhrase(left) + " and " + chkPhrase(right) + " with '" + op + "'. '" + op + "' compares two numbers. (Text and true/false values can be checked with == and !=.) I caught this before the program ran, so nothing ran.")
+            }
+            if right != "number" {
+                answer = errAt(line, "I can't compare " + chkPhrase(left) + " and " + chkPhrase(right) + " with '" + op + "'. '" + op + "' compares two numbers. (Text and true/false values can be checked with == and !=.) I caught this before the program ran, so nothing ran.")
+            }
+        }
+    }
+    give answer
+}
+
+// The kind rules of the operators — checkBinary. Gives
+// back okVal(kind) or the refusal.
+make chkCheckBinary(op, left, right, line) {
+    if op != "==" {
+        if op != "!=" {
+            if chkIsMaybe(left) {
+                let r = chkUnhandledMaybe(left, line)
+                if op == "+" {
+                    if left == "text" {
+                        r = okVal("text")
+                    }
+                    if right == "text" {
+                        r = okVal("text")
+                    }
+                }
+                give r
+            }
+            if chkIsMaybe(right) {
+                let r2 = chkUnhandledMaybe(right, line)
+                if op == "+" {
+                    if left == "text" {
+                        r2 = okVal("text")
+                    }
+                    if right == "text" {
+                        r2 = okVal("text")
+                    }
+                }
+                give r2
+            }
+            if left == "nothing" {
+                let msg = chkNothingBinaryMessage(op, left, right)
+                if msg != "" {
+                    let early = errAt(line, msg)
+                    if op == "+" {
+                        if left == "text" {
+                            early = okVal("text")
+                        }
+                        if right == "text" {
+                            early = okVal("text")
+                        }
+                    }
+                    give early
+                }
+            }
+            if right == "nothing" {
+                let msg2 = chkNothingBinaryMessage(op, left, right)
+                if msg2 != "" {
+                    let early2 = errAt(line, msg2)
+                    if op == "+" {
+                        if left == "text" {
+                            early2 = okVal("text")
+                        }
+                        if right == "text" {
+                            early2 = okVal("text")
+                        }
+                    }
+                    give early2
+                }
+            }
+        }
+    }
+    let answer = okVal("unknown")
+    if op == "+" {
+        answer = chkPlusResult(left, right, line)
+    }
+    if op == "-" {
+        answer = chkArithResult(op, left, right, line)
+    }
+    if op == "*" {
+        answer = chkArithResult(op, left, right, line)
+    }
+    if op == "/" {
+        answer = chkArithResult(op, left, right, line)
+    }
+    if op == "<" {
+        answer = chkCompareResult(op, left, right, line)
+    }
+    if op == "<=" {
+        answer = chkCompareResult(op, left, right, line)
+    }
+    if op == ">" {
+        answer = chkCompareResult(op, left, right, line)
+    }
+    if op == ">=" {
+        answer = chkCompareResult(op, left, right, line)
+    }
+    if op == "==" {
+        answer = okVal("boolean")
+    }
+    if op == "!=" {
+        answer = okVal("boolean")
+    }
+    give answer
+}
+
+// Whether a floor block's text is only whitespace —
+// Swift's trimmingCharacters(in: .whitespacesAndNewlines)
+// emptiness test, over the characters a floor block's
+// lines can hold.
+make chkAsmIsEmpty(asm) {
+    let allSpace = true
+    for c in asm {
+        let ok = false
+        if isSpaceCh(c) {
+            ok = true
+        }
+        if c == "\n" {
+            ok = true
+        }
+        if find(FLOORTRIM, c) >= 0 {
+            ok = true
+        }
+        if ok == false {
+            allSpace = false
+        }
+    }
+    give allSpace
+}
+
+// ---------- calls ----------
+
+// The bare-only tools. Stone 50: this answers "not a bare
+// tool" ({ found: false }) for every name, in every mode —
+// the hosted walk knows none of them, and check-bare /
+// check-guest run the hosted walk in this stone. Stone 51
+// extends THIS function with the bare/guest doors (the
+// bareOnlyTools / guestDeskTools / guestDoorTools tables
+// and their crossing refusals), in this one place.
+make chkBareTool(name, args, line, e, outerNames, forgiving) {
+    give { found: false, kind: "unknown" }
+}
+
+// A call to a built-in tool — checkBuiltinCall. Gives
+// back okVal(the kind the tool gives back) or a refusal.
+make chkBuiltinCall(name, args, line, e, outerNames, forgiving) {
+    let def = chkBuiltinDef(name)
+    let rule = chkBuiltinRule(name)
+    let kinds = []
+    for arg in args {
+        let kr = chkExprAny(arg, e, outerNames, forgiving)
+        if kr.ok == false {
+            give kr
+        }
+        append(kinds, kr.value)
+    }
+    if length(args) != length(def.params) {
+        give errAt(line, chkBuiltinCountMessage(name, def, length(args)))
+    }
+    let i = 0
+    while i < length(kinds) {
+        let kind = kinds[i]
+        if kind != "unknown" {
+            let need = rule.needs[i]
+            if need.hasAllowed {
+                if nameIndex(need.allowed, kind) < 0 {
+                    let message = "'" + name + "' needs " + need.need + ", but it was given " + chkPhrase(kind) + "."
+                    if chkIsMaybe(kind) {
+                        message = message + " A value that may be nothing has to be checked first: if value == nothing { ... } else { ... } — in the 'else', the value is known to be there."
+                    }
+                    give errAt(line, message + " I caught this before the program ran, so nothing ran.")
+                }
+            }
+        }
+        i = i + 1
+    }
+    let rr = chkCheckBuiltinRanges(name, args, e, line)
+    if rr.ok == false {
+        give rr
+    }
+    if name == "wholediv" {
+        let dr = chkCheckDivisor("/", args[1], e, line)
+        if dr.ok == false {
+            give dr
+        }
+    }
+    if name == "leftover" {
+        let dr2 = chkCheckDivisor("/", args[1], e, line)
+        if dr2.ok == false {
+            give dr2
+        }
+    }
+    if name == "append" {
+        if args[0].type == "variable" {
+            envForgetFacts(e, args[0].name)
+        }
+    }
+    if name == "insertat" {
+        if args[0].type == "variable" {
+            envForgetFacts(e, args[0].name)
+        }
+    }
+    if name == "removeat" {
+        if args[0].type == "variable" {
+            envForgetFacts(e, args[0].name)
+        }
+    }
+    give okVal(rule.result)
+}
+
+// A call to a function the program made — the part of
+// checkCall past the built-in and bare doors.
+make chkCallMade(name, args, line, e, outerNames, forgiving) {
+    let rec = nmGet(gChkFuncs, name)
+    if rec.found == false {
+        let message = "I don't know a function called '" + name + "' yet. You can make one with: make " + name + "(...) { ... }"
+        let suggestion = chkClosestFunction(name)
+        if suggestion.found {
+            message = message + " Did you mean '" + suggestion.name + "'?"
+        }
+        give errAt(line, message)
+    }
+    let record = rec.value
+    let argKinds = []
+    for arg in args {
+        let kr = chkExprAny(arg, e, outerNames, forgiving)
+        if kr.ok == false {
+            give kr
+        }
+        append(argKinds, kr.value)
+    }
+    if length(args) != length(record.params) {
+        give errAt(line, "The function '" + name + "' takes " + chkTakesText(record.params) + ", but it was given " + length(args) + ". Make the call match how the function was made: " + name + "(" + join(record.params, ", ") + ").")
+    }
+    let ar = chkCheckCallAnnotations(name, record, argKinds, line)
+    if ar.ok == false {
+        give ar
+    }
+    envForgetKinds(e)
+    give okVal("")
+}
+
+// A call, by any road — checkCall / checkCallForgiving
+// share this shape, the forgiving flag choosing the
+// expression walk, as Swift's two functions differ only
+// in that walk.
+make chkCallAny(name, args, line, e, outerNames, forgiving) {
+    let def = chkBuiltinDef(name)
+    if def.found {
+        let br = chkBuiltinCall(name, args, line, e, outerNames, forgiving)
+        if br.ok == false {
+            give br
+        }
+        give okVal("")
+    }
+    let bare = chkBareTool(name, args, line, e, outerNames, forgiving)
+    if bare.found {
+        give okVal("")
+    }
+    give chkCallMade(name, args, line, e, outerNames, forgiving)
+}
+
+// A floor block — checkFloor, the hosted side: the block
+// must not be empty, each handed value a number or a
+// block of bytes, at most one block of bytes; what it
+// gives back can't be proven, so the kind is unknown.
+// (The bare branches — a piece of text allowed, a number
+// given back — land in Stone 51 with the doors.)
+make chkFloor(asm, args, line, e, outerNames, forgiving) {
+    if chkAsmIsEmpty(asm) {
+        give errAt(line, "This floor block is empty — it needs the processor instructions it is meant to run, between the 'floor {' line and the line holding only '}'.")
+    }
+    let bytesSeen = 0
+    for arg in args {
+        let kr = chkExprAny(arg, e, outerNames, forgiving)
+        if kr.ok == false {
+            give kr
+        }
+        let kind = kr.value
+        if kind == "bytes" {
+            bytesSeen = bytesSeen + 1
+            if bytesSeen > 1 {
+                give errAt(line, "'floor' can be handed only one block of bytes, but it was given two. I caught this before the program ran, so nothing ran.")
+            }
+        } else {
+            if kind != "unknown" {
+                if kind != "number" {
+                    give errAt(line, "'floor' can be handed numbers and one block of bytes, but it was given " + chkPhrase(kind) + ". I caught this before the program ran, so nothing ran.")
+                }
+            }
+        }
+    }
+    give okVal("unknown")
+}
+
+// ---------- expressions ----------
+// checkExpr and checkExprForgiving share one body here,
+// the forgiving flag choosing — at exactly the places
+// Swift's two functions differ — how a variable found
+// nowhere is read (forgiven when a 'let' for it exists
+// around the function's making) and which walk the parts
+// below take. Swift duplicates the walk; the parts where
+// the two walks are word-for-word the same are one road
+// here, and the parts where they differ (the variable
+// case, and the recursion itself) branch on the flag.
+
+make chkExprAny(expr, e, outerNames, forgiving) {
+    let litKind = ""
+    if expr.type == "number" {
+        litKind = "number"
+    }
+    if expr.type == "text" {
+        litKind = "text"
+    }
+    if expr.type == "boolean" {
+        litKind = "boolean"
+    }
+    if expr.type == "nothing" {
+        litKind = "nothing"
+    }
+    if litKind != "" {
+        give okVal(litKind)
+    }
+    if expr.type == "variable" {
+        let looked = envLookup(e, expr.name)
+        if looked.found {
+            give okVal(looked.value)
+        }
+        if forgiving {
+            if chkContainsName(outerNames, expr.name) {
+                give okVal("unknown")
+            }
+        }
+        let message = "I don't know a variable called '" + expr.name + "' yet. You can make one with: let " + expr.name + " = ..."
+        let suggestion = chkClosestName(expr.name, e)
+        if suggestion.found {
+            message = message + " Did you mean '" + suggestion.name + "'?"
+        }
+        give errAt(expr.line, message)
+    }
+    if expr.type == "call" {
+        let def = chkBuiltinDef(expr.name)
+        if def.found {
+            give chkBuiltinCall(expr.name, expr.args, expr.line, e, outerNames, forgiving)
+        }
+        let bare = chkBareTool(expr.name, expr.args, expr.line, e, outerNames, forgiving)
+        if bare.found {
+            give okVal(bare.kind)
+        }
+        let cr = chkCallMade(expr.name, expr.args, expr.line, e, outerNames, forgiving)
+        if cr.ok == false {
+            give cr
+        }
+        let rec = nmGet(gChkFuncs, expr.name)
+        if rec.found {
+            let rk = rec.value.returnKind
+            if rk != "" {
+                let kind = chkFromWord(rk)
+                if kind != "" {
+                    give okVal(kind)
+                }
+            }
+        }
+        give okVal("unknown")
+    }
+    if expr.type == "object" {
+        for v in expr.values {
+            let vr = chkExprAny(v, e, outerNames, forgiving)
+            if vr.ok == false {
+                give vr
+            }
+        }
+        give okVal("object")
+    }
+    if expr.type == "list" {
+        for item in expr.items {
+            let ir = chkExprAny(item, e, outerNames, forgiving)
+            if ir.ok == false {
+                give ir
+            }
+        }
+        give okVal("list")
+    }
+    if expr.type == "field" {
+        let br = chkExprAny(expr.base, e, outerNames, forgiving)
+        if br.ok == false {
+            give br
+        }
+        let fr = chkCheckFieldBase(br.value, expr.name, expr.line)
+        if fr.ok == false {
+            give fr
+        }
+        give okVal("unknown")
+    }
+    if expr.type == "index" {
+        let br2 = chkExprAny(expr.base, e, outerNames, forgiving)
+        if br2.ok == false {
+            give br2
+        }
+        let ir2 = chkExprAny(expr.index, e, outerNames, forgiving)
+        if ir2.ok == false {
+            give ir2
+        }
+        let kr = chkCheckIndexKind(br2.value, ir2.value, expr.line)
+        if kr.ok == false {
+            give kr
+        }
+        let rr = chkCheckIndexRange(expr.base, br2.value, expr.index, e, expr.line)
+        if rr.ok == false {
+            give rr
+        }
+        if br2.value == "text" {
+            give okVal("text")
+        }
+        give okVal("unknown")
+    }
+    if expr.type == "floor" {
+        give chkFloor(expr.asm, expr.args, expr.line, e, outerNames, forgiving)
+    }
+    if expr.type == "negate" {
+        let nr = chkExprAny(expr.inner, e, outerNames, forgiving)
+        if nr.ok == false {
+            give nr
+        }
+        let cr2 = chkCheckNegate(nr.value, expr.line)
+        if cr2.ok == false {
+            give cr2
+        }
+        if nr.value == "number" {
+            give okVal("number")
+        }
+        give okVal("unknown")
+    }
+    if expr.type == "binary" {
+        let lr = chkExprAny(expr.left, e, outerNames, forgiving)
+        if lr.ok == false {
+            give lr
+        }
+        let rr2 = chkExprAny(expr.right, e, outerNames, forgiving)
+        if rr2.ok == false {
+            give rr2
+        }
+        let dr = chkCheckDivisor(expr.op, expr.right, e, expr.line)
+        if dr.ok == false {
+            give dr
+        }
+        give chkCheckBinary(expr.op, lr.value, rr2.value, expr.line)
+    }
+    give okVal("unknown")
+}
+
+// ---------- statements: the plain walk ----------
+// checkBlock / checkChildBlock / checkStatement, and
+// checkDefine. The forgiving twins follow in their own
+// section, duplicated as Swift duplicates them — the two
+// walks differ (the attempt/for/while child handling in
+// the forgiving walk, the unmade-name forgiveness), and
+// the duplication is mirrored rather than unified.
+
+make chkAnnotationWording(name, kindWord, kind) {
+    give "'" + name + "' is marked as " + chkPhraseForWord(kindWord) + " by its annotation, but this value is " + chkPhrase(kind) + ". Change the value, or change the annotation."
+}
+
+make chkBlock(stmts, e, outerNames) {
+    let outer = chkUnionNames(outerNames, chkDeclaredNames(stmts))
+    for s in stmts {
+        let r = chkStatement(s, e, outer)
+        if r.ok == false {
+            give r
+        }
+    }
+    give okVal("")
+}
+
+make chkChildBlock(stmts, e, outerNames, mergeWithBefore) {
+    let before = envCopy(e)
+    envPush(e)
+    let r = chkBlock(stmts, e, outerNames)
+    if r.ok == false {
+        give r
+    }
+    envPop(e)
+    if mergeWithBefore {
+        envBecome(e, envMerged(before, e))
+    }
+    give okVal("")
+}
+
+make chkStatement(s, e, outerNames) {
+    if s.type == "declare" {
+        let kr = chkExprAny(s.value, e, outerNames, false)
+        if kr.ok == false {
+            give kr
+        }
+        if s.kindWord != "" {
+            let ar = chkCheckAnnotation(s.kindWord, kr.value, s.line, chkAnnotationWording(s.name, s.kindWord, kr.value))
+            if ar.ok == false {
+                give ar
+            }
+        }
+        let constObj = chkConstNumber(s.value, e)
+        let provenEmpty = chkIsEmptyListExpr(s.value, e)
+        chkNoteAliasing(s.value, e)
+        envDeclare(e, s.name, chkDeclaredKind(s.kindWord, kr.value), s.kindWord, constObj, provenEmpty, chkLiteralLength(s.value))
+        give okVal("")
+    }
+    if s.type == "assign" {
+        let kr2 = chkExprAny(s.value, e, outerNames, false)
+        if kr2.ok == false {
+            give kr2
+        }
+        let looked = envLookup(e, s.name)
+        if looked.found == false {
+            give errAt(s.line, "I can't set '" + s.name + "', because no variable called '" + s.name + "' has been made yet. Make one first with: let " + s.name + " = ...")
+        }
+        let ann = envLookupAnn(e, s.name)
+        let annWord = ""
+        if ann.found {
+            annWord = ann.value
+            let ar2 = chkCheckAnnotation(annWord, kr2.value, s.line, chkAnnotationWording(s.name, annWord, kr2.value))
+            if ar2.ok == false {
+                give ar2
+            }
+        }
+        let constObj2 = chkConstNumber(s.value, e)
+        let provenEmpty2 = chkIsEmptyListExpr(s.value, e)
+        chkNoteAliasing(s.value, e)
+        envAssign(e, s.name, chkDeclaredKind(annWord, kr2.value), constObj2, provenEmpty2, chkLiteralLength(s.value))
+        give okVal("")
+    }
+    if s.type == "assignTarget" {
+        let tr = chkExprAny(s.target, e, outerNames, false)
+        if tr.ok == false {
+            give tr
+        }
+        let vr = chkExprAny(s.value, e, outerNames, false)
+        if vr.ok == false {
+            give vr
+        }
+        give okVal("")
+    }
+    if s.type == "say" {
+        let vr2 = chkExprAny(s.value, e, outerNames, false)
+        if vr2.ok == false {
+            give vr2
+        }
+        give okVal("")
+    }
+    if s.type == "if" {
+        let cr = chkExprAny(s.condition, e, outerNames, false)
+        if cr.ok == false {
+            give cr
+        }
+        let test = chkNothingTest(s.condition, e)
+        let before = envCopy(e)
+        if test.found {
+            envNarrow(e, test.name, test.thenKind)
+        }
+        let tr2 = chkChildBlock(s.thenStmts, e, outerNames, false)
+        if tr2.ok == false {
+            give tr2
+        }
+        let afterThen = envCopy(e)
+        envBecome(e, before)
+        if test.found {
+            envNarrow(e, test.name, test.elseKind)
+        }
+        if s.hasElse {
+            let er = chkChildBlock(s.elseStmts, e, outerNames, false)
+            if er.ok == false {
+                give er
+            }
+        }
+        envBecome(e, envMerged(afterThen, e))
+        give okVal("")
+    }
+    if s.type == "while" {
+        let cr3 = chkExprAny(s.condition, e, outerNames, false)
+        if cr3.ok == false {
+            give cr3
+        }
+        let test2 = chkNothingTest(s.condition, e)
+        if test2.found {
+            envNarrow(e, test2.name, test2.thenKind)
+        }
+        let br = chkChildBlock(s.body, e, outerNames, true)
+        if br.ok == false {
+            give br
+        }
+        if test2.found {
+            envNarrow(e, test2.name, test2.elseKind)
+        }
+        give okVal("")
+    }
+    if s.type == "repeat" {
+        let kr3 = chkExprAny(s.count, e, outerNames, false)
+        if kr3.ok == false {
+            give kr3
+        }
+        let rr = chkCheckRepeatCount(s.count, e, s.line)
+        if rr.ok == false {
+            give rr
+        }
+        let ck = chkCheckCountKind(kr3.value, s.line)
+        if ck.ok == false {
+            give ck
+        }
+        let br2 = chkChildBlock(s.body, e, outerNames, true)
+        if br2.ok == false {
+            give br2
+        }
+        give okVal("")
+    }
+    if s.type == "for" {
+        let kr4 = chkExprAny(s.over, e, outerNames, false)
+        if kr4.ok == false {
+            give kr4
+        }
+        let wk = chkCheckWalkKind(kr4.value, s.line)
+        if wk.ok == false {
+            give wk
+        }
+        let before2 = envCopy(e)
+        envPush(e)
+        envDeclare(e, s.name, "unknown", "", { found: false, value: 0 }, false, { found: false, value: 0 })
+        let br3 = chkBlock(s.body, e, outerNames)
+        if br3.ok == false {
+            give br3
+        }
+        envPop(e)
+        envBecome(e, envMerged(before2, e))
+        give okVal("")
+    }
+    if s.type == "define" {
+        give chkDefine(s.name, s.params, s.paramKinds, s.returnKind, s.body, e, outerNames)
+    }
+    if s.type == "give" {
+        let kr5 = chkExprAny(s.value, e, outerNames, false)
+        if kr5.ok == false {
+            give kr5
+        }
+        give chkCheckGive(kr5.value, s.line)
+    }
+    if s.type == "attempt" {
+        let before3 = envCopy(e)
+        let br4 = chkChildBlock(s.body, e, outerNames, false)
+        if br4.ok == false {
+            give br4
+        }
+        let afterBody = envCopy(e)
+        envBecome(e, before3)
+        envPush(e)
+        envDeclare(e, "problem", "text", "", { found: false, value: 0 }, false, { found: false, value: 0 })
+        let rr2 = chkBlock(s.recovery, e, outerNames)
+        if rr2.ok == false {
+            give rr2
+        }
+        envPop(e)
+        envBecome(e, envMerged(afterBody, e))
+        give okVal("")
+    }
+    if s.type == "doCall" {
+        give chkCallAny(s.name, s.args, s.line, e, outerNames, false)
+    }
+    if s.type == "doExpr" {
+        let er2 = chkExprAny(s.expr, e, outerNames, false)
+        if er2.ok == false {
+            give er2
+        }
+        give okVal("")
+    }
+    give okVal("")
+}
+
+// A function body is checked where the function is made —
+// checkDefine. The body's env starts as a copy of the
+// making env with its facts dropped; what the body may
+// have changed is not carried back.
+make chkDefine(name, params, paramKinds, returnKind, body, e, outerNames) {
+    let bodyEnv = envCopy(e)
+    envDropFacts(bodyEnv)
+    envPush(bodyEnv)
+    let i = 0
+    while i < length(params) {
+        let kindWord = ""
+        if i < length(paramKinds) {
+            kindWord = paramKinds[i]
+        }
+        envDeclare(bodyEnv, params[i], chkDeclaredKind(kindWord, "unknown"), kindWord, { found: false, value: 0 }, false, { found: false, value: 0 })
+        i = i + 1
+    }
+    let bodyOuter = chkUnionNames(outerNames, chkDeclaredNames(body))
+    let savedReturnKind = gChkReturnKind
+    let savedFuncName = gChkFuncName
+    gChkReturnKind = returnKind
+    gChkFuncName = name
+    let result = okVal("")
+    for s in body {
+        let r = chkStatementInFunction(s, bodyEnv, bodyOuter)
+        if r.ok == false {
+            result = r
+        }
+        if result.ok == false {
+            gChkReturnKind = savedReturnKind
+            gChkFuncName = savedFuncName
+            give result
+        }
+    }
+    gChkReturnKind = savedReturnKind
+    gChkFuncName = savedFuncName
+    give okVal("")
+}
+
+// ---------- statements: the forgiving walk (function bodies) ----------
+// checkStatementInFunction / checkChildBlockInFunction /
+// checkStatementWithForgiveness, duplicated from the
+// plain walk as Swift duplicates them. The differences
+// are Swift's own: an unmade name found in outerNames is
+// forgiven; the attempt body and recovery are walked
+// statement by statement in pushed scopes (not through
+// the child-block helper); the for body likewise, with
+// its own outer-names union; the while and repeat bodies
+// go through the child-block helper and merge with the
+// state from BEFORE the narrowing (while) / before the
+// body (repeat).
+
+make chkStatementInFunction(s, e, outerNames) {
+    if s.type == "define" {
+        give chkDefine(s.name, s.params, s.paramKinds, s.returnKind, s.body, e, outerNames)
+    }
+    give chkStatementForgiving(s, e, outerNames)
+}
+
+make chkChildBlockInFunction(stmts, e, outerNames) {
+    envPush(e)
+    let outer = chkUnionNames(outerNames, chkDeclaredNames(stmts))
+    let result = okVal("")
+    for s in stmts {
+        let r = chkStatementInFunction(s, e, outer)
+        if r.ok == false {
+            result = r
+        }
+        if result.ok == false {
+            envPop(e)
+            give result
+        }
+    }
+    envPop(e)
+    give okVal("")
+}
+
+make chkStatementForgiving(s, e, outerNames) {
+    if s.type == "declare" {
+        let kr = chkExprAny(s.value, e, outerNames, true)
+        if kr.ok == false {
+            give kr
+        }
+        if s.kindWord != "" {
+            let ar = chkCheckAnnotation(s.kindWord, kr.value, s.line, chkAnnotationWording(s.name, s.kindWord, kr.value))
+            if ar.ok == false {
+                give ar
+            }
+        }
+        let constObj = chkConstNumber(s.value, e)
+        let provenEmpty = chkIsEmptyListExpr(s.value, e)
+        chkNoteAliasing(s.value, e)
+        envDeclare(e, s.name, chkDeclaredKind(s.kindWord, kr.value), s.kindWord, constObj, provenEmpty, chkLiteralLength(s.value))
+        give okVal("")
+    }
+    if s.type == "assign" {
+        let kr2 = chkExprAny(s.value, e, outerNames, true)
+        if kr2.ok == false {
+            give kr2
+        }
+        let looked = envLookup(e, s.name)
+        if looked.found == false {
+            if chkContainsName(outerNames, s.name) == false {
+                give errAt(s.line, "I can't set '" + s.name + "', because no variable called '" + s.name + "' has been made yet. Make one first with: let " + s.name + " = ...")
+            }
+        }
+        let ann = envLookupAnn(e, s.name)
+        let annWord = ""
+        if ann.found {
+            annWord = ann.value
+            let ar2 = chkCheckAnnotation(annWord, kr2.value, s.line, chkAnnotationWording(s.name, annWord, kr2.value))
+            if ar2.ok == false {
+                give ar2
+            }
+        }
+        let constObj2 = chkConstNumber(s.value, e)
+        let provenEmpty2 = chkIsEmptyListExpr(s.value, e)
+        chkNoteAliasing(s.value, e)
+        envAssign(e, s.name, chkDeclaredKind(annWord, kr2.value), constObj2, provenEmpty2, chkLiteralLength(s.value))
+        give okVal("")
+    }
+    if s.type == "assignTarget" {
+        let tr = chkExprAny(s.target, e, outerNames, true)
+        if tr.ok == false {
+            give tr
+        }
+        let vr = chkExprAny(s.value, e, outerNames, true)
+        if vr.ok == false {
+            give vr
+        }
+        give okVal("")
+    }
+    if s.type == "say" {
+        let vr2 = chkExprAny(s.value, e, outerNames, true)
+        if vr2.ok == false {
+            give vr2
+        }
+        give okVal("")
+    }
+    if s.type == "if" {
+        let cr = chkExprAny(s.condition, e, outerNames, true)
+        if cr.ok == false {
+            give cr
+        }
+        let test = chkNothingTest(s.condition, e)
+        let before = envCopy(e)
+        if test.found {
+            envNarrow(e, test.name, test.thenKind)
+        }
+        let tr2 = chkChildBlockInFunction(s.thenStmts, e, outerNames)
+        if tr2.ok == false {
+            give tr2
+        }
+        let afterThen = envCopy(e)
+        envBecome(e, before)
+        if test.found {
+            envNarrow(e, test.name, test.elseKind)
+        }
+        if s.hasElse {
+            let er = chkChildBlockInFunction(s.elseStmts, e, outerNames)
+            if er.ok == false {
+                give er
+            }
+        }
+        envBecome(e, envMerged(afterThen, e))
+        give okVal("")
+    }
+    if s.type == "while" {
+        let cr3 = chkExprAny(s.condition, e, outerNames, true)
+        if cr3.ok == false {
+            give cr3
+        }
+        let test2 = chkNothingTest(s.condition, e)
+        let before2 = envCopy(e)
+        if test2.found {
+            envNarrow(e, test2.name, test2.thenKind)
+        }
+        let br = chkChildBlockInFunction(s.body, e, outerNames)
+        if br.ok == false {
+            give br
+        }
+        envBecome(e, envMerged(before2, e))
+        if test2.found {
+            envNarrow(e, test2.name, test2.elseKind)
+        }
+        give okVal("")
+    }
+    if s.type == "repeat" {
+        let kr3 = chkExprAny(s.count, e, outerNames, true)
+        if kr3.ok == false {
+            give kr3
+        }
+        let rr = chkCheckRepeatCount(s.count, e, s.line)
+        if rr.ok == false {
+            give rr
+        }
+        let ck = chkCheckCountKind(kr3.value, s.line)
+        if ck.ok == false {
+            give ck
+        }
+        let before3 = envCopy(e)
+        let br2 = chkChildBlockInFunction(s.body, e, outerNames)
+        if br2.ok == false {
+            give br2
+        }
+        envBecome(e, envMerged(before3, e))
+        give okVal("")
+    }
+    if s.type == "for" {
+        let kr4 = chkExprAny(s.over, e, outerNames, true)
+        if kr4.ok == false {
+            give kr4
+        }
+        let wk = chkCheckWalkKind(kr4.value, s.line)
+        if wk.ok == false {
+            give wk
+        }
+        let before4 = envCopy(e)
+        envPush(e)
+        envDeclare(e, s.name, "unknown", "", { found: false, value: 0 }, false, { found: false, value: 0 })
+        let outer2 = chkUnionNames(outerNames, chkDeclaredNames(s.body))
+        let result2 = okVal("")
+        for inner in s.body {
+            let ir = chkStatementInFunction(inner, e, outer2)
+            if ir.ok == false {
+                result2 = ir
+            }
+            if result2.ok == false {
+                envPop(e)
+                give result2
+            }
+        }
+        envPop(e)
+        envBecome(e, envMerged(before4, e))
+        give okVal("")
+    }
+    if s.type == "define" {
+        give chkDefine(s.name, s.params, s.paramKinds, s.returnKind, s.body, e, outerNames)
+    }
+    if s.type == "give" {
+        let kr5 = chkExprAny(s.value, e, outerNames, true)
+        if kr5.ok == false {
+            give kr5
+        }
+        give chkCheckGive(kr5.value, s.line)
+    }
+    if s.type == "attempt" {
+        let before5 = envCopy(e)
+        envPush(e)
+        let bodyOuter = chkUnionNames(outerNames, chkDeclaredNames(s.body))
+        let result3 = okVal("")
+        for inner2 in s.body {
+            let ir2 = chkStatementInFunction(inner2, e, bodyOuter)
+            if ir2.ok == false {
+                result3 = ir2
+            }
+            if result3.ok == false {
+                envPop(e)
+                give result3
+            }
+        }
+        envPop(e)
+        let afterBody = envCopy(e)
+        envBecome(e, before5)
+        envPush(e)
+        envDeclare(e, "problem", "text", "", { found: false, value: 0 }, false, { found: false, value: 0 })
+        let recoveryOuter = chkUnionNames(outerNames, chkDeclaredNames(s.recovery))
+        for inner3 in s.recovery {
+            let ir3 = chkStatementInFunction(inner3, e, recoveryOuter)
+            if ir3.ok == false {
+                envPop(e)
+                give ir3
+            }
+        }
+        envPop(e)
+        envBecome(e, envMerged(afterBody, e))
+        give okVal("")
+    }
+    if s.type == "doCall" {
+        give chkCallAny(s.name, s.args, s.line, e, outerNames, true)
+    }
+    if s.type == "doExpr" {
+        let er2 = chkExprAny(s.expr, e, outerNames, true)
+        if er2.ok == false {
+            give er2
+        }
+        give okVal("")
+    }
+    give okVal("")
+}
+
+// The checker's door: collect the functions, then walk
+// the program in a fresh environment.
+make chkCheckProgram(stmts) {
+    nmClear(gChkFuncs)
+    chkCollectFunctions(stmts)
+    gChkReturnKind = ""
+    gChkFuncName = ""
+    let e = envNew()
+    give chkBlock(stmts, e, [])
+}
+
 // ---------- the program itself ----------
 // What running this front end does: take the mode and the
 // file path from the words it was started with, read the
-// file, and print the dump the mode asks for — the tokens
-// ('tokens', Stone 47) or the parse tree on one line
-// ('tree', Stone 48). A problem is spoken on the error
-// channel, leaving with the dump contract's parting numbers:
-// 2 when the file itself can't be opened (or the mode is
-// not one this program knows), 1 when the lexer refuses the
-// program — or, in 'tree', when the parser does (a lex
-// refusal in 'tree' is reported exactly as in 'tokens'; no
-// partial dump is printed either way).
+// file, and print what the mode asks for — the tokens
+// ('tokens', Stone 47), the parse tree on one line
+// ('tree', Stone 48), or the checker's verdict ('check',
+// 'check-bare', 'check-guest', Stone 50: lex, parse, then
+// the checker walk above; an accepted program prints
+// exactly "checked"). In this stone the three check modes
+// all run the hosted walk (see the checker section's
+// header). A problem is spoken on the error channel,
+// leaving with the contract's parting numbers: 2 when the
+// file itself can't be opened (or the mode is not one this
+// program knows), 1 when the lexer refuses the program —
+// or, in 'tree' and the check modes, when the parser does,
+// or in the check modes when the checker does (a lex
+// refusal is reported exactly as in 'tokens'; no partial
+// output is printed either way).
 
 let allArgs = arguments()
 if length(allArgs) < 2 {
@@ -2083,8 +4758,14 @@ if length(allArgs) < 2 {
 } else {
     if allArgs[0] != "tokens" {
         if allArgs[0] != "tree" {
-            sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens' and 'tree', like: nifla-front tokens program.nifla")
-            exitwith(2)
+            if allArgs[0] != "check" {
+                if allArgs[0] != "check-bare" {
+                    if allArgs[0] != "check-guest" {
+                        sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare' and 'check-guest', like: nifla-front tokens program.nifla")
+                        exitwith(2)
+                    }
+                }
+            }
         }
     }
     let path = allArgs[1]
@@ -2112,7 +4793,17 @@ if length(allArgs) < 2 {
                 sayerr(parsed.message)
                 exitwith(1)
             } else {
-                say dumpProgram(parsed.value)
+                if allArgs[0] == "tree" {
+                    say dumpProgram(parsed.value)
+                } else {
+                    let checked = chkCheckProgram(parsed.value)
+                    if checked.ok == false {
+                        sayerr(checked.message)
+                        exitwith(1)
+                    } else {
+                        say "checked"
+                    }
+                }
             }
         }
     }

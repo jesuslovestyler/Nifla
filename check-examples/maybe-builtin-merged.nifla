@@ -1,0 +1,5 @@
+let m = "abc"
+if 1 < 2 {
+    m = nothing
+}
+say length(m)

@@ -1,0 +1,1 @@
+say part("hello", -1, 2)

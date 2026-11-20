@@ -1,0 +1,4 @@
+make gety() {
+    give y
+}
+say gety()

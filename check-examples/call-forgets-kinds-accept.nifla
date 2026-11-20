@@ -1,0 +1,6 @@
+make poke() {
+    give 1
+}
+let x = "text"
+let y = poke()
+say x - 1

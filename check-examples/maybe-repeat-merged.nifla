@@ -1,0 +1,7 @@
+let m = 1
+if 1 < 2 {
+    m = nothing
+}
+repeat m {
+    say "x"
+}

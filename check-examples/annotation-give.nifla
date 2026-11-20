@@ -1,0 +1,4 @@
+make answer() -> text {
+    give 42
+}
+say answer()

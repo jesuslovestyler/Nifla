@@ -1,0 +1,6 @@
+let a = makebytes(2)
+let b = makebytes(3)
+let r = floor(a, b) {
+    mov rax, 1
+}
+say r

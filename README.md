@@ -3941,6 +3941,286 @@ The port's next leg — the checker, carried
 into Nifla the same way, piece by piece — is
 future work, named here and not started.
 
+## Stone 50 — the checker begins: the hosted walk stands in Nifla
+
+The all-Nifla port's second leg opens: the
+checker. `src/Checker.swift` (1,656 lines) carried
+into `selfhost/nifla-front.nifla` as the front end's
+three new modes — `nifla-front check <path>`,
+`check-bare`, `check-guest` — lex, parse, then the
+checker walk, printing exactly `checked` for an
+accepted program and leaving 0, or the refusal as
+`Line N: <message>` on the error channel leaving 1
+(a lex or parse refusal exactly as in `tree` mode),
+or 2 when the file itself can't be read. Nothing
+under `src/` is touched, and
+`selfhost/nifla-in-nifla.nifla` is untouched.
+
+**The convergence decision for this leg:
+SUPERSEDE.** Stones 47–49 converged with the
+self-hosted interpreter's front-end machinery
+because that machinery already existed in Nifla.
+The checker has no such quarry: the self-hosted
+interpreter runs no static pre-pass at all — its
+guards are runtime guards spoken as the program
+runs (its file holds no occurrence of the
+checker's closing words, "I caught this before
+the program ran"), and it shares with the checker
+only helpers — the edit distance and its closest
+name, the kind-word phrases, the maybe-word tests.
+So this section is written fresh in Nifla against
+`Checker.swift` as the sole standard, reusing the
+front file's existing helpers (the errAt/okVal
+result objects, `editDistance` carried in from the
+self-host's copy, `nameIndex`, `numText`) and the
+self-host's kind-word helpers' *wording* where
+they mirror the checker's phrases. The self-host
+keeps its own way, single-file by Stone 8's
+design, and stays untouched.
+
+**What was ported** — the hosted core walk,
+whole: kinds carried as text (`"number"`,
+`"text"`, `"boolean"`, `"object"`, `"list"`,
+`"bytes"`, `"unknown"`, `"nothing"`, and
+`"maybe <inner>"`), with `phrase`, `fromKindWord`
+(a word naming no kind — "nothing" among them —
+carried as `""`, Swift's nil) and `mergedKind`
+mirrored case for case. `StaticEnv` stands as an
+object of five lists of *name maps* —
+`{ names: [...], vals: [...] }` parallel lists,
+because a Nifla object can't build a field name
+from text — one map per scope for kinds,
+annotations, constants, proven-empty flags and
+tracked lengths; absence from a map is a fact's
+nil, and no sentinel is ever stored. Where Swift
+copies its value-type environment, the port
+deep-copies; where Swift reassigns it, the port
+writes the new picture into the same object
+(a caller holds the object, not the variable).
+Every `StaticEnv` operation — lookup in all five
+pictures, declare, assign, narrow, dropFacts,
+forgetFacts, forgetKinds, push/pop scope, and
+`merged` (which starts from the first picture and
+rewrites only scopes `0..<min(count)`, the rest
+kept whole) — follows the Swift line by line.
+Function records are collected before checking
+(the first define of a name wins, recursing into
+define bodies, attempt body and recovery, both
+`if` sides and loop bodies), and the plain and
+forgiving statement walks are duplicated as Swift
+duplicates them — they differ in the attempt, for
+and while child handling (the plain child block
+pushes a scope; the forgiving attempt and for
+walks go statement by statement with their own
+outer-names unions; the forgiving while merges
+with the state from before its narrowing) — while
+the expression and call walks, whose Swift twins
+differ only in the variable case and the recursion
+itself, share one body with the forgiving flag
+choosing at exactly those places. The full
+`builtinRules` table is transcribed exactly,
+needs-phrases included, with parameter counts
+from `builtinTools` in `src/Interpreter.swift`
+(only the count is used for checking; the names
+and example serve `builtinCountMessage`, found
+there and mirrored word for word). All the
+Stone 18/19/30/31 helpers stand: declaredKind,
+annotationSatisfied, the maybe refusals,
+checkAnnotation and its call/give forms,
+checkRepeatCount, checkDivisor, checkIndexRange,
+checkBuiltinRanges, constNumber, literalLength,
+isEmptyListExpr, noteAliasing, nothingTest with
+its narrowing, checkIndexKind, checkFieldBase,
+checkCountKind, checkWalkKind, checkNegate,
+checkBinary, and the hosted side of checkFloor
+(the empty-block refusal, the bytes counting, the
+"numbers and one block of bytes" refusal, an
+unknown answer). Every refusal message is
+transcribed character for character, including
+the closing "I caught this before the program
+ran, so nothing ran." exactly where Swift puts
+it — and its absence where Swift leaves it off
+(the unknown-function, unknown-variable and
+set-unmade messages carry no suffix).
+
+**The oracle.** `tools/check-oracle.swift` is a
+proof-only Swift main in the front oracle's
+pattern, speaking the three modes' verdicts
+(`check` forBareMetal/forGuest false/false,
+`check-bare` true/false, `check-guest` true/true,
+as `src/main.swift` and `src/Compiler.swift`
+invoke the checker). One finding on its build:
+the five files named for it do not link alone —
+`BareCompiler.swift` reaches `findAssembler` in
+`src/Compiler.swift`, and `Compiler.swift`
+reaches the ARM bare compiler, so the proof
+builds those two untouched files in as well
+(seven `src/` files in all). No `src/` file was
+restructured for it.
+
+**In this stone, `check-bare` and `check-guest`
+run the same hosted walk.** The bare/guest tool
+doors and the bare floor rules land in Stone 51:
+`chkBareTool` answers "not a bare tool" for every
+name in one place, ready to be extended there,
+and `chkFloor` carries its hosted branches only.
+The proof names what that costs, below.
+
+**The fixtures**: 55 new files in
+`check-examples/`, each written small and
+confirmed against the oracle first — the fixture
+triggers the intended refusal, or, for the
+acceptance pins, is accepted — then held to the
+port byte for byte. The families: an unmade
+variable (plain, and with a did-you-mean), an
+unmade set, an unknown function (plain, and with
+a suggestion), wrong counts (a made function
+called as a statement, and a built-in tool),
+kind-mismatched binary operations (`+`, `-`, `*`,
+`/`, and a comparison), annotation refusals
+(let, assign, parameter, give, and the `nothing`
+mark), maybe refusals earned by an if-merge
+(in a binary, an index, a field, a repeat count,
+a for walk, a negate, and a built-in need),
+nothingTest narrowing acceptances (if/else with
+`==`, a while with `!=`, and the
+annotation-driven road), proven ranges
+(division by zero through a variable and through
+arithmetic, `wholediv` by arithmetic, a negative
+repeat by arithmetic, index ranges on literal
+text, a literal list, a tracked-length variable
+and an empty literal, `removeat` past a tracked
+length, a negative `part` start, `makebytes`
+past the limit through a variable, `exitwith`
+out of range as a statement), floor refusals
+(an empty block standing alone, two blocks of
+bytes through variables, a list handed over),
+and the fact pins: a list whose facts a second
+name's making makes the checker forget (an index
+it must then *accept*), a call forgetting every
+kind (a subtraction it must then accept), a kind
+merged to maybe and then narrowed (accepted),
+a function body using a later-made outer name
+(accepted, the forgiveness), and a function body
+using a name made nowhere (refused).
+
+**The proof** is `./run-check.sh`, in
+`run-front-parser.sh`'s shape, comparing stdout,
+stderr and exit code byte for byte per file.
+Hosted `check`: examples 60/60, checker 45/45
+(each refuses, and the agreed refusal also
+equals its `.error` file byte for byte), floor
+4/4, voice 3/3, selfhost 2/2 (the self-host and
+the front end itself, checker and all), tools
+1/1, primer 58/58, tutorial 86/86, fixtures
+102/102, checkfix 55/55 — with the three
+`front-examples/BOUNDARY.txt` fixtures divergent
+at the lex stage in check mode too, confirmed
+divergent on the run. Bare `check-bare`:
+bare 16/16, cardnull 21/21. Guest `check-guest`:
+guestbare 2/2, guestcard 3/3. Cardnull's
+`cardnull.nifla` — the corpus's big file —
+checks identically in bare mode, inside the
+proof's time: no guard was tripped and nothing
+timed out. The bare and guest groups' counts
+stand *with* the pending list inside them:
+
+**The Stone 51 pending list** — 22 mode-and-file
+pairs, named in `run-check.sh`, each verified
+divergent on every run (the proof fails if one
+ever agrees, and fails if any other file
+diverges). Every divergence is the port halting
+at a bare/guest door call or a bare floor text
+the hosted walk refuses, where the oracle's
+bare/guest walk passes it or refuses later for a
+door reason of its own:
+- *The bare tool door* (oracle accepts; the port
+  refuses the name as an unknown function):
+  `nifla-arm` (memorysize), `nifla-disk`
+  (diskread), `nifla-host` (diskread),
+  `nifla-memory` (memorysize), `commands`
+  (memorysize), `usbkey` (waittick),
+  `featherdoor` (callguest) — all in check-bare.
+- *A door crossing*: `nifla-guest` in check-bare
+  (the oracle refuses 'guestvalue' as a guest's
+  tool in a non-guest; the port refuses the name
+  as unknown), and `diskkeep` in check-bare (the
+  port halts at the door call 'disksectors',
+  line 115; the oracle's own first refusal —
+  the unknown function 'andmask' at line 457 —
+  stands past the door and is never reached).
+- *The bare floor-text rule* (oracle accepts the
+  text a bare floor may be handed; the port
+  refuses it in the hosted words): `nifla-arm-floor`,
+  `nifla-bare`, `nifla-listen`, `pixface` in
+  check-bare; `nifla-guest-desk` and the three
+  feathers in check-guest (below).
+- *Mixed, floor first*: `nifla-guest-desk`,
+  `calculator-feather`, `paint-feather` and
+  `welcome-feather` in check-bare — the port's
+  first refusal is the floor text; the oracle's
+  is a guest-door crossing further on (or, for
+  the desk, its guestgive crossing). In
+  check-guest the same three feathers and
+  `nifla-guest-desk` diverge floor-first against
+  an oracle acceptance, and `nifla-guest` in
+  check-guest diverges at the guest door itself
+  (guestvalue, a guest's own tool the oracle
+  accepts there).
+Stone 51 owes exactly these: the bare/guest
+tool doors in `chkBareTool`, and `chkFloor`'s
+bare branches (a piece of text allowed, a number
+given back). Nothing else diverged anywhere.
+
+**A finding about the compiled door, recorded
+plainly.** A first, guard-style draft of the
+checker section compiled to generated Swift
+carrying 163 "initialization of immutable value
+was never used" warnings — one for nearly every
+block whose scope nothing uses, a block holding
+only a `give` of a constant being the common
+case — 132,130 bytes of compiler diagnostics.
+`niflac` (src/Compiler.swift) pipes its Swift
+compiler's error channel and reads it only after
+the compiler exits; past the pipe's 64 KB the
+compiler blocks writing and `niflac` blocks
+waiting, and no compile ever finishes — the
+compiler sits idle, which is the tell. The front
+end stood at 84 warnings / 35,037 bytes before
+this stone, under the limit with room; the
+finished checker is written in assignment style
+in its tables and operator walks (a result
+variable set inside the blocks, given once at
+the end — a block that assigns uses its scope
+and warns nothing), and the whole file now
+stands at 53 warnings / 44,099 bytes, compiling
+through `niflac` as every proof requires. The
+checker section's header in
+`selfhost/nifla-front.nifla` carries the note
+for the next stone. No behavior is involved —
+the generated warnings were never the program's
+words — but any future stone that grows this
+file in guard style can hit the same wall.
+
+No PRIMER change: the language's surface did not
+change in this stone.
+
+Behavior unchanged everywhere else: the full
+suite sweep on this stone's tree — every
+run-*.sh plus run_tests.sh, 27 scripts in all
+with this stone's proof among them, each exit
+0 — interpreted 60/60, compiled 159/159, voice
+6/6, self-hosted 60/60, primer and tutorial
+books true, web corpus byte for byte, feather,
+feathercheck, selfmade, web-floor and every
+bare proof green, with the front leg's three
+proofs and its gate (run-front.sh) passing
+whole on the enlarged front end. The checker's
+leg has begun: the hosted walk stands in Nifla,
+identical to Swift across the whole corpus; the
+bare and guest doors are Stone 51's, named
+above and not started.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

@@ -1,0 +1,9 @@
+make lookup() -> maybe number {
+    give 7
+}
+let v = lookup()
+if v == nothing {
+    say "none"
+} else {
+    say v + 1
+}

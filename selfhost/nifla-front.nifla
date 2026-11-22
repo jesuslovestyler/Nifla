@@ -6794,19 +6794,38 @@ make btSpanUsed(q) {
 // source character must read as the value's next
 // character and hands over its own aligned bytes.
 // The walk holds exactly when the value is spent at
-// a closing quote.
+// a closing quote. The value is first opened into
+// steps: a CRLF pair in the value is one cluster to
+// the text walk, but in the source it may stand as
+// a raw carriage return followed by the \n escape —
+// two steps there — so the pair is walked as its
+// two characters. (Stone 58's sweep found the
+// desync: raw carriage returns before the escape,
+// in a literal the seeded map could not carry.)
 make btSimulateSpan(s0, end, value) {
+    let steps = []
+    let vi = 0
+    while vi < length(value) {
+        let g = part(value, vi, 1)
+        if g == CRCHAR + "\n" {
+            append(steps, CRCHAR)
+            append(steps, "\n")
+        } else {
+            append(steps, g)
+        }
+        vi = vi + 1
+    }
     let s = s0
     let v = 0
     let bytes = []
     let ok = true
-    while v < length(value) {
+    while v < length(steps) {
         if s >= end {
             ok = false
-            v = length(value)
+            v = length(steps)
         } else {
             let sch = gBtSrcChars[s]
-            let vch = part(value, v, 1)
+            let vch = steps[v]
             if sch == "\\" {
                 let esc = ""
                 if s + 1 < end {
@@ -6836,16 +6855,16 @@ make btSimulateSpan(s0, end, value) {
                         v = v + 1
                     } else {
                         ok = false
-                        v = length(value)
+                        v = length(steps)
                     }
                 } else {
                     ok = false
-                    v = length(value)
+                    v = length(steps)
                 }
             } else {
                 if sch == "\"" {
                     ok = false
-                    v = length(value)
+                    v = length(steps)
                 } else {
                     if sch == vch {
                         for b in gBtSrcBytes[s] {
@@ -6855,7 +6874,7 @@ make btSimulateSpan(s0, end, value) {
                         v = v + 1
                     } else {
                         ok = false
-                        v = length(value)
+                        v = length(steps)
                     }
                 }
             }

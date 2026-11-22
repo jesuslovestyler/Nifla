@@ -5354,6 +5354,51 @@ about 1.5 KB of headroom — the next stone that grows the
 front end must be warning-frugal, or reclaim warnings
 from the older sections first.
 
+Stone 58 is the bare leg's generated sweep, and it
+earned its keep. run-barecompile-sweep.sh (seeds
+56056–56059) generates four families no one hand-picked
+and compares both sides byte for byte: bare-grammar
+programs in both pictures (300; 39 accepted as host,
+58 as guest, the rest refused identically), number
+literals under the bare law (200; the in-law half
+accepted, the past-law half refused with the refusal
+speaking the value, its rendering compared), text
+literals assembled byte by byte (200, all accepted),
+and random-byte feather cards (120). Its first run
+failed 56 text cases in each picture — the oracle
+accepted, the front end refused — and the failure was
+a real desync in Stone 56's subtlest walk: a literal
+holding raw carriage returns before the \n escape
+carries the CR and the escape's LF as one cluster in
+the value, while the source walks them in two steps,
+and the span walk compared cluster to step and gave
+up. The walk now opens the value into steps first,
+the pair walked as its two characters (spelled with
+CRCHAR — the language has no \r escape), and a
+regression fixture (text-crlf-escape.nifla) pins the
+shape in the corpus gate. The same sweep probed the
+number boundary once, from outside the proved ground:
+a hand-typed 5e-23 (one significant digit, below
+about 1e-22) reads one ulp apart in the bare
+validator's refusal, exactly the pattern
+front-examples/BOUNDARY.txt records; the generated
+family stays inside the ground (at most 21 zeros of
+scale) and agrees everywhere. With the fix, the sweep
+passes whole — 1,520 comparisons — the corpus gate
+passes in both pictures (505 comparisons each, card
+7/7, the five boundary fixtures divergent in both),
+and generated-Swift diagnostics stand at 62,829
+bytes. The bare leg is complete: validator,
+translator in both pictures, and the feather's card
+all stand in Nifla, proved against the untouched
+Swift oracle across the hand-written corpus and the
+generated sweeps. What remains unported is driver
+machinery, recorded at Stone 55: findAssembler and
+compileBare's assembling half, which read the process
+environment and run other tools — the language has
+no word for either. The ARM bare compiler
+(src/BareCompilerARM.swift) is the port's next leg.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

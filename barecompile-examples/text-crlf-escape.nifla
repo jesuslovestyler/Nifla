@@ -1,0 +1,6 @@
+// Stone 58 regression fixture: raw carriage returns
+// standing before the \n escape, in a literal past
+// the ASCII edge — the value holds the pair as one
+// cluster; the source walks it in two steps.
+let t = "\n中文é"
+say t

@@ -1,0 +1,18 @@
+// Stone 56 fixture: floor blocks in the emitted
+// assembly — one handed a text and two numbers, one
+// handed only numbers (the memory side cleared), one
+// handed a block of bytes; three blocks, numbered in
+// the order the walk meets them, each standing
+// behind its desk at the file's end.
+let word = "abc"
+let a = floor(word, 7, 8) {
+    mov rax, r12
+}
+let block = makebytes(16)
+let b = floor(block) {
+    mov rax, r12
+}
+let c = floor(1, 2) {
+    mov rax, [r10]
+}
+say a + b + c

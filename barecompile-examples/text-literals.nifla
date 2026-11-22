@@ -1,0 +1,12 @@
+// Stone 56 fixture: text literals and their bytes —
+// plain ASCII, the four escapes, an empty text, and a
+// longer line, said and joined. Pins the literals'
+// numbering, their .byte lists and byte counts in the
+// emitted assembly.
+let plain = "bare metal"
+let escaped = "one\ttwo\nthree \"four\" \\ five"
+let empty = ""
+say plain
+say escaped
+say empty
+say plain + "!"

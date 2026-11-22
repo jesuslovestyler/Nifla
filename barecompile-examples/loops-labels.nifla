@@ -1,0 +1,21 @@
+// Stone 56 fixture: the label counter's order — an
+// if/else, a while and a repeat nested and in
+// sequence, each loop with its own guard slot, and
+// the labelled one-off walks (absolute, smallest,
+// readkey) between them. Pins every fresh label's
+// number in the emitted assembly.
+let total = 0
+let i = 0
+while i < 3 {
+    if i == 1 {
+        total = total + 10
+    } else {
+        total = total + 1
+    }
+    i = i + 1
+}
+repeat 2 {
+    total = total + absolute(0 - 5)
+}
+say smallest(total, readkey())
+say total

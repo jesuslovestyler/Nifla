@@ -1,0 +1,11 @@
+// Stone 56 fixture: a block of bytes at work — made,
+// written by number (the one setting-by-place), read
+// back by number, turned into text with astext, and
+// a number read out of text with asnumber. Pins the
+// index walks and the two reader calls.
+let block = makebytes(512)
+block[0] = 72
+block[1] = 105
+let word = astext(block)
+say block[0] + block[1]
+say asnumber("42")

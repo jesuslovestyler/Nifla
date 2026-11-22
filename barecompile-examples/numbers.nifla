@@ -1,0 +1,13 @@
+// Stone 56 fixture: number literals at the edges of
+// what the validator lets through (whole, under 1e15)
+// and the arithmetic walks — division's guard, the
+// remainder and whole-division words, negation. Pins
+// the Int64 rendering of each literal.
+let zero = 0
+let big = 999999999999999
+let other = 123456789012345
+say big - other
+say big / 7
+say leftover(big, 97)
+say wholediv(big, 97)
+say 0 - 42

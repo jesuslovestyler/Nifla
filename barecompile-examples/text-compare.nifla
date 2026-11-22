@@ -1,0 +1,13 @@
+// Stone 56 fixture: text comparisons and a boolean
+// at work — == and != over texts (the text_eq call,
+// the xor for !=), a comparison over numbers (the
+// setcc walk), and a joined say. Pins the two
+// comparison shapes side by side.
+let word = "nifla"
+if word == "nifla" {
+    say "match"
+}
+if word != "other" {
+    say "different"
+}
+say word + " on bare metal"

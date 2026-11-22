@@ -14,6 +14,7 @@
 //     nifla-front compile <path>
 //     nifla-front barevalid <path>
 //     nifla-front barevalid-guest <path>
+//     nifla-front barecompile <path>
 //
 // Stone 50 adds the check modes: lex, parse, then the
 // checker (the section below the tree dump), printing
@@ -36,6 +37,16 @@
 // The bare leg's claim in this stone is the
 // validator's verdict; the bare translator's assembly
 // stands in the leg's next stone.
+//
+// Stone 56 adds the barecompile mode: the whole bare
+// road in the host picture — lex, parse, check,
+// validate, then the bare translator (the section
+// below the validator) — printing the emitted
+// assembly exactly as the toolchain's BareTranslator
+// (src/BareCompiler.swift) writes it. The translator
+// is made with no video request, as a build without
+// the flag is; the guest picture of the same
+// translator stands in the leg's next stone.
 //
 // 'tokens' reads the file at <path> and prints its tokens,
 // one per line, in this dump:
@@ -6521,6 +6532,2229 @@ make bvValidateProgram(stmts, guest) {
     give okVal(true)
 }
 
+// ---------- the bare translator (Stone 56) ----------
+//
+// SUPERSEDE, as the checker leg superseded: the bare
+// translator (BareTranslator in src/BareCompiler.swift)
+// re-walked in Nifla, in the mode 'barecompile'. The
+// walk is Swift's, statement by statement and
+// expression by expression, and the assembly it emits
+// must match the Swift translator's byte for byte —
+// the claim run-barecompile.sh proves against the
+// bare oracle. The translator is made from the bare
+// validator's walk, as Swift's is: the settled shapes
+// (gBvFuncs, gBvParamKinds) and the picture (gBvGuest)
+// are the validator's globals, read after bvValidate
+// has run. The guest picture of this same translator
+// is Stone 57's stone; this section carries the flag
+// from its first day, and the head and tail below
+// branch on it exactly where Swift's translate does.
+//
+// Scope, as the ledger records: the translator is
+// made with NO video request — the video request is
+// driver input, as a build without the flag is, so
+// the multiboot header stands in its unasked form.
+// compileBare's driver half (the assembling, the
+// linking, the packaging) is not ported, as
+// compileMain's driver half was not in Stone 53;
+// findAssembler stands with the driver (Stone 55).
+//
+// Two reckonings in this walk want care:
+//
+// Numbers. Swift's translator writes a literal with
+// Int64(value); the validator has already proved
+// every literal whole and under 1e15 in absolute
+// value, so the front end's numText — the digits the
+// number was read from, which the parser keeps — is
+// exactly that rendering. The same numText renders
+// every offset, count and label number the walk
+// reckons, all small whole numbers.
+//
+// Text bytes. A literal is emitted as its UTF-8
+// bytes (.byte lines in .rodata) with its byte
+// count, and Swift reckons both from the value. The
+// language gives no way to ask a character for its
+// code point (the word boundary, front-examples/
+// BOUNDARY.txt), so the bytes are reckoned two honest
+// ways. The ASCII characters are seeded: a one-byte
+// block holding b reads back through astext as
+// exactly that byte's character, for every b from 0
+// to 127 — plus the carriage-return/line-feed pair,
+// the one two-character ASCII grapheme — and a
+// literal whose characters are all seeded is reckoned
+// from the seed alone. Any other character in a
+// literal necessarily stands in the program's own
+// source, on the literal's own line (a literal never
+// spans lines), and the mode holds both readings of
+// that file — the text and its bytes. So the source
+// is aligned once, character by character, gathering
+// bytes until astext of the gathered bytes reads as
+// that character, and a literal is then matched
+// against its own line: each opening quote on the
+// line is tried as the literal's start, walking the
+// value and the source in step (an escape in the
+// source standing for its one seeded character),
+// until the value is spent exactly at a closing
+// quote. The match is positional, never by name —
+// text equality in this language is canonical, so a
+// precomposed letter and the same letter written as
+// base plus combining mark are the same key to any
+// table, while their bytes differ; only the place
+// tells them apart. A literal matched no way fails
+// the translation rather than emit a wrong byte
+// (gBtByteFailed) — argued impossible, and the proof
+// would catch it.
+//
+// The section is written in assignment style
+// throughout, and conditional emissions go through
+// btEmitWhen / btEmitPick or a line reckoned into a
+// variable first: a block that only hands back a
+// literal leaves its scope unused in the generated
+// Swift, and enough of those warnings overflow the
+// 64 KB pipe niflac reads swiftc's words through
+// (the Stone 50 finding, measured again at this
+// stone).
+
+let gBtCode = []
+let gBtLiterals = []
+let gBtFloors = []
+let gBtLabelCounter = 0
+let gBtScopes = []
+let gBtNextOffset = 0
+let gBtExitLabel = ""
+let gBtGuest = false
+let gBtSourceText = ""
+let gBtSourcePath = ""
+let gBtByteMap = nmNew()
+let gBtByteMapSeeded = false
+let gBtByteFailed = false
+let gBtSrcChars = []
+let gBtSrcBytes = []
+let gBtLineStarts = []
+let gBtSourceBuilt = false
+let gBtUsedSpans = []
+let gBtBuiltinKinds = nmNew()
+let gBtBuiltinKindsSeeded = false
+let gBtRegisters = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+
+make btAddrLoad(reg, name) {
+    if gBtGuest {
+        give "    lea " + reg + ", [rip + " + name + "]"
+    }
+    give "    mov " + reg + ", offset " + name
+}
+
+make btFreshLabel(base) {
+    gBtLabelCounter = gBtLabelCounter + 1
+    give "__" + base + "_" + numText(gBtLabelCounter)
+}
+
+make btEmit(line) {
+    append(gBtCode, line)
+}
+
+make btEmitWhen(flag, line) {
+    if flag {
+        btEmit(line)
+    }
+}
+
+make btEmitPick(flag, whenTrue, whenFalse) {
+    if flag {
+        btEmit(whenTrue)
+    } else {
+        btEmit(whenFalse)
+    }
+}
+
+make btSlots(kind) {
+    let n = 1
+    if kind == "text" {
+        n = 2
+    }
+    if kind == "bytes" {
+        n = 2
+    }
+    give n
+}
+
+make btDeclareVar(name, kind) {
+    gBtNextOffset = gBtNextOffset + 8 * btSlots(kind)
+    let scope = gBtScopes[length(gBtScopes) - 1]
+    nmSet(scope, name, { offset: gBtNextOffset, kind: kind })
+    give { offset: gBtNextOffset, kind: kind }
+}
+
+// Swift's lookupVar hands back (0, number) for a name
+// no scope holds — the checker proved it exists, so
+// the walk uses the entry as it stands.
+make btLookupVar(name) {
+    let i = length(gBtScopes) - 1
+    let result = { offset: 0, kind: "number" }
+    let looking = true
+    while looking {
+        if i < 0 {
+            looking = false
+        } else {
+            let r = nmGet(gBtScopes[i], name)
+            if r.found {
+                result = { offset: r.value.offset, kind: r.value.kind }
+                looking = false
+            } else {
+                i = i - 1
+            }
+        }
+    }
+    give result
+}
+
+make btBlockFromBytes(list) {
+    let block = makebytes(length(list))
+    let i = 0
+    while i < length(list) {
+        block[i] = list[i]
+        i = i + 1
+    }
+    give block
+}
+
+make btSeedByteMap() {
+    if gBtByteMapSeeded == false {
+        gBtByteMapSeeded = true
+        let b = 0
+        while b < 128 {
+            let one = [b]
+            nmSet(gBtByteMap, astext(btBlockFromBytes(one)), one)
+            b = b + 1
+        }
+        let pair = [13, 10]
+        nmSet(gBtByteMap, astext(btBlockFromBytes(pair)), pair)
+    }
+    give true
+}
+
+make btBuildSource() {
+    if gBtSourceBuilt == false {
+        gBtSourceBuilt = true
+        let bytes = readbytes(gBtSourcePath)
+        let total = length(gBtSourceText)
+        let cursor = 0
+        let i = 0
+        append(gBtLineStarts, 0)
+        while i < total {
+            let ch = part(gBtSourceText, i, 1)
+            let acc = []
+            let matched = false
+            while matched == false {
+                if cursor < length(bytes) {
+                    append(acc, bytes[cursor])
+                    cursor = cursor + 1
+                    if astext(btBlockFromBytes(acc)) == ch {
+                        matched = true
+                    }
+                } else {
+                    matched = true
+                }
+            }
+            append(gBtSrcChars, ch)
+            append(gBtSrcBytes, acc)
+            if ch == "\n" {
+                append(gBtLineStarts, i + 1)
+            }
+            i = i + 1
+        }
+    }
+    give true
+}
+
+make btSpanUsed(q) {
+    let used = false
+    for s in gBtUsedSpans {
+        if s == q {
+            used = true
+        }
+    }
+    give used
+}
+
+// Walks a value and the source in step from just
+// after an opening quote: an escape in the source
+// stands for its one seeded character, any other
+// source character must read as the value's next
+// character and hands over its own aligned bytes.
+// The walk holds exactly when the value is spent at
+// a closing quote.
+make btSimulateSpan(s0, end, value) {
+    let s = s0
+    let v = 0
+    let bytes = []
+    let ok = true
+    while v < length(value) {
+        if s >= end {
+            ok = false
+            v = length(value)
+        } else {
+            let sch = gBtSrcChars[s]
+            let vch = part(value, v, 1)
+            if sch == "\\" {
+                let esc = ""
+                if s + 1 < end {
+                    let nxt = gBtSrcChars[s + 1]
+                    if nxt == "n" {
+                        esc = "\n"
+                    }
+                    if nxt == "t" {
+                        esc = "\t"
+                    }
+                    if nxt == "\"" {
+                        esc = "\""
+                    }
+                    if nxt == "\\" {
+                        esc = "\\"
+                    }
+                }
+                if esc != "" {
+                    if vch == esc {
+                        let r = nmGet(gBtByteMap, esc)
+                        if r.found {
+                            for b in r.value {
+                                append(bytes, b)
+                            }
+                        }
+                        s = s + 2
+                        v = v + 1
+                    } else {
+                        ok = false
+                        v = length(value)
+                    }
+                } else {
+                    ok = false
+                    v = length(value)
+                }
+            } else {
+                if sch == "\"" {
+                    ok = false
+                    v = length(value)
+                } else {
+                    if sch == vch {
+                        for b in gBtSrcBytes[s] {
+                            append(bytes, b)
+                        }
+                        s = s + 1
+                        v = v + 1
+                    } else {
+                        ok = false
+                        v = length(value)
+                    }
+                }
+            }
+        }
+    }
+    if ok {
+        if s >= end {
+            ok = false
+        } else {
+            if gBtSrcChars[s] != "\"" {
+                ok = false
+            }
+        }
+    }
+    give { ok: ok, bytes: bytes }
+}
+
+make btTextBytes(value, line) {
+    btSeedByteMap()
+    let out = []
+    let allSeeded = true
+    let i = 0
+    while i < length(value) {
+        let ch = part(value, i, 1)
+        let r = nmGet(gBtByteMap, ch)
+        if r.found {
+            for b in r.value {
+                append(out, b)
+            }
+        } else {
+            allSeeded = false
+        }
+        i = i + 1
+    }
+    if allSeeded {
+        give out
+    }
+    btBuildSource()
+    let start = 0
+    let end = length(gBtSrcChars)
+    if line - 1 < length(gBtLineStarts) {
+        start = gBtLineStarts[line - 1]
+    }
+    if line < length(gBtLineStarts) {
+        end = gBtLineStarts[line]
+    }
+    let q = start
+    let found = false
+    let result = []
+    while q < end {
+        if found {
+            q = end
+        } else {
+            if gBtSrcChars[q] == "\"" {
+                if btSpanUsed(q) == false {
+                    let sim = btSimulateSpan(q + 1, end, value)
+                    if sim.ok {
+                        append(gBtUsedSpans, q)
+                        result = sim.bytes
+                        found = true
+                    }
+                }
+            }
+            q = q + 1
+        }
+    }
+    if found == false {
+        gBtByteFailed = true
+        give []
+    }
+    give result
+}
+
+make btSeedBuiltinKinds() {
+    if gBtBuiltinKindsSeeded == false {
+        gBtBuiltinKindsSeeded = true
+        nmSet(gBtBuiltinKinds, "length", "number")
+        nmSet(gBtBuiltinKinds, "absolute", "number")
+        nmSet(gBtBuiltinKinds, "smallest", "number")
+        nmSet(gBtBuiltinKinds, "largest", "number")
+        nmSet(gBtBuiltinKinds, "bitand", "number")
+        nmSet(gBtBuiltinKinds, "bitor", "number")
+        nmSet(gBtBuiltinKinds, "bitxor", "number")
+        nmSet(gBtBuiltinKinds, "leftover", "number")
+        nmSet(gBtBuiltinKinds, "wholediv", "number")
+        nmSet(gBtBuiltinKinds, "asnumber", "number")
+        nmSet(gBtBuiltinKinds, "astext", "text")
+        nmSet(gBtBuiltinKinds, "makebytes", "bytes")
+    }
+    give true
+}
+
+// The translator's own kindOf: it reads the frame
+// this walk is building (gBtScopes), where Swift's
+// reads its scopes — not the validator's settled
+// shapes. Written in assignment style, the settled
+// flag carrying Swift's order: the built-in words
+// first, then the bare and guest tables, then a made
+// function's settled give shape.
+make btKindOf(e) {
+    let result = "number"
+    if e.type == "text" {
+        result = "text"
+    }
+    if e.type == "boolean" {
+        result = "boolean"
+    }
+    if e.type == "variable" {
+        let r = btLookupVar(e.name)
+        result = r.kind
+    }
+    if e.type == "call" {
+        btSeedBuiltinKinds()
+        let settled = false
+        let br = nmGet(gBtBuiltinKinds, e.name)
+        if br.found {
+            result = br.value
+            settled = true
+        }
+        if settled == false {
+            if nmHas(gBvBareTools, e.name) {
+                result = "number"
+                settled = true
+            }
+        }
+        if settled == false {
+            if nmHas(gBvGuestDesk, e.name) {
+                result = "number"
+                settled = true
+            }
+        }
+        if settled == false {
+            if nmHas(gBvGuestDoor, e.name) {
+                result = "number"
+                settled = true
+            }
+        }
+        if settled == false {
+            let fr = nmGet(gBvFuncs, e.name)
+            if fr.found {
+                result = fr.value.giveKind
+            }
+        }
+    }
+    if e.type == "binary" {
+        result = "number"
+        if e.op == "<" {
+            result = "boolean"
+        }
+        if e.op == "<=" {
+            result = "boolean"
+        }
+        if e.op == ">" {
+            result = "boolean"
+        }
+        if e.op == ">=" {
+            result = "boolean"
+        }
+        if e.op == "==" {
+            result = "boolean"
+        }
+        if e.op == "!=" {
+            result = "boolean"
+        }
+        if e.op == "+" {
+            result = "number"
+            if btKindOf(e.left) == "text" {
+                result = "text"
+            }
+            if btKindOf(e.right) == "text" {
+                result = "text"
+            }
+        }
+    }
+    give result
+}
+
+make btEmitBlock(stmts) {
+    append(gBtScopes, nmNew())
+    for s in stmts {
+        btEmitStatement(s)
+    }
+    removeat(gBtScopes, length(gBtScopes) - 1)
+}
+
+make btEmitGuardTick(passOffset) {
+    btEmit("    mov rax, [rbp - " + numText(passOffset) + "]")
+    btEmit("    inc rax")
+    btEmit("    mov [rbp - " + numText(passOffset) + "], rax")
+    btEmit("    cmp rax, 1000000")
+    btEmit("    jg __halt_trap")
+}
+
+make btEmitStore(entry) {
+    if btSlots(entry.kind) == 2 {
+        btEmit("    mov [rbp - " + numText(entry.offset - 8) + "], rax")
+        btEmit("    mov [rbp - " + numText(entry.offset) + "], rdx")
+    } else {
+        btEmit("    mov [rbp - " + numText(entry.offset) + "], rax")
+    }
+}
+
+make btEmitStatement(s) {
+    if s.type == "declare" {
+        let kind = btKindOf(s.value)
+        btEmitExpr(s.value)
+        let entry = btDeclareVar(s.name, kind)
+        btEmitStore(entry)
+    }
+    if s.type == "assign" {
+        btEmitExpr(s.value)
+        btEmitStore(btLookupVar(s.name))
+    }
+    if s.type == "assignTarget" {
+        if s.target.type == "index" {
+            btEmitExpr(s.target.base)
+            btEmit("    push rax")
+            btEmit("    push rdx")
+            btEmitExpr(s.target.index)
+            btEmit("    push rax")
+            btEmitExpr(s.value)
+            btEmit("    mov r8, rax")
+            btEmit("    pop rax")
+            btEmit("    pop rdx")
+            btEmit("    pop rcx")
+            btEmit("    cmp rax, rdx")
+            btEmit("    jae __halt_trap")
+            btEmit("    cmp r8, 255")
+            btEmit("    ja __halt_trap")
+            btEmit("    mov byte ptr [rcx + rax], r8b")
+        }
+        btEmitWhen(s.target.type != "index", "    ud2")
+    }
+    if s.type == "say" {
+        btEmitExpr(s.value)
+        btEmitWhen(btKindOf(s.value) == "number", "    call __nifla_numtext")
+        btEmit("    call __nifla_say_text")
+        btEmit("    call __nifla_say_newline")
+    }
+    btEmitWhen(s.type == "for", "    ud2")
+    btEmitWhen(s.type == "attempt", "    ud2")
+    btEmitWhen(s.type == "define", "    ud2")
+    if s.type == "if" {
+        let elseLabel = btFreshLabel("else")
+        let endLabel = btFreshLabel("endif")
+        btEmitExpr(s.condition)
+        btEmit("    test rax, rax")
+        if s.hasElse {
+            btEmit("    je " + elseLabel)
+        } else {
+            btEmit("    je " + endLabel)
+        }
+        btEmitBlock(s.thenStmts)
+        if s.hasElse {
+            btEmit("    jmp " + endLabel)
+            btEmit(elseLabel + ":")
+            btEmitBlock(s.elseStmts)
+        }
+        btEmit(endLabel + ":")
+    }
+    if s.type == "while" {
+        let passEntry = btDeclareVar(btFreshLabel("guard_passes"), "number")
+        let topLabel = btFreshLabel("while")
+        let endLabel = btFreshLabel("endwhile")
+        btEmit("    mov qword ptr [rbp - " + numText(passEntry.offset) + "], 0")
+        btEmit(topLabel + ":")
+        btEmitExpr(s.condition)
+        btEmit("    test rax, rax")
+        btEmit("    je " + endLabel)
+        btEmitGuardTick(passEntry.offset)
+        btEmitBlock(s.body)
+        btEmit("    jmp " + topLabel)
+        btEmit(endLabel + ":")
+    }
+    if s.type == "repeat" {
+        let countEntry = btDeclareVar(btFreshLabel("repeat_count"), "number")
+        let counterEntry = btDeclareVar(btFreshLabel("repeat_done"), "number")
+        let passEntry = btDeclareVar(btFreshLabel("guard_passes"), "number")
+        btEmitExpr(s.count)
+        btEmit("    mov [rbp - " + numText(countEntry.offset) + "], rax")
+        btEmit("    test rax, rax")
+        btEmit("    js __halt_trap")
+        btEmit("    mov qword ptr [rbp - " + numText(counterEntry.offset) + "], 0")
+        btEmit("    mov qword ptr [rbp - " + numText(passEntry.offset) + "], 0")
+        let topLabel = btFreshLabel("repeat")
+        let endLabel = btFreshLabel("endrepeat")
+        btEmit(topLabel + ":")
+        btEmit("    mov rax, [rbp - " + numText(counterEntry.offset) + "]")
+        btEmit("    cmp rax, [rbp - " + numText(countEntry.offset) + "]")
+        btEmit("    jae " + endLabel)
+        btEmitGuardTick(passEntry.offset)
+        btEmitBlock(s.body)
+        btEmit("    mov rax, [rbp - " + numText(counterEntry.offset) + "]")
+        btEmit("    inc rax")
+        btEmit("    mov [rbp - " + numText(counterEntry.offset) + "], rax")
+        btEmit("    jmp " + topLabel)
+        btEmit(endLabel + ":")
+    }
+    if s.type == "give" {
+        btEmitExpr(s.value)
+        btEmit("    jmp " + gBtExitLabel)
+    }
+    if s.type == "doCall" {
+        btEmitCall({ name: s.name, args: s.args, line: s.line })
+    }
+    if s.type == "doExpr" {
+        btEmitExpr(s.expr)
+    }
+}
+
+make btEmitExpr(e) {
+    if e.type == "number" {
+        btEmit("    mov rax, " + numText(e.value))
+    }
+    if e.type == "text" {
+        let bytes = btTextBytes(e.value, e.line)
+        let label = "__text_" + numText(length(gBtLiterals))
+        append(gBtLiterals, { label: label, bytes: bytes })
+        btEmit(btAddrLoad("rax", label))
+        btEmit("    mov rdx, " + numText(length(bytes)))
+    }
+    if e.type == "boolean" {
+        btEmitPick(e.flag, "    mov rax, 1", "    mov rax, 0")
+    }
+    btEmitWhen(e.type == "nothing", "    ud2")
+    if e.type == "variable" {
+        let entry = btLookupVar(e.name)
+        if btSlots(entry.kind) == 2 {
+            btEmit("    mov rax, [rbp - " + numText(entry.offset - 8) + "]")
+            btEmit("    mov rdx, [rbp - " + numText(entry.offset) + "]")
+        } else {
+            btEmit("    mov rax, [rbp - " + numText(entry.offset) + "]")
+        }
+    }
+    if e.type == "call" {
+        btEmitCall(e)
+    }
+    if e.type == "floor" {
+        let index = length(gBtFloors)
+        append(gBtFloors, e.asm)
+        let numberIndex = 0
+        let hasText = false
+        for arg in e.args {
+            if btSlots(btKindOf(arg)) == 2 {
+                btEmitExpr(arg)
+                btEmit("    mov rbx, rax")
+                btEmit("    mov r12, rdx")
+                hasText = true
+            } else {
+                btEmitExpr(arg)
+                btEmit("    mov [__floor_inputs + " + numText(8 * numberIndex) + "], rax")
+                numberIndex = numberIndex + 1
+            }
+        }
+        btEmit(btAddrLoad("r10", "__floor_inputs"))
+        btEmit("    mov r11, " + numText(numberIndex))
+        btEmitWhen(hasText == false, "    xor ebx, ebx")
+        btEmitWhen(hasText == false, "    xor r12d, r12d")
+        btEmit("    xor r13d, r13d")
+        btEmit("    xor r14d, r14d")
+        btEmit("    call __floor_" + numText(index))
+    }
+    if e.type == "negate" {
+        btEmitExpr(e.inner)
+        btEmit("    neg rax")
+    }
+    if e.type == "binary" {
+        btEmitBinary(e)
+    }
+    if e.type == "index" {
+        btEmitExpr(e.base)
+        btEmit("    push rax")
+        btEmit("    push rdx")
+        btEmitExpr(e.index)
+        btEmit("    pop rdx")
+        btEmit("    pop rcx")
+        btEmit("    cmp rax, rdx")
+        btEmit("    jae __halt_trap")
+        btEmit("    movzx rax, byte ptr [rcx + rax]")
+    }
+    btEmitWhen(e.type == "object", "    ud2")
+    btEmitWhen(e.type == "list", "    ud2")
+    btEmitWhen(e.type == "field", "    ud2")
+}
+
+make btEmitBinary(e) {
+    let done = false
+    if e.op == "+" {
+        if btKindOf(e.left) == "text" {
+            btEmitJoin(e)
+            done = true
+        }
+        if done == false {
+            if btKindOf(e.right) == "text" {
+                btEmitJoin(e)
+                done = true
+            }
+        }
+    }
+    if done == false {
+        if e.op == "==" {
+            if btKindOf(e.left) == "text" {
+                btEmitTextCompare(e, true)
+                done = true
+            }
+            if done == false {
+                if btKindOf(e.right) == "text" {
+                    btEmitTextCompare(e, true)
+                    done = true
+                }
+            }
+        }
+    }
+    if done == false {
+        if e.op == "!=" {
+            if btKindOf(e.left) == "text" {
+                btEmitTextCompare(e, false)
+                done = true
+            }
+            if done == false {
+                if btKindOf(e.right) == "text" {
+                    btEmitTextCompare(e, false)
+                    done = true
+                }
+            }
+        }
+    }
+    if done == false {
+        btEmitExpr(e.left)
+        btEmit("    push rax")
+        btEmitExpr(e.right)
+        btEmit("    mov rcx, rax")
+        btEmit("    pop rax")
+        if e.op == "+" {
+            btEmit("    add rax, rcx")
+            done = true
+        }
+        if e.op == "-" {
+            btEmit("    sub rax, rcx")
+            done = true
+        }
+        if e.op == "*" {
+            btEmit("    imul rax, rcx")
+            done = true
+        }
+        if e.op == "/" {
+            btEmit("    test rcx, rcx")
+            btEmit("    je __halt_trap")
+            btEmit("    cqo")
+            btEmit("    idiv rcx")
+            done = true
+        }
+        if e.op == "<" {
+            btEmitCompare("setl")
+            done = true
+        }
+        if e.op == "<=" {
+            btEmitCompare("setle")
+            done = true
+        }
+        if e.op == ">" {
+            btEmitCompare("setg")
+            done = true
+        }
+        if e.op == ">=" {
+            btEmitCompare("setge")
+            done = true
+        }
+        if e.op == "==" {
+            btEmitCompare("sete")
+            done = true
+        }
+        if e.op == "!=" {
+            btEmitCompare("setne")
+            done = true
+        }
+        btEmitWhen(done == false, "    ud2")
+    }
+}
+
+make btEmitJoin(e) {
+    btEmitExpr(e.left)
+    btEmitWhen(btKindOf(e.left) == "number", "    call __nifla_numtext")
+    btEmit("    push rax")
+    btEmit("    push rdx")
+    btEmitExpr(e.right)
+    btEmitWhen(btKindOf(e.right) == "number", "    call __nifla_numtext")
+    btEmit("    mov rcx, rax")
+    btEmit("    mov r8, rdx")
+    btEmit("    pop rdx")
+    btEmit("    pop rax")
+    btEmit("    call __nifla_join")
+}
+
+make btEmitTextCompare(e, isEqual) {
+    btEmitExpr(e.left)
+    btEmit("    push rax")
+    btEmit("    push rdx")
+    btEmitExpr(e.right)
+    btEmit("    mov r8, rdx")
+    btEmit("    mov rcx, rax")
+    btEmit("    pop rdx")
+    btEmit("    pop rax")
+    btEmit("    call __nifla_text_eq")
+    btEmitWhen(isEqual == false, "    xor rax, 1")
+}
+
+make btEmitCompare(setcc) {
+    btEmit("    cmp rax, rcx")
+    btEmit("    " + setcc + " al")
+    btEmit("    movzx rax, al")
+}
+
+make btEmitCall(e) {
+    let done = false
+    if e.name == "length" {
+        btEmitExpr(e.args[0])
+        btEmit("    mov rax, rdx")
+        done = true
+    }
+    if done == false {
+        if e.name == "absolute" {
+            btEmitExpr(e.args[0])
+            let doneLabel = btFreshLabel("absolute_done")
+            btEmit("    test rax, rax")
+            btEmit("    jns " + doneLabel)
+            btEmit("    neg rax")
+            btEmit(doneLabel + ":")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "smallest" {
+            btEmitChoose(e, true)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "largest" {
+            btEmitChoose(e, false)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "bitand" {
+            btEmitBits(e)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "bitor" {
+            btEmitBits(e)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "bitxor" {
+            btEmitBits(e)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "leftover" {
+            btEmitExpr(e.args[0])
+            btEmit("    push rax")
+            btEmitExpr(e.args[1])
+            btEmit("    mov rcx, rax")
+            btEmit("    pop rax")
+            btEmit("    test rcx, rcx")
+            btEmit("    je __halt_trap")
+            btEmit("    cqo")
+            btEmit("    idiv rcx")
+            btEmit("    mov rax, rdx")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "wholediv" {
+            btEmitExpr(e.args[0])
+            btEmit("    push rax")
+            btEmitExpr(e.args[1])
+            btEmit("    mov rcx, rax")
+            btEmit("    pop rax")
+            btEmit("    test rcx, rcx")
+            btEmit("    je __halt_trap")
+            btEmit("    cqo")
+            btEmit("    idiv rcx")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "asnumber" {
+            btEmitExpr(e.args[0])
+            btEmit("    call __nifla_asnumber")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "astext" {
+            btEmitExpr(e.args[0])
+            btEmit("    call __nifla_astext")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "makebytes" {
+            btEmitExpr(e.args[0])
+            btEmit("    call __nifla_alloc")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "memorysize" {
+            btEmit("    mov rax, [__mem_total]")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "disksectors" {
+            btEmit("    call __nifla_disk_sectors")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "guestvalue" {
+            btEmit("    mov rax, [__desk]")
+            btEmit("    mov rax, [rax + 8]")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "guestgive" {
+            btEmitExpr(e.args[0])
+            btEmit("    mov rcx, [__desk]")
+            btEmit("    mov [rcx + 16], rax")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "callguest" {
+            btEmitExpr(e.args[0])
+            btEmit("    push rax")
+            btEmitExpr(e.args[1])
+            btEmit("    mov [__guest_desk + 8], rax")
+            btEmit("    mov rax, 1")
+            btEmit("    mov [__guest_desk], rax")
+            btEmit("    mov qword ptr [__guest_desk + 16], 0")
+            btEmit("    mov rax, [__cursor_row]")
+            btEmit("    mov [__guest_desk + 32], rax")
+            btEmit("    mov rax, [__cursor_col]")
+            btEmit("    mov [__guest_desk + 40], rax")
+            btEmit("    pop rax")
+            btEmit("    lea rcx, [rax + 524288]")
+            btEmit("    mov [__guest_desk + 24], rcx")
+            btEmit(btAddrLoad("rdi", "__guest_desk"))
+            btEmit("    call rax")
+            btEmit("    mov rcx, [__guest_desk + 32]")
+            btEmit("    mov [__cursor_row], rcx")
+            btEmit("    mov rcx, [__guest_desk + 40]")
+            btEmit("    mov [__cursor_col], rcx")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "diskread" {
+            btEmitDisk(e, true)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "diskwrite" {
+            btEmitDisk(e, false)
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "ticks" {
+            btEmit("    mov rax, [__ticks]")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "waittick" {
+            btEmit("    hlt")
+            btEmit("    mov rax, [__ticks]")
+            done = true
+        }
+    }
+    if done == false {
+        if e.name == "readkey" {
+            let emptyLabel = btFreshLabel("readkey_empty")
+            let doneLabel = btFreshLabel("readkey_done")
+            btEmit("    mov rax, [__key_tail]")
+            btEmit("    cmp rax, [__key_head]")
+            btEmit("    je " + emptyLabel)
+            btEmit("    mov rcx, rax")
+            btEmit("    and ecx, 63")
+            btEmit("    movzx ecx, byte ptr [__key_buf + rcx]")
+            btEmit("    inc rax")
+            btEmit("    mov [__key_tail], rax")
+            btEmit("    mov rax, rcx")
+            btEmit("    jmp " + doneLabel)
+            btEmit(emptyLabel + ":")
+            btEmit("    xor eax, eax")
+            btEmit(doneLabel + ":")
+            done = true
+        }
+    }
+    if done == false {
+        let slotCount = 0
+        for arg in e.args {
+            btEmitExpr(arg)
+            btEmit("    push rax")
+            slotCount = slotCount + 1
+            if btSlots(btKindOf(arg)) == 2 {
+                btEmit("    push rdx")
+                slotCount = slotCount + 1
+            }
+        }
+        if slotCount > 0 {
+            let registerIndex = slotCount - 1
+            while registerIndex >= 0 {
+                btEmit("    pop " + gBtRegisters[registerIndex])
+                registerIndex = registerIndex - 1
+            }
+        }
+        btEmit("    call __fn_" + e.name)
+    }
+}
+
+make btEmitChoose(e, wantSmallest) {
+    btEmitExpr(e.args[0])
+    btEmit("    push rax")
+    btEmitExpr(e.args[1])
+    btEmit("    mov rcx, rax")
+    btEmit("    pop rax")
+    let doneLabel = btFreshLabel("choose_done")
+    btEmit("    cmp rax, rcx")
+    btEmitPick(wantSmallest, "    jle " + doneLabel, "    jge " + doneLabel)
+    btEmit("    mov rax, rcx")
+    btEmit(doneLabel + ":")
+}
+
+make btEmitBits(e) {
+    btEmitExpr(e.args[0])
+    btEmit("    push rax")
+    btEmitExpr(e.args[1])
+    btEmit("    mov rcx, rax")
+    btEmit("    pop rax")
+    btEmit("    test rax, rax")
+    btEmit("    js __halt_trap")
+    btEmit("    test rcx, rcx")
+    btEmit("    js __halt_trap")
+    let opLine = "    xor rax, rcx"
+    if e.name == "bitand" {
+        opLine = "    and rax, rcx"
+    }
+    if e.name == "bitor" {
+        opLine = "    or rax, rcx"
+    }
+    btEmit(opLine)
+}
+
+make btEmitDisk(e, isRead) {
+    btEmitExpr(e.args[0])
+    btEmit("    push rax")
+    btEmitExpr(e.args[1])
+    btEmit("    cmp rdx, 512")
+    btEmit("    jb __halt_trap")
+    btEmit("    mov rbx, rax")
+    btEmit("    pop rax")
+    btEmitPick(isRead, "    call __nifla_disk_read", "    call __nifla_disk_write")
+}
+
+make btEmitFunction(s) {
+    gBtCode = []
+    gBtScopes = [nmNew()]
+    gBtNextOffset = 0
+    gBtExitLabel = "__fn_" + s.name + "_exit"
+    let info = { params: [], giveKind: "unknown" }
+    let fr = nmGet(gBvFuncs, s.name)
+    if fr.found {
+        info = fr.value
+    }
+    let kinds = []
+    let kr = nmGet(gBvParamKinds, s.name)
+    if kr.found {
+        kinds = kr.value
+    }
+    let paramStores = []
+    let index = 0
+    let registerIndex = 0
+    for pname in info.params {
+        let kind = "number"
+        if index < length(kinds) {
+            kind = kinds[index]
+        }
+        if kind == "unknown" {
+            kind = "number"
+        }
+        let entry = btDeclareVar(pname, kind)
+        let slots = btSlots(entry.kind)
+        let slot = 0
+        while slot < slots {
+            let off = entry.offset - 8 * (slots - 1 - slot)
+            append(paramStores, "    mov [rbp - " + numText(off) + "], " + gBtRegisters[registerIndex])
+            registerIndex = registerIndex + 1
+            slot = slot + 1
+        }
+        index = index + 1
+    }
+    for stmt in s.body {
+        btEmitStatement(stmt)
+    }
+    let bodyLines = gBtCode
+    gBtCode = []
+    btEmit("__fn_" + s.name + ":")
+    btEmit("    push rbp")
+    btEmit("    mov rbp, rsp")
+    let frameSize = wholediv(gBtNextOffset + 15, 16) * 16
+    btEmitWhen(frameSize > 0, "    sub rsp, " + numText(frameSize))
+    btEmit("    mov rax, [__guard_depth]")
+    btEmit("    cmp rax, 500")
+    btEmit("    jae __halt_trap")
+    btEmit("    inc rax")
+    btEmit("    mov [__guard_depth], rax")
+    for line in paramStores {
+        btEmit(line)
+    }
+    for line in bodyLines {
+        btEmit(line)
+    }
+    btEmit("    xor eax, eax")
+    btEmit("    xor edx, edx")
+    btEmit(gBtExitLabel + ":")
+    btEmit("    mov rcx, [__guard_depth]")
+    btEmit("    dec rcx")
+    btEmit("    mov [__guard_depth], rcx")
+    btEmit("    mov rsp, rbp")
+    btEmit("    pop rbp")
+    btEmit("    ret")
+    btEmit("")
+}
+
+make btEmitMain(stmts) {
+    gBtCode = []
+    gBtScopes = [nmNew()]
+    gBtNextOffset = 0
+    gBtExitLabel = "__nifla_main_exit"
+    for s in stmts {
+        if s.type != "define" {
+            btEmitStatement(s)
+        }
+    }
+    let bodyLines = gBtCode
+    gBtCode = []
+    btEmit("__nifla_main:")
+    btEmit("    push rbp")
+    btEmit("    mov rbp, rsp")
+    let frameSize = wholediv(gBtNextOffset + 15, 16) * 16
+    btEmitWhen(frameSize > 0, "    sub rsp, " + numText(frameSize))
+    for line in bodyLines {
+        btEmit(line)
+    }
+    btEmit(gBtExitLabel + ":")
+    btEmit("    mov rsp, rbp")
+    btEmit("    pop rbp")
+    btEmit("    ret")
+    btEmit("")
+}
+
+make btTranslateProgram(stmts, sourceName, sourceText, sourcePath, guest) {
+    gBtGuest = guest
+    gBtSourceText = sourceText
+    gBtSourcePath = sourcePath
+    gBtByteMap = nmNew()
+    gBtByteMapSeeded = false
+    gBtByteFailed = false
+    gBtSrcChars = []
+    gBtSrcBytes = []
+    gBtLineStarts = []
+    gBtSourceBuilt = false
+    gBtUsedSpans = []
+    gBtLiterals = []
+    gBtFloors = []
+    gBtLabelCounter = 0
+    gBtCode = []
+    let functionCode = []
+    for s in stmts {
+        if s.type == "define" {
+            btEmitFunction(s)
+            for line in gBtCode {
+                append(functionCode, line)
+            }
+            gBtCode = []
+        }
+    }
+    btEmitMain(stmts)
+    let mainCode = gBtCode
+    gBtCode = []
+    let result = okVal("")
+    if gBtByteFailed {
+        result = errAt(1, "A piece of text in this program holds a character whose bytes I could not reckon.")
+    } else {
+        let out = btHeadLines(sourceName)
+        for line in functionCode {
+            append(out, line)
+        }
+        for line in mainCode {
+            append(out, line)
+        }
+        let tail = btTailLines()
+        for line in tail {
+            append(out, line)
+        }
+        result = okVal(join(out, "\n") + "\n")
+    }
+    give result
+}
+
+make btHeadLines(sourceName) {
+    let out = []
+    if gBtGuest {
+    append(out, "// A guest, from " + sourceName + ", by niflac --bare --guest (Nifla Stone 17).")
+    append(out, "// No boot of its own: it is linked for the doorstep at")
+    append(out, "// 2 MiB (0x200000), where a host copies its image, checks")
+    append(out, "// its checksum, and calls its first byte with a desk in rdi.")
+    } else {
+    append(out, "// Bare metal, from " + sourceName + ", by niflac --bare (Nifla Stone 11).")
+    append(out, "// No operating system, no runtime: a multiboot header, a")
+    append(out, "// 32-bit stub that builds page tables and switches the")
+    append(out, "// processor into 64-bit long mode, then the program itself.")
+    }
+    append(out, "    .intel_syntax noprefix")
+    append(out, "")
+    if gBtGuest {
+    append(out, "// The door (Stone 17): the host calls here with the")
+    append(out, "// desk's address in rdi. The desk is eight numbers:")
+    append(out, "// +0 the desk's version (1), +8 the host's gift (a")
+    append(out, "// number, read with guestvalue()), +16 the guest's")
+    append(out, "// parting number (set with guestgive()), +24 the end")
+    append(out, "// of the guest region (the half megabyte from the")
+    append(out, "// doorstep; its heap starts at its own image's end")
+    append(out, "// inside that region), +32/+40 the screen")
+    append(out, "// cursor's row and column, handed over and handed")
+    append(out, "// back so host and guest share one page. The guest")
+    append(out, "// does not clear the screen, does not touch the")
+    append(out, "// interrupt table or the memory map — those are the")
+    append(out, "// host's. When its program ends, it comes back")
+    append(out, "// through the ret at the end of this door with its")
+    append(out, "// parting number in rax.")
+    append(out, "    .section .text")
+    append(out, "    .code64")
+    append(out, "    .globl __guest_entry")
+    append(out, "__guest_entry:")
+    append(out, "    mov [__desk], rdi")
+    append(out, "    lea rax, [rip + __kernel_end]")
+    append(out, "    add rax, 15")
+    append(out, "    and rax, -16")
+    append(out, "    mov [__heap_cursor], rax")
+    append(out, "    mov rax, [rdi + 24]")
+    append(out, "    mov [__heap_limit], rax")
+    append(out, "    mov rax, [rdi + 32]")
+    append(out, "    mov [__cursor_row], rax")
+    append(out, "    mov rax, [rdi + 40]")
+    append(out, "    mov [__cursor_col], rax")
+    append(out, "    call __nifla_main")
+    append(out, "    mov rax, [__desk]")
+    append(out, "    mov rcx, [__cursor_row]")
+    append(out, "    mov [rax + 32], rcx")
+    append(out, "    mov rcx, [__cursor_col]")
+    append(out, "    mov [rax + 40], rcx")
+    append(out, "    mov rax, [rax + 16]")
+    append(out, "    ret")
+    append(out, "__halt_trap:")
+    append(out, "    cli")
+    append(out, "    hlt")
+    append(out, "    jmp __halt_trap")
+    append(out, "")
+    } else {
+    append(out, "// The multiboot header stands as the first bytes of")
+    append(out, "// the text section itself (Stone 16): a loader looks")
+    append(out, "// for it in the first 8192 bytes of the file, and a")
+    append(out, "// section of its own drifted past that window as the")
+    append(out, "// runtime grew. First in .text, it cannot drift.")
+    append(out, "    .section .text")
+    append(out, "    .align 4")
+    append(out, "    .long 0x1BADB002")
+    append(out, "    .long 0x2")
+    append(out, "    .long -(0x1BADB002 + 0x2)")
+    append(out, "    .code32")
+    append(out, "    .globl _start32")
+    append(out, "_start32:")
+    append(out, "    mov [__mb_info], ebx")
+    append(out, "    mov [__mb_magic], eax")
+    append(out, "    mov esp, offset __stack_top")
+    append(out, "    mov eax, offset __pdpt")
+    append(out, "    or eax, 0x3")
+    append(out, "    mov [__pml4], eax")
+    append(out, "    mov eax, offset __pd")
+    append(out, "    or eax, 0x3")
+    append(out, "    mov [__pdpt], eax")
+    append(out, "    xor ecx, ecx")
+    append(out, "__pd_fill:")
+    append(out, "    mov eax, ecx")
+    append(out, "    shl eax, 21")
+    append(out, "    or eax, 0x83")
+    append(out, "    mov [__pd + ecx * 8], eax")
+    append(out, "    mov dword ptr [__pd + ecx * 8 + 4], 0")
+    append(out, "    inc ecx")
+    append(out, "    cmp ecx, 512")
+    append(out, "    jne __pd_fill")
+    append(out, "    mov eax, offset __pml4")
+    append(out, "    mov cr3, eax")
+    append(out, "    mov eax, cr4")
+    append(out, "    or eax, 0x20")
+    append(out, "    mov cr4, eax")
+    append(out, "    mov ecx, 0xC0000080")
+    append(out, "    rdmsr")
+    append(out, "    or eax, 0x100")
+    append(out, "    wrmsr")
+    append(out, "    mov eax, cr0")
+    append(out, "    or eax, 0x80000000")
+    append(out, "    mov cr0, eax")
+    append(out, "    lgdt [__gdt_ptr]")
+    append(out, "    push 0x08")
+    append(out, "    push offset __long_entry")
+    append(out, "    retf")
+    append(out, "")
+    append(out, "    .code64")
+    append(out, "__long_entry:")
+    append(out, "    mov ax, 0x10")
+    append(out, "    mov ds, ax")
+    append(out, "    mov es, ax")
+    append(out, "    mov fs, ax")
+    append(out, "    mov gs, ax")
+    append(out, "    mov ss, ax")
+    append(out, "    call __nifla_memory_init")
+    append(out, "    call __nifla_screen_init")
+    append(out, "    call __nifla_interrupts_init")
+    append(out, "    call __nifla_main")
+    append(out, "__halt_trap:")
+    append(out, "    cli")
+    append(out, "    hlt")
+    append(out, "    jmp __halt_trap")
+    append(out, "")
+    }
+    append(out, "// Text comparison: rax/r8 hold the two texts (pointer in")
+    append(out, "// rax and rcx, count in rdx and r8). Answers 1 or 0 in rax.")
+    append(out, "__nifla_text_eq:")
+    append(out, "    cmp rdx, r8")
+    append(out, "    jne __text_eq_no")
+    append(out, "    xor r9d, r9d")
+    append(out, "__text_eq_loop:")
+    append(out, "    cmp r9, rdx")
+    append(out, "    jae __text_eq_yes")
+    append(out, "    movzx r10d, byte ptr [rax + r9]")
+    append(out, "    cmp r10b, byte ptr [rcx + r9]")
+    append(out, "    jne __text_eq_no")
+    append(out, "    inc r9")
+    append(out, "    jmp __text_eq_loop")
+    append(out, "__text_eq_yes:")
+    append(out, "    mov rax, 1")
+    append(out, "    ret")
+    append(out, "__text_eq_no:")
+    append(out, "    xor eax, eax")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Stone 13: the machine learns what memory it has.")
+    append(out, "// The loader handed over a map of the machine's")
+    append(out, "// memory (the multiboot map, asked for in the")
+    append(out, "// header); this walk adds up the usable stretches")
+    append(out, "// into __mem_total, and finds the usable stretch")
+    append(out, "// the program itself sits in — everything from the")
+    append(out, "// program's end to that stretch's end is the heap.")
+    append(out, "// The allocator is a bump allocator: each makebytes")
+    append(out, "// takes the next slice, rounded up to a whole 16")
+    append(out, "// bytes, and zeroes it. Nothing is ever handed")
+    append(out, "// back — there is no free — and a request past the")
+    append(out, "// heap's end, or past one block's 16 MiB cap, stops")
+    append(out, "// the machine rather than corrupt anything.")
+    append(out, "__nifla_memory_init:")
+    append(out, "    mov eax, [__mb_magic]")
+    append(out, "    cmp eax, 0x2BADB002")
+    append(out, "    jne __mem_done")
+    append(out, "    mov esi, [__mb_info]")
+    append(out, "    test rsi, rsi")
+    append(out, "    jz __mem_done")
+    append(out, "    mov eax, [rsi]")
+    append(out, "    test eax, 0x40")
+    append(out, "    jz __mem_done")
+    append(out, "    mov ecx, [rsi + 44]")
+    append(out, "    mov esi, [rsi + 48]")
+    append(out, "    mov rdx, rsi")
+    append(out, "    add rdx, rcx")
+    append(out, "__mem_walk:")
+    append(out, "    cmp rsi, rdx")
+    append(out, "    jae __mem_done")
+    append(out, "    cmp dword ptr [rsi + 20], 1")
+    append(out, "    jne __mem_next")
+    append(out, "    mov rax, [rsi + 12]")
+    append(out, "    add [__mem_total], rax")
+    append(out, "    mov rax, [rsi + 4]")
+    append(out, btAddrLoad("r8", "__kernel_end"))
+    append(out, "    cmp r8, rax")
+    append(out, "    jb __mem_next")
+    append(out, "    add rax, [rsi + 12]")
+    append(out, "    cmp r8, rax")
+    append(out, "    jae __mem_next")
+    append(out, "    mov [__heap_limit], rax")
+    append(out, "__mem_next:")
+    append(out, "    mov eax, [rsi]")
+    append(out, "    add rax, 4")
+    append(out, "    add rsi, rax")
+    append(out, "    jmp __mem_walk")
+    append(out, "__mem_done:")
+    append(out, btAddrLoad("rax", "__kernel_end"))
+    append(out, "    add rax, 15")
+    append(out, "    and rax, -16")
+    append(out, "    mov [__heap_cursor], rax")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// makebytes' engine: a count in rax becomes a block")
+    append(out, "// — its address in rax, its count in rdx.")
+    append(out, "__nifla_alloc:")
+    append(out, "    cmp rax, 16777216")
+    append(out, "    ja __halt_trap")
+    append(out, "    mov rdx, rax")
+    append(out, "    add rax, 15")
+    append(out, "    and rax, -16")
+    append(out, "    mov r8, rax")
+    append(out, "    mov rax, [__heap_cursor]")
+    append(out, "    mov rcx, rax")
+    append(out, "    add rcx, r8")
+    append(out, "    cmp rcx, [__heap_limit]")
+    append(out, "    ja __halt_trap")
+    append(out, "    mov [__heap_cursor], rcx")
+    append(out, "    mov r9, rax")
+    append(out, "    mov rdi, rax")
+    append(out, "    mov rcx, r8")
+    append(out, "    xor eax, eax")
+    append(out, "    rep stosb")
+    append(out, "    mov rax, r9")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Stone 15: words on the screen. A piece of text is")
+    append(out, "// still an address and a count; a joined text is a")
+    append(out, "// fresh block from the allocator holding the two")
+    append(out, "// sides side by side, and a number's written form is")
+    append(out, "// built digit by digit into a fresh block of its")
+    append(out, "// own. 'say' writes at a cursor the runtime keeps,")
+    append(out, "// wrapping at the row's end, stepping down a row at")
+    append(out, "// a newline, and scrolling the screen up when it")
+    append(out, "// fills. The writing color is the plain one, 0x07;")
+    append(out, "// placing words at chosen spots in chosen colors is")
+    append(out, "// the screen library's work (barelib/screen.nifla).")
+    append(out, "__nifla_screen_init:")
+    append(out, "    mov rdi, 0xB8000")
+    append(out, "    mov rcx, 2000")
+    append(out, "    mov ax, 0x0720")
+    append(out, "    rep stosw")
+    append(out, "    mov qword ptr [__cursor_row], 0")
+    append(out, "    mov qword ptr [__cursor_col], 0")
+    append(out, "    ret")
+    append(out, "__nifla_numtext:")
+    append(out, "    mov rcx, rax")
+    append(out, "    xor r8d, r8d")
+    append(out, "    test rax, rax")
+    append(out, "    jns __nt_digits")
+    append(out, "    mov r8d, 1")
+    append(out, "    neg rcx")
+    append(out, "__nt_digits:")
+    append(out, "    lea rsi, [__numtext_buf + 32]")
+    append(out, "    mov r9, rsi")
+    append(out, "    mov rax, rcx")
+    append(out, "    mov rcx, 10")
+    append(out, "__nt_loop:")
+    append(out, "    xor edx, edx")
+    append(out, "    div rcx")
+    append(out, "    add dl, 48")
+    append(out, "    dec rsi")
+    append(out, "    mov byte ptr [rsi], dl")
+    append(out, "    test rax, rax")
+    append(out, "    jnz __nt_loop")
+    append(out, "    test r8d, r8d")
+    append(out, "    jz __nt_copy")
+    append(out, "    dec rsi")
+    append(out, "    mov byte ptr [rsi], 45")
+    append(out, "__nt_copy:")
+    append(out, "    mov rax, r9")
+    append(out, "    sub rax, rsi")
+    append(out, "    push rsi")
+    append(out, "    push rax")
+    append(out, "    call __nifla_alloc")
+    append(out, "    pop rcx")
+    append(out, "    pop rsi")
+    append(out, "    mov rdi, rax")
+    append(out, "    rep movsb")
+    append(out, "    ret")
+    append(out, "__nifla_join:")
+    append(out, "    push rbx")
+    append(out, "    push r12")
+    append(out, "    mov rbx, rax")
+    append(out, "    mov r12, rcx")
+    append(out, "    push rdx")
+    append(out, "    push r8")
+    append(out, "    mov rax, rdx")
+    append(out, "    add rax, r8")
+    append(out, "    call __nifla_alloc")
+    append(out, "    pop r8")
+    append(out, "    pop rcx")
+    append(out, "    mov rdi, rax")
+    append(out, "    push rax")
+    append(out, "    push rdx")
+    append(out, "    mov rsi, rbx")
+    append(out, "    rep movsb")
+    append(out, "    mov rsi, r12")
+    append(out, "    mov rcx, r8")
+    append(out, "    rep movsb")
+    append(out, "    pop rdx")
+    append(out, "    pop rax")
+    append(out, "    pop r12")
+    append(out, "    pop rbx")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Stone 39: reading a number out of text. The text")
+    append(out, "// is in rax (its address) and rdx (its count); the")
+    append(out, "// number comes back in rax. The writing read is")
+    append(out, "// the hosted one — a '-' first when the number is")
+    append(out, "// below zero, then digits, then at most one '.'")
+    append(out, "// with digits after it — as far as bare numbers")
+    append(out, "// reach: they are whole, so a fraction's digits")
+    append(out, "// must all be zero for the text to name a bare")
+    append(out, "// number ('3.0' reads as 3, exactly), and the")
+    append(out, "// magnitude must fit the machine word (up to")
+    append(out, "// 9223372036854775807, or one more below zero).")
+    append(out, "// Anything else — letters, spaces, an empty text,")
+    append(out, "// a lone '-', a fraction that is not zero, a")
+    append(out, "// magnitude too big to hold — stops the machine:")
+    append(out, "// the hosted doors answer such a text with a")
+    append(out, "// problem 'attempt' can catch, but bare metal has")
+    append(out, "// no 'nothing' to answer with, and stopping is")
+    append(out, "// its way of refusing.")
+    append(out, "__nifla_asnumber:")
+    append(out, "    mov rsi, rax")
+    append(out, "    mov rcx, rdx")
+    append(out, "    xor r8d, r8d")
+    append(out, "    xor r9d, r9d")
+    append(out, "    mov r10, 922337203685477580")
+    append(out, "    test rcx, rcx")
+    append(out, "    je __halt_trap")
+    append(out, "    cmp byte ptr [rsi], 45")
+    append(out, "    jne __an_whole")
+    append(out, "    mov r9d, 1")
+    append(out, "    inc rsi")
+    append(out, "    dec rcx")
+    append(out, "__an_whole:")
+    append(out, "    test rcx, rcx")
+    append(out, "    je __halt_trap")
+    append(out, "    movzx eax, byte ptr [rsi]")
+    append(out, "    sub eax, 48")
+    append(out, "    cmp eax, 9")
+    append(out, "    ja __halt_trap")
+    append(out, "__an_digit:")
+    append(out, "    mov r11d, eax")
+    append(out, "    cmp r8, r10")
+    append(out, "    ja __halt_trap")
+    append(out, "    jne __an_take")
+    append(out, "    lea rax, [r9 + 7]")
+    append(out, "    cmp r11, rax")
+    append(out, "    ja __halt_trap")
+    append(out, "__an_take:")
+    append(out, "    imul r8, r8, 10")
+    append(out, "    add r8, r11")
+    append(out, "    inc rsi")
+    append(out, "    dec rcx")
+    append(out, "    test rcx, rcx")
+    append(out, "    je __an_done")
+    append(out, "    movzx eax, byte ptr [rsi]")
+    append(out, "    sub eax, 48")
+    append(out, "    cmp eax, 9")
+    append(out, "    jbe __an_digit")
+    append(out, "    cmp byte ptr [rsi], 46")
+    append(out, "    jne __halt_trap")
+    append(out, "    inc rsi")
+    append(out, "    dec rcx")
+    append(out, "    test rcx, rcx")
+    append(out, "    je __halt_trap")
+    append(out, "__an_frac:")
+    append(out, "    movzx eax, byte ptr [rsi]")
+    append(out, "    sub eax, 48")
+    append(out, "    cmp eax, 9")
+    append(out, "    ja __halt_trap")
+    append(out, "    test eax, eax")
+    append(out, "    jne __halt_trap")
+    append(out, "    inc rsi")
+    append(out, "    dec rcx")
+    append(out, "    test rcx, rcx")
+    append(out, "    jne __an_frac")
+    append(out, "__an_done:")
+    append(out, "    mov rax, r8")
+    append(out, "    test r9d, r9d")
+    append(out, "    je __an_ret")
+    append(out, "    neg rax")
+    append(out, "__an_ret:")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Stone 44: reading text out of a block of bytes.")
+    append(out, "// The block is in rax (its address) and rdx (its")
+    append(out, "// count); the text comes back in rax and rdx the")
+    append(out, "// same way, in a fresh block from the allocator")
+    append(out, "// (three times the block's count is room enough:")
+    append(out, "// a letter never takes more room as text than it")
+    append(out, "// did as bytes, except a byte that is no letter")
+    append(out, "// at all, which takes the replacement mark's")
+    append(out, "// three). The bytes are read as UTF-8, the")
+    append(out, "// writing the hosted doors read: a letter's whole")
+    append(out, "// sequence of bytes passes through as it stands;")
+    append(out, "// a run of bytes that is not a letter — a byte")
+    append(out, "// that starts nothing, a letter cut short, a")
+    append(out, "// sequence written overlong or into the marks")
+    append(out, "// set apart — stands as the one replacement mark")
+    append(out, "// (U+FFFD, written EF BF BD), never dropped,")
+    append(out, "// never guessed at. The walk follows the rule")
+    append(out, "// every reader follows: a cut-short letter counts")
+    append(out, "// its whole sound prefix as the one run, and the")
+    append(out, "// byte that broke it is read afresh after the")
+    append(out, "// mark.")
+    append(out, "__nifla_astext:")
+    append(out, "    push rbx")
+    append(out, "    push r12")
+    append(out, "    push r13")
+    append(out, "    mov rbx, rax")
+    append(out, "    mov r12, rdx")
+    append(out, "    lea rax, [rdx + rdx*2]")
+    append(out, "    call __nifla_alloc")
+    append(out, "    mov r13, rax")
+    append(out, "    mov rdi, rax")
+    append(out, "    mov rsi, rbx")
+    append(out, "    mov rcx, r12")
+    append(out, "__at_loop:")
+    append(out, "    test rcx, rcx")
+    append(out, "    je __at_done")
+    append(out, "    movzx eax, byte ptr [rsi]")
+    append(out, "    cmp eax, 0x80")
+    append(out, "    jb __at_copy1")
+    append(out, "    cmp eax, 0xC2")
+    append(out, "    jb __at_mark1")
+    append(out, "    cmp eax, 0xE0")
+    append(out, "    jb __at_2byte")
+    append(out, "    je __at_e0")
+    append(out, "    cmp eax, 0xED")
+    append(out, "    jb __at_3byte")
+    append(out, "    je __at_ed")
+    append(out, "    cmp eax, 0xF0")
+    append(out, "    jb __at_3byte")
+    append(out, "    je __at_f0")
+    append(out, "    cmp eax, 0xF4")
+    append(out, "    jb __at_4byte")
+    append(out, "    je __at_f4")
+    append(out, "    jmp __at_mark1")
+    append(out, "__at_2byte:")
+    append(out, "    mov r8, 2")
+    append(out, "    mov r9, 0x80")
+    append(out, "    mov r10, 0xBF")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_e0:")
+    append(out, "    mov r8, 3")
+    append(out, "    mov r9, 0xA0")
+    append(out, "    mov r10, 0xBF")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_3byte:")
+    append(out, "    mov r8, 3")
+    append(out, "    mov r9, 0x80")
+    append(out, "    mov r10, 0xBF")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_ed:")
+    append(out, "    mov r8, 3")
+    append(out, "    mov r9, 0x80")
+    append(out, "    mov r10, 0x9F")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_f0:")
+    append(out, "    mov r8, 4")
+    append(out, "    mov r9, 0x90")
+    append(out, "    mov r10, 0xBF")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_4byte:")
+    append(out, "    mov r8, 4")
+    append(out, "    mov r9, 0x80")
+    append(out, "    mov r10, 0xBF")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_f4:")
+    append(out, "    mov r8, 4")
+    append(out, "    mov r9, 0x80")
+    append(out, "    mov r10, 0x8F")
+    append(out, "    jmp __at_seq")
+    append(out, "__at_seq:")
+    append(out, "    mov r11, 1")
+    append(out, "__at_seq_check:")
+    append(out, "    cmp r11, r8")
+    append(out, "    je __at_copyseq")
+    append(out, "    cmp r11, rcx")
+    append(out, "    je __at_markprefix")
+    append(out, "    movzx eax, byte ptr [rsi + r11]")
+    append(out, "    cmp r11, 1")
+    append(out, "    je __at_seq_first")
+    append(out, "    cmp eax, 0x80")
+    append(out, "    jb __at_markprefix")
+    append(out, "    cmp eax, 0xBF")
+    append(out, "    ja __at_markprefix")
+    append(out, "    inc r11")
+    append(out, "    jmp __at_seq_check")
+    append(out, "__at_seq_first:")
+    append(out, "    cmp eax, r9d")
+    append(out, "    jb __at_markprefix")
+    append(out, "    cmp eax, r10d")
+    append(out, "    ja __at_markprefix")
+    append(out, "    inc r11")
+    append(out, "    jmp __at_seq_check")
+    append(out, "__at_copyseq:")
+    append(out, "    push rcx")
+    append(out, "    mov rcx, r8")
+    append(out, "    rep movsb")
+    append(out, "    pop rcx")
+    append(out, "    sub rcx, r8")
+    append(out, "    jmp __at_loop")
+    append(out, "__at_markprefix:")
+    append(out, "    mov byte ptr [rdi], 0xEF")
+    append(out, "    mov byte ptr [rdi + 1], 0xBF")
+    append(out, "    mov byte ptr [rdi + 2], 0xBD")
+    append(out, "    add rdi, 3")
+    append(out, "    add rsi, r11")
+    append(out, "    sub rcx, r11")
+    append(out, "    jmp __at_loop")
+    append(out, "__at_mark1:")
+    append(out, "    mov byte ptr [rdi], 0xEF")
+    append(out, "    mov byte ptr [rdi + 1], 0xBF")
+    append(out, "    mov byte ptr [rdi + 2], 0xBD")
+    append(out, "    add rdi, 3")
+    append(out, "    inc rsi")
+    append(out, "    dec rcx")
+    append(out, "    jmp __at_loop")
+    append(out, "__at_copy1:")
+    append(out, "    movzx eax, byte ptr [rsi]")
+    append(out, "    mov byte ptr [rdi], al")
+    append(out, "    inc rsi")
+    append(out, "    inc rdi")
+    append(out, "    dec rcx")
+    append(out, "    jmp __at_loop")
+    append(out, "__at_done:")
+    append(out, "    mov rax, r13")
+    append(out, "    mov rdx, rdi")
+    append(out, "    sub rdx, r13")
+    append(out, "    pop r13")
+    append(out, "    pop r12")
+    append(out, "    pop rbx")
+    append(out, "    ret")
+    append(out, "__nifla_say_text:")
+    append(out, "    push rbx")
+    append(out, "    push r12")
+    append(out, "    push r13")
+    append(out, "    mov rbx, rax")
+    append(out, "    mov r12, rdx")
+    append(out, "    xor r13d, r13d")
+    append(out, "__say_loop:")
+    append(out, "    cmp r13, r12")
+    append(out, "    jae __say_done")
+    append(out, "    movzx eax, byte ptr [rbx + r13]")
+    append(out, "    inc r13")
+    append(out, "    cmp al, 10")
+    append(out, "    je __say_nl")
+    append(out, "    mov rcx, [__cursor_row]")
+    append(out, "    imul rcx, 80")
+    append(out, "    add rcx, [__cursor_col]")
+    append(out, "    mov byte ptr [0xB8000 + rcx * 2], al")
+    append(out, "    mov byte ptr [0xB8000 + rcx * 2 + 1], 0x07")
+    append(out, "    inc qword ptr [__cursor_col]")
+    append(out, "    cmp qword ptr [__cursor_col], 80")
+    append(out, "    jb __say_loop")
+    append(out, "__say_nl:")
+    append(out, "    call __nifla_say_newline")
+    append(out, "    jmp __say_loop")
+    append(out, "__say_done:")
+    append(out, "    pop r13")
+    append(out, "    pop r12")
+    append(out, "    pop rbx")
+    append(out, "    ret")
+    append(out, "__nifla_say_newline:")
+    append(out, "    mov qword ptr [__cursor_col], 0")
+    append(out, "    inc qword ptr [__cursor_row]")
+    append(out, "    cmp qword ptr [__cursor_row], 25")
+    append(out, "    jb __nl_done")
+    append(out, "    mov rsi, 0xB8000 + 160")
+    append(out, "    mov rdi, 0xB8000")
+    append(out, "    mov rcx, 3840")
+    append(out, "    rep movsb")
+    append(out, "    mov rdi, 0xB8000 + 3840")
+    append(out, "    mov rcx, 80")
+    append(out, "    mov ax, 0x0720")
+    append(out, "    rep stosw")
+    append(out, "    mov qword ptr [__cursor_row], 24")
+    append(out, "__nl_done:")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Stone 16: a disk. The drive is the primary IDE")
+    append(out, "// channel's master, spoken to in ATA PIO — ports")
+    append(out, "// 0x1F0 to 0x1F7, LBA28 addressing, one 512-byte")
+    append(out, "// sector at a time, polled: wait for the drive to")
+    append(out, "// be ready, set the sector address, give the read")
+    append(out, "// (0x20) or write (0x30) command, wait for the")
+    append(out, "// data request, and move 256 words through the")
+    append(out, "// data port. A write is followed by a cache flush")
+    append(out, "// (0xE7), so what was written is on the disk, not")
+    append(out, "// only in the drive's memory. A drive that never")
+    append(out, "// answers, or answers with an error, stops the")
+    append(out, "// machine — except disksectors(), which asks the")
+    append(out, "// drive who it is (0xEC) and simply answers 0 when")
+    append(out, "// no drive replies.")
+    append(out, "__nifla_disk_read:")
+    append(out, "    mov rsi, rbx")
+    append(out, "    mov r8, rax")
+    append(out, "    call __disk_setup")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    mov al, 0x20")
+    append(out, "    out dx, al")
+    append(out, "    call __disk_wait_drq")
+    append(out, "    mov rdi, rsi")
+    append(out, "    mov rcx, 256")
+    append(out, "    mov edx, 0x1F0")
+    append(out, "    rep insw")
+    append(out, "    mov rax, 512")
+    append(out, "    ret")
+    append(out, "__nifla_disk_write:")
+    append(out, "    mov rsi, rbx")
+    append(out, "    mov r8, rax")
+    append(out, "    call __disk_setup")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    mov al, 0x30")
+    append(out, "    out dx, al")
+    append(out, "    call __disk_wait_drq")
+    append(out, "    mov rcx, 256")
+    append(out, "    mov edx, 0x1F0")
+    append(out, "    rep outsw")
+    append(out, "    call __disk_wait_ready")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    mov al, 0xE7")
+    append(out, "    out dx, al")
+    append(out, "    call __disk_wait_ready")
+    append(out, "    mov rax, 512")
+    append(out, "    ret")
+    append(out, "__disk_setup:")
+    append(out, "    call __disk_wait_ready")
+    append(out, "    mov edx, 0x1F6")
+    append(out, "    mov rax, r8")
+    append(out, "    shr rax, 24")
+    append(out, "    and al, 0x0F")
+    append(out, "    or al, 0xE0")
+    append(out, "    out dx, al")
+    append(out, "    call __disk_wait_ready")
+    append(out, "    mov edx, 0x1F2")
+    append(out, "    mov al, 1")
+    append(out, "    out dx, al")
+    append(out, "    mov edx, 0x1F3")
+    append(out, "    mov rax, r8")
+    append(out, "    out dx, al")
+    append(out, "    mov edx, 0x1F4")
+    append(out, "    mov rax, r8")
+    append(out, "    shr rax, 8")
+    append(out, "    out dx, al")
+    append(out, "    mov edx, 0x1F5")
+    append(out, "    mov rax, r8")
+    append(out, "    shr rax, 16")
+    append(out, "    out dx, al")
+    append(out, "    ret")
+    append(out, "__disk_wait_ready:")
+    append(out, "    mov rcx, 10000000")
+    append(out, "__dwr_loop:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    in al, dx")
+    append(out, "    cmp al, 0xFF")
+    append(out, "    je __halt_trap")
+    append(out, "    test al, 0x80")
+    append(out, "    jz __dwr_check")
+    append(out, "    dec rcx")
+    append(out, "    jnz __dwr_loop")
+    append(out, "    jmp __halt_trap")
+    append(out, "__dwr_check:")
+    append(out, "    test al, 0x21")
+    append(out, "    jnz __halt_trap")
+    append(out, "    ret")
+    append(out, "__disk_wait_drq:")
+    append(out, "    mov rcx, 10000000")
+    append(out, "__dwd_loop:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    in al, dx")
+    append(out, "    cmp al, 0xFF")
+    append(out, "    je __halt_trap")
+    append(out, "    test al, 0x80")
+    append(out, "    jnz __dwd_wait")
+    append(out, "    test al, 0x21")
+    append(out, "    jnz __halt_trap")
+    append(out, "    test al, 0x08")
+    append(out, "    jnz __dwd_done")
+    append(out, "__dwd_wait:")
+    append(out, "    dec rcx")
+    append(out, "    jnz __dwd_loop")
+    append(out, "    jmp __halt_trap")
+    append(out, "__dwd_done:")
+    append(out, "    ret")
+    append(out, "__nifla_disk_sectors:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    in al, dx")
+    append(out, "    cmp al, 0xFF")
+    append(out, "    je __ds_none")
+    append(out, "    test al, al")
+    append(out, "    jz __ds_none")
+    append(out, "    mov rcx, 10000000")
+    append(out, "__ds_wait:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    in al, dx")
+    append(out, "    test al, 0x80")
+    append(out, "    jz __ds_sel")
+    append(out, "    dec rcx")
+    append(out, "    jnz __ds_wait")
+    append(out, "    jmp __ds_none")
+    append(out, "__ds_sel:")
+    append(out, "    mov edx, 0x1F6")
+    append(out, "    mov al, 0xE0")
+    append(out, "    out dx, al")
+    append(out, "    mov rcx, 100000")
+    append(out, "__ds_settle:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    in al, dx")
+    append(out, "    test al, 0x80")
+    append(out, "    jz __ds_cmd")
+    append(out, "    dec rcx")
+    append(out, "    jnz __ds_settle")
+    append(out, "    jmp __ds_none")
+    append(out, "__ds_cmd:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    mov al, 0xEC")
+    append(out, "    out dx, al")
+    append(out, "    mov rcx, 10000000")
+    append(out, "__ds_drq:")
+    append(out, "    mov edx, 0x1F7")
+    append(out, "    in al, dx")
+    append(out, "    cmp al, 0xFF")
+    append(out, "    je __ds_none")
+    append(out, "    test al, 0x80")
+    append(out, "    jnz __ds_drq_wait")
+    append(out, "    test al, 0x01")
+    append(out, "    jnz __ds_none")
+    append(out, "    test al, 0x08")
+    append(out, "    jnz __ds_read")
+    append(out, "__ds_drq_wait:")
+    append(out, "    dec rcx")
+    append(out, "    jnz __ds_drq")
+    append(out, "    jmp __ds_none")
+    append(out, "__ds_read:")
+    append(out, btAddrLoad("rdi", "__disk_id_buf"))
+    append(out, "    mov rcx, 256")
+    append(out, "    mov edx, 0x1F0")
+    append(out, "    rep insw")
+    append(out, "    mov eax, dword ptr [__disk_id_buf + 120]")
+    append(out, "    ret")
+    append(out, "__ds_none:")
+    append(out, "    xor eax, eax")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Stone 12: the machine learns to listen. An interrupt")
+    append(out, "// table is built and loaded; the two interrupt")
+    append(out, "// controllers (the PIC pair) are remapped so the timer")
+    append(out, "// arrives as interrupt 32 and the keyboard as 33; the")
+    append(out, "// timer chip (the PIT) is set ticking a hundred times")
+    append(out, "// a second; then interrupts are switched on. Every")
+    append(out, "// door but the timer's and the keyboard's leads to a")
+    append(out, "// stub that simply returns — a door nobody uses yet.")
+    append(out, "__nifla_interrupts_init:")
+    append(out, "    lea rdi, [__idt]")
+    append(out, btAddrLoad("rax", "__irq_default"))
+    append(out, "    mov rcx, 256")
+    append(out, "__idt_fill:")
+    append(out, "    call __idt_set")
+    append(out, "    add rdi, 16")
+    append(out, "    dec rcx")
+    append(out, "    jne __idt_fill")
+    append(out, "    lea rdi, [__idt + 512]")
+    append(out, btAddrLoad("rax", "__irq_timer"))
+    append(out, "    call __idt_set")
+    append(out, "    lea rdi, [__idt + 528]")
+    append(out, btAddrLoad("rax", "__irq_keyboard"))
+    append(out, "    call __idt_set")
+    append(out, "    mov al, 0x11")
+    append(out, "    out 0x20, al")
+    append(out, "    call __io_wait")
+    append(out, "    out 0xA0, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x20")
+    append(out, "    out 0x21, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x28")
+    append(out, "    out 0xA1, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x04")
+    append(out, "    out 0x21, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x02")
+    append(out, "    out 0xA1, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x01")
+    append(out, "    out 0x21, al")
+    append(out, "    call __io_wait")
+    append(out, "    out 0xA1, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0xF8")
+    append(out, "    out 0x21, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0xFF")
+    append(out, "    out 0xA1, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x36")
+    append(out, "    out 0x43, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x9C")
+    append(out, "    out 0x40, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov al, 0x2E")
+    append(out, "    out 0x40, al")
+    append(out, "    call __io_wait")
+    append(out, "    mov rcx, 16")
+    append(out, "__kbd_drain:")
+    append(out, "    in al, 0x64")
+    append(out, "    test al, 1")
+    append(out, "    jz __kbd_drained")
+    append(out, "    in al, 0x60")
+    append(out, "    dec rcx")
+    append(out, "    jne __kbd_drain")
+    append(out, "__kbd_drained:")
+    append(out, "    lidt [__idt_ptr]")
+    append(out, "    sti")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// Writes one interrupt-gate entry: rax holds the")
+    append(out, "// handler's address, rdi the entry's. Keeps both.")
+    append(out, "__idt_set:")
+    append(out, "    mov word ptr [rdi], ax")
+    append(out, "    mov word ptr [rdi + 2], 0x08")
+    append(out, "    mov byte ptr [rdi + 4], 0")
+    append(out, "    mov byte ptr [rdi + 5], 0x8E")
+    append(out, "    push rax")
+    append(out, "    shr rax, 16")
+    append(out, "    mov word ptr [rdi + 6], ax")
+    append(out, "    shr rax, 16")
+    append(out, "    mov dword ptr [rdi + 8], eax")
+    append(out, "    pop rax")
+    append(out, "    mov dword ptr [rdi + 12], 0")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "// A breath between writings to the old, slow chips:")
+    append(out, "// a write to port 0x80, which nothing answers.")
+    append(out, "__io_wait:")
+    append(out, "    out 0x80, al")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__irq_default:")
+    append(out, "    iretq")
+    append(out, "")
+    append(out, "// The timer's knock, a hundred times a second: one")
+    append(out, "// more tick counted, the controller told 'seen'.")
+    append(out, "__irq_timer:")
+    append(out, "    inc qword ptr [__ticks]")
+    append(out, "    push rax")
+    append(out, "    mov al, 0x20")
+    append(out, "    out 0x20, al")
+    append(out, "    pop rax")
+    append(out, "    iretq")
+    append(out, "")
+    append(out, "// The keyboard's knock: the scancode waiting at port")
+    append(out, "// 0x60 goes into the ring buffer (64 bytes; when the")
+    append(out, "// ring is full the new byte is dropped — the oldest")
+    append(out, "// news is kept), the controller is told 'seen', and")
+    append(out, "// the program reads the ring with readkey().")
+    append(out, "__irq_keyboard:")
+    append(out, "    push rax")
+    append(out, "    push rbx")
+    append(out, "    push rcx")
+    append(out, "    in al, 0x60")
+    append(out, "    mov rbx, [__key_head]")
+    append(out, "    mov rcx, rbx")
+    append(out, "    sub rcx, [__key_tail]")
+    append(out, "    cmp rcx, 64")
+    append(out, "    jae __kbd_full")
+    append(out, "    mov rcx, rbx")
+    append(out, "    and rcx, 63")
+    append(out, "    mov byte ptr [__key_buf + rcx], al")
+    append(out, "    inc rbx")
+    append(out, "    mov [__key_head], rbx")
+    append(out, "__kbd_full:")
+    append(out, "    mov al, 0x20")
+    append(out, "    out 0x20, al")
+    append(out, "    pop rcx")
+    append(out, "    pop rbx")
+    append(out, "    pop rax")
+    append(out, "    iretq")
+    append(out, "")
+    give out
+}
+
+make btTailLines() {
+    let out = []
+    let fi = 0
+    while fi < length(gBtFloors) {
+        append(out, "")
+        append(out, "__floor_" + numText(fi) + ":")
+        append(out, "    push rbx")
+        append(out, "    push r12")
+        append(out, "    push r13")
+        append(out, "    push r14")
+        append(out, "    push r15")
+        append(out, gBtFloors[fi])
+        append(out, "    pop r15")
+        append(out, "    pop r14")
+        append(out, "    pop r13")
+        append(out, "    pop r12")
+        append(out, "    pop rbx")
+        append(out, "    ret")
+        fi = fi + 1
+    }
+    append(out, "")
+    append(out, "    .section .rodata")
+    append(out, "    .align 8")
+    append(out, "__gdt:")
+    append(out, "    .quad 0")
+    append(out, "    .quad 0x00AF9A000000FFFF")
+    append(out, "    .quad 0x00CF92000000FFFF")
+    append(out, "__gdt_end:")
+    append(out, "__gdt_ptr:")
+    append(out, "    .word __gdt_end - __gdt - 1")
+    append(out, "    .long __gdt")
+    append(out, "__idt_ptr:")
+    append(out, "    .word 4095")
+    append(out, "    .quad __idt")
+    for lit in gBtLiterals {
+        append(out, lit.label + ":")
+        let litLine = "    .byte 0"
+        if length(lit.bytes) > 0 {
+            let parts = []
+            for b in lit.bytes {
+                append(parts, numText(b))
+            }
+            litLine = "    .byte " + join(parts, ", ")
+        }
+        append(out, litLine)
+    }
+    append(out, "")
+    append(out, "    .section .bss")
+    append(out, "    .align 4096")
+    append(out, "__pml4:")
+    append(out, "    .skip 4096")
+    append(out, "__pdpt:")
+    append(out, "    .skip 4096")
+    append(out, "__pd:")
+    append(out, "    .skip 4096")
+    append(out, "    .align 16")
+    append(out, "__idt:")
+    append(out, "    .skip 4096")
+    append(out, "    .align 8")
+    append(out, "__ticks:")
+    append(out, "    .skip 8")
+    append(out, "__key_head:")
+    append(out, "    .skip 8")
+    append(out, "__key_tail:")
+    append(out, "    .skip 8")
+    append(out, "__key_buf:")
+    append(out, "    .skip 64")
+    append(out, "    .align 8")
+    append(out, "__mb_info:")
+    append(out, "    .skip 8")
+    append(out, "__mb_magic:")
+    append(out, "    .skip 8")
+    append(out, "__mem_total:")
+    append(out, "    .skip 8")
+    append(out, "__heap_cursor:")
+    append(out, "    .skip 8")
+    append(out, "__heap_limit:")
+    append(out, "    .skip 8")
+    append(out, "__cursor_row:")
+    append(out, "    .skip 8")
+    append(out, "__cursor_col:")
+    append(out, "    .skip 8")
+    append(out, "__desk:")
+    append(out, "    .skip 8")
+    append(out, "__guest_desk:")
+    append(out, "    .skip 64")
+    append(out, "__numtext_buf:")
+    append(out, "    .skip 32")
+    append(out, "__disk_id_buf:")
+    append(out, "    .skip 512")
+    append(out, "__guard_depth:")
+    append(out, "    .skip 8")
+    append(out, "__floor_inputs:")
+    append(out, "    .skip 128")
+    append(out, "    .align 16")
+    append(out, "__stack:")
+    append(out, "    .skip 16384")
+    append(out, "__stack_top:")
+    give out
+}
+
+
 // ---------- the program itself ----------
 // What running this front end does: take the mode and the
 // file path from the words it was started with, read the
@@ -6557,8 +8791,10 @@ if length(allArgs) < 2 {
                         if allArgs[0] != "compile" {
                             if allArgs[0] != "barevalid" {
                                 if allArgs[0] != "barevalid-guest" {
-                                    sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest', 'compile', 'barevalid' and 'barevalid-guest', like: nifla-front tokens program.nifla")
-                                    exitwith(2)
+                                    if allArgs[0] != "barecompile" {
+                                        sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest', 'compile', 'barevalid', 'barevalid-guest' and 'barecompile', like: nifla-front tokens program.nifla")
+                                        exitwith(2)
+                                    }
                                 }
                             }
                         }
@@ -6625,6 +8861,27 @@ if length(allArgs) < 2 {
                                 }
                             }
                         } else {
+                    if allArgs[0] == "barecompile" {
+                        let checked = chkCheckProgram(parsed.value, true, false)
+                        if checked.ok == false {
+                            sayerr(checked.message)
+                            exitwith(1)
+                        } else {
+                            let validated = bvValidateProgram(parsed.value, false)
+                            if validated.ok == false {
+                                sayerr(validated.message)
+                                exitwith(1)
+                            } else {
+                                let translated = btTranslateProgram(parsed.value, cmpSourceName(path), source, path, false)
+                                if translated.ok == false {
+                                    sayerr(translated.message)
+                                    exitwith(1)
+                                } else {
+                                    say part(translated.value, 0, length(translated.value) - 1)
+                                }
+                            }
+                        }
+                    } else {
                     if allArgs[0] == "compile" {
                         let checked = chkCheckProgram(parsed.value, false, false)
                         if checked.ok == false {
@@ -6643,6 +8900,7 @@ if length(allArgs) < 2 {
                             say "checked"
                         }
                     }
+                        }
                         }
                     }
                 }

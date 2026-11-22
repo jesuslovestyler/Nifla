@@ -1,0 +1,11 @@
+// Stone 56 fixture: the host's own tools in the
+// emitted assembly — the clock and keyboard reads,
+// the memory size, the disk tools moving a sector
+// through a block of bytes, and the host opening the
+// guest door with callguest. Pins each tool's inline
+// emission in the host picture.
+let block = makebytes(512)
+let moved = diskread(0, block)
+let written = diskwrite(1, block)
+say ticks() + memorysize() + disksectors()
+say callguest(2097152, 7)

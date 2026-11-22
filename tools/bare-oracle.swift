@@ -22,28 +22,42 @@
 //     barevalid-guest   the guest picture: the checker
 //                       with forGuest true, then the
 //                       validator with guestMode true.
+//     barecompile       the host picture walked the
+//                       whole way: lex, parse, check,
+//                       validate, then the bare translator
+//                       (BareTranslator in
+//                       src/BareCompiler.swift) made from
+//                       that validator, printing the
+//                       emitted assembly exactly as
+//                       translate writes it — the form
+//                       compileBare writes to the .s file
+//                       beside the binary. The translator
+//                       is made with no video request, as
+//                       a build without the flag is.
 //
 // The verdict dump: a program the whole road accepts
-// prints exactly "valid" on stdout and leaves 0. A lex,
-// parse, check or validation refusal prints nothing on
-// stdout, "Line N: <message>" on stderr, and leaves 1.
-// A file that can't be read as UTF-8 prints a plain
-// message on stderr and leaves 2; that wording (the
-// front oracle's file-error wording) is not part of
-// the identity claim the bare proofs prove.
+// prints exactly "valid" on stdout and leaves 0 in the
+// barevalid modes, and the emitted assembly in the
+// barecompile mode. A lex, parse, check or validation
+// refusal prints nothing on stdout, "Line N: <message>"
+// on stderr, and leaves 1. A file that can't be read
+// as UTF-8 prints a plain message on stderr and leaves
+// 2; that wording (the front oracle's file-error
+// wording) is not part of the identity claim the bare
+// proofs prove.
 //
-// This stone's claim is the validator's verdict only —
-// the bare translator's assembly stands in the next
-// stone of the leg, and this oracle grows that mode
-// there. compileBare's driver half (the assembling,
-// the linking, the packaging) is not ported in this
-// leg, as compileMain's driver half was not in the
-// compiler leg; findAssembler, which Compiler.swift
-// hosts, is driver machinery of the same kind — it
-// reads the process environment and tests files for
-// executability, neither of which the language can
-// express — and stands with the driver, recorded in
-// the README ledger.
+// Stone 55's claim was the validator's verdict; Stone
+// 56 grows this oracle the barecompile mode, and the
+// claim grows with it to the translator's emitted
+// text in the host picture. compileBare's driver half
+// (the assembling, the linking, the packaging) is not
+// ported in this leg, as compileMain's driver half was
+// not in the compiler leg; findAssembler, which
+// Compiler.swift hosts, is driver machinery of the
+// same kind — it reads the process environment and
+// tests files for executability, neither of which the
+// language can express — and stands with the driver,
+// recorded in the README ledger.
 //
 // This file is a proof harness only — it is not part
 // of the toolchain and nothing in src/ depends on it.
@@ -58,11 +72,12 @@ import Foundation
 struct BareOracle {
     static func main() {
         let args = CommandLine.arguments
-        guard args.count >= 3, args[1] == "barevalid" || args[1] == "barevalid-guest" else {
-            FileHandle.standardError.write(Data("usage: bare-oracle barevalid|barevalid-guest <path>\n".utf8))
+        guard args.count >= 3, args[1] == "barevalid" || args[1] == "barevalid-guest" || args[1] == "barecompile" else {
+            FileHandle.standardError.write(Data("usage: bare-oracle barevalid|barevalid-guest|barecompile <path>\n".utf8))
             exit(2)
         }
         let guest = args[1] == "barevalid-guest"
+        let compile = args[1] == "barecompile"
         let path = args[2]
         let source: String
         do {
@@ -75,8 +90,15 @@ struct BareOracle {
             let tokens = try Lexer(source).tokenize()
             let program = try Parser(tokens).parseProgram()
             try Checker(program: program, forBareMetal: true, forGuest: guest).check(program)
-            try BareValidator(guestMode: guest).validate(program)
-            FileHandle.standardOutput.write(Data("valid\n".utf8))
+            let validator = BareValidator(guestMode: guest)
+            try validator.validate(program)
+            if compile {
+                var translator = BareTranslator(validator: validator)
+                let asm = translator.translate(program, sourceName: URL(fileURLWithPath: path).lastPathComponent)
+                FileHandle.standardOutput.write(Data(asm.utf8))
+            } else {
+                FileHandle.standardOutput.write(Data("valid\n".utf8))
+            }
         } catch let error as NiflaError {
             FileHandle.standardError.write(Data((error.spoken + "\n").utf8))
             exit(1)

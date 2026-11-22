@@ -1,0 +1,10 @@
+// Stone 56 fixture: a text literal holding characters
+// past ASCII — an em dash and a Latin-1 letter. The
+// language gives no way to ask a character for its
+// code point, so the port reckons these bytes from
+// the program's own source; the oracle reckons them
+// from the value. The emitted .byte list is the pin.
+let line = "feathers here — type feather"
+let cafe = "café"
+say line
+say cafe

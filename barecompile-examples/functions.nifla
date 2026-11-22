@@ -1,0 +1,19 @@
+// Stone 56 fixture: made functions in the emitted
+// assembly — a text parameter and a bytes parameter
+// (two register slots each, in order; the bytes are
+// pinned to their shape by the pick inside, as the
+// bare road settles shapes), a number parameter,
+// gives, and calls whose values are stacked and
+// popped into the registers in reverse. Pins the
+// frame offsets, the parameter stores, and the call
+// sequence.
+make measure(word, block, scale) {
+    give (length(word) + block[0]) * scale
+}
+make first(word) {
+    give word
+}
+let block = makebytes(64)
+block[0] = 2
+say measure("hello", block, 3)
+say first("welcome")

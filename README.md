@@ -5181,6 +5181,142 @@ comes near the proof's timeout but that one.
 No PRIMER change: the language's surface did
 not change in this stone.
 
+## Stone 56 — the bare translator stands in Nifla (host picture)
+
+The bare leg's second stone: `BareTranslator`,
+the second half of `src/BareCompiler.swift`,
+stands in Nifla in `selfhost/nifla-front.nifla`
+as the front end's new `barecompile` mode —
+the whole bare road in the host picture: lex,
+parse, check in the bare picture, the bare
+validator (Stone 55), then the translator,
+printing the emitted assembly exactly as the
+Swift translator writes it. SUPERSEDE again,
+in the pattern of Stones 50 and 55: the
+translator is written fresh against
+`BareCompiler.swift` as the sole standard, and
+it is made from the validator's walk, as
+Swift's is — the settled shapes and the
+picture are the validator section's globals,
+read after validation has run. The self-host
+stays untouched, and nothing under `src/` is
+touched.
+
+Ported whole: the translator's own `kindOf`
+(reading the frame the walk is building, not
+the validator's settled shapes); the frame
+walk — functions before the program, each with
+its register parameter stores, its guard-depth
+counting and its fixed exit label, the program
+itself behind `__nifla_main`; statements whole
+(the loop guard slots with their million-pass
+tick, the one setting-by-place, a `say` through
+the runtime's own text doors); expressions
+whole (the floor desk — one piece of memory on
+the memory side, the numbers in their row —
+text joins and text comparisons through the
+runtime's doors, the labelled one-off walks);
+calls whole (the machine's own tools inline
+where the call stands, the guest door's desk
+filled in by the host, the register call for
+made functions); and `translate` itself — the
+runtime text the file opens with, the floor
+blocks behind their desk, the literals in
+`.rodata`, the `.bss` reservations. The label
+counter's order is Swift's, label for label.
+
+Scope, recorded as Stone 55 recorded its own:
+the translator here is made with NO video
+request — the video request is driver input,
+as a build without the flag is, so the
+multiboot header stands in its unasked form.
+`compileBare`'s driver half and `findAssembler`
+stand unported with the driver (Stone 55's
+record). The guest picture of this same
+translator, and the feather card with its
+`fnv1a64` reckoning, stand in the leg's next
+stones.
+
+Two reckonings in the walk are the port's own,
+and the ledger names them. Numbers: Swift
+writes a literal with `Int64(value)`; the
+validator has already proved every literal
+whole and under 1e15, so the parser's kept
+digits (`numText`) are exactly that rendering,
+and the same digits render every offset, count
+and label number. Text bytes: a literal is
+emitted as its UTF-8 bytes with its byte
+count, and the language gives no way to ask a
+character for its code point (the word
+boundary). The ASCII characters are seeded —
+a one-byte block holding b reads back through
+`astext` as that byte's character — and a
+literal of seeded characters is reckoned from
+the seed alone. Any other character stands in
+the program's own source, on the literal's own
+line, and the mode holds both readings of that
+file: the source is aligned once, character by
+character against its bytes, and a literal is
+matched positionally against its line — each
+opening quote tried as its start, value and
+source walked in step, an escape standing for
+its one seeded character — until the value is
+spent exactly at a closing quote. The match
+must be positional: text equality here is
+canonical, so a precomposed letter and the
+same letter written as base plus combining
+mark are one key to any table while their
+bytes differ (the compile corpus's text
+battery holds both in a single literal); only
+the place tells them apart. A literal matched
+no way refuses the translation rather than
+emit a wrong byte — argued impossible, and
+the proof would catch it.
+
+Proof: the bare oracle grows the `barecompile`
+mode (the same seven-file link), and
+`run-barecompile.sh` compares stdout, stderr
+and exit byte for byte across the corpus:
+barecompile fixtures 9/9, bare 16/16,
+barevalid fixtures 18/18, examples 60/60,
+checker 45/45, floor 4/4, voice 3/3, selfhost
+2/2, tools 1/1, primer 58/58, tutorial 86/86,
+fixtures 104/104, checkfix 64/64, cmpfix
+10/10, cardnull 21/21 — 501 comparisons in
+all, 496 agreeing byte for byte and the 5
+boundary fixtures verified divergent (they
+diverge at the refusal the validator speaks,
+before any translation). The 9 new fixtures
+in `barecompile-examples/` were each
+confirmed against the oracle first: text
+literals and their escapes, a literal past
+the ASCII edge, number literals at the
+validator's edge, made functions with text
+and bytes parameters, the label counter's
+order across nested loops, three floor
+blocks, a block of bytes picked and read
+back, the host's own tools and its guest
+door, text comparisons beside number ones.
+
+The pipe discipline of Stone 50 is this
+stone's second ledger entry. A first draft of
+the section, written in the guard style the
+earlier stones had already refused, stood at
+147 warnings / some 113 KB of diagnostics and
+blocked niflac's swiftc pipe outright. The
+finished section is written so its blocks
+declare or assign — conditional emissions go
+through two small helpers or a line reckoned
+into a variable first — and the whole front
+file's generated Swift stands at 78 warnings
+/ 61,791 bytes of diagnostics, the same
+warning count as Stone 55 and fewer bytes,
+under the pipe's limit with the margin the
+proofs exercise on every run.
+
+No PRIMER change: the language's surface did
+not change in this stone.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

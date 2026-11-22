@@ -5317,6 +5317,43 @@ proofs exercise on every run.
 No PRIMER change: the language's surface did
 not change in this stone.
 
+Stone 57 walks the guest picture and lays the feather's
+card. The front end gains the barecompile-guest mode —
+the same road with the checker, the validator and the
+translator all in the guest picture — and run-barecompile.sh
+walks the whole corpus in both pictures: 504 comparisons
+each, the guest-* fixtures in barecompile-examples/ the
+guest picture's own (a guest at its desk, text in a guest,
+a floor in a guest; refused in the host picture,
+translated in the guest), the front end translating
+itself both ways, and the five BOUNDARY.txt fixtures
+verified divergent in both pictures (ten divergences).
+The card mode stands beside them: featherCard from
+src/BareCompiler.swift, the card the toolchain lays at
+a feather's head, printed for a file's bytes — the name
+from the file's own name without its ending, the byte
+count, the checksum. The checksum is the question
+Stone 55's ledger left open: FNV-1a-64's state is 64
+bits, and no Nifla number holds it exactly. It did not
+become a boundary. The answer was already standing in
+the tree: the feather checker (tools/feathercheck.nifla)
+carries the hash as four 16-bit limbs and multiplies
+limb by limb by the prime — whose own limbs are 435, 0,
+256, 0 — every product and carry far inside the numbers'
+exact reach. The card section carries it the same way,
+step for step with both reckonings, and the gate proves
+it over byte files made in scratch (an empty file, whose
+checksum is the offset basis itself; every byte value;
+a name with no ending; a name with two) and standing
+files up to the front end's own ~320 KB of source. What
+stands in compileBare's driver — assembling the guest,
+laying the card on the image — stays with the driver,
+as the assembling does. Generated-Swift diagnostics
+stand at 62,751 bytes: still under the pipe limit, with
+about 1.5 KB of headroom — the next stone that grows the
+front end must be warning-frugal, or reclaim warnings
+from the older sections first.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

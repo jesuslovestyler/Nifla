@@ -34,6 +34,18 @@
 //                       beside the binary. The translator
 //                       is made with no video request, as
 //                       a build without the flag is.
+//     barecompile-guest the guest picture walked the
+//                       whole way, the translator's
+//                       guestMode true.
+//     card              featherCard (the same file)
+//                       for the file's own bytes: the
+//                       name from the file's name
+//                       without its ending, the byte
+//                       count, the FNV-1a-64 checksum
+//                       — printed exactly as the card
+//                       stands at a feather's head.
+//                       The file is read as bytes and
+//                       never lexed.
 //
 // The verdict dump: a program the whole road accepts
 // prints exactly "valid" on stdout and leaves 0 in the
@@ -72,12 +84,22 @@ import Foundation
 struct BareOracle {
     static func main() {
         let args = CommandLine.arguments
-        guard args.count >= 3, args[1] == "barevalid" || args[1] == "barevalid-guest" || args[1] == "barecompile" else {
-            FileHandle.standardError.write(Data("usage: bare-oracle barevalid|barevalid-guest|barecompile <path>\n".utf8))
+        guard args.count >= 3, args[1] == "barevalid" || args[1] == "barevalid-guest" || args[1] == "barecompile" || args[1] == "barecompile-guest" || args[1] == "card" else {
+            FileHandle.standardError.write(Data("usage: bare-oracle barevalid|barevalid-guest|barecompile|barecompile-guest|card <path>\n".utf8))
             exit(2)
         }
-        let guest = args[1] == "barevalid-guest"
-        let compile = args[1] == "barecompile"
+        let guest = args[1] == "barevalid-guest" || args[1] == "barecompile-guest"
+        let compile = args[1] == "barecompile" || args[1] == "barecompile-guest"
+        if args[1] == "card" {
+            let path = args[2]
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+                FileHandle.standardError.write(Data("I couldn't read the file at '\(path)'.\n".utf8))
+                exit(2)
+            }
+            let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            FileHandle.standardOutput.write(Data(featherCard(name: name, programBytes: [UInt8](data)).utf8))
+            exit(0)
+        }
         let path = args[2]
         let source: String
         do {

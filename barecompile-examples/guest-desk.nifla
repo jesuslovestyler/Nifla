@@ -1,0 +1,8 @@
+// Stone 57 fixture: a guest at its desk — the number
+// the host sent, read with guestvalue, worked on, and
+// handed back with guestgive. Accepted in the guest
+// picture, refused in the host picture; pins the
+// desk reads in the emitted assembly.
+let gift = guestvalue()
+let answer = guestgive(gift + 1)
+say answer

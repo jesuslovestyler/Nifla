@@ -1,0 +1,8 @@
+// Stone 57 fixture: a floor block in a guest — the
+// desk set up the guest way, the block behind its
+// desk at the file's end.
+let word = "abc"
+let total = floor(word, 7) {
+    mov rax, r12
+}
+say total

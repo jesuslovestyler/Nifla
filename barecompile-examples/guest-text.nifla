@@ -1,0 +1,6 @@
+// Stone 57 fixture: text in a guest — a literal and a
+// join, where every address is counted from where the
+// instruction stands. Pins the rip-relative loads in
+// the guest picture's literals and head.
+let word = "a guest's words"
+say word + " — handed over the desk"

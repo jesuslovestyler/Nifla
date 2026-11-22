@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stone 56 proof: the bare translator stands in Nifla.
+# Stone 56/57 proof: the bare translator stands in Nifla.
 #
 # selfhost/nifla-front.nifla — the toolchain front end
 # written in Nifla, this leg carrying the bare
@@ -48,6 +48,22 @@
 # fixtures at the lex stage, and the number fixtures
 # in the value the validator's refusal carries, the
 # refusal speaking before any translation.
+#
+# Stone 57 walks the same corpus in the guest picture
+# too (the barecompile-guest mode): the guest-*
+# fixtures in barecompile-examples/ are the guest
+# picture's own — refused in the host picture,
+# translated in the guest — and the boundary fixtures
+# must stay divergent in both pictures.
+#
+# Stone 57 also proves the card mode: the feather
+# card (featherCard in src/BareCompiler.swift) for a
+# file's bytes, the oracle's against the front end's,
+# over byte files made in scratch (empty, every byte
+# value, a name with no ending, a name with two) and
+# standing files of the repo. The checksum's 64-bit
+# state is carried as four 16-bit limbs, the way the
+# feather checker already carries it.
 #
 # Prints PASS or FAIL per file and a summary with
 # per-group counts and the claim.
@@ -135,6 +151,8 @@ is_boundary() {
 
 pass=0
 fail=0
+bdiv=0
+MODE=barecompile
 
 # run_group <label> <files...> — compares the two
 # barecompile results on every file; boundary fixtures
@@ -148,9 +166,9 @@ run_group() {
     for f in "$@"; do
         [ -f "$f" ] || continue
         gtotal=$((gtotal + 1))
-        timeout 300 "$ORACLE" barecompile "$f" > "$SCRATCH/o.out" 2> "$SCRATCH/o.err"
+        timeout 300 "$ORACLE" "$MODE" "$f" > "$SCRATCH/o.out" 2> "$SCRATCH/o.err"
         oc=$?
-        timeout 300 "$FRONT" barecompile "$f" > "$SCRATCH/f.out" 2> "$SCRATCH/f.err"
+        timeout 300 "$FRONT" "$MODE" "$f" > "$SCRATCH/f.out" 2> "$SCRATCH/f.err"
         fc=$?
         agree=0
         if [ "$oc" -eq "$fc" ] && cmp -s "$SCRATCH/o.out" "$SCRATCH/f.out" && cmp -s "$SCRATCH/o.err" "$SCRATCH/f.err"; then
@@ -158,10 +176,11 @@ run_group() {
         fi
         if [ "$label" = "fixtures" ] && is_boundary "$f"; then
             if [ "$agree" -eq 1 ]; then
-                echo "FAIL $f (named in BOUNDARY.txt but the two sides AGREE in barecompile mode — the boundary list is stale and must be revisited)"
+                echo "FAIL $f (named in BOUNDARY.txt but the two sides AGREE in $MODE mode — the boundary list is stale and must be revisited)"
                 fail=$((fail + 1))
             else
-                echo "BOUNDARY $f (verified divergent: oracle exit $oc, front exit $fc)"
+                echo "BOUNDARY $f (verified divergent in $MODE: oracle exit $oc, front exit $fc)"
+                bdiv=$((bdiv + 1))
                 gpass=$((gpass + 1))
             fi
             continue
@@ -182,33 +201,83 @@ run_group() {
     GROUP_RESULTS="$GROUP_RESULTS $label $gpass/$gtotal,"
 }
 
-run_group bcfix barecompile-examples/*.nifla
-run_group bare bare-examples/*.nifla
-run_group bvfix barevalid-examples/*.nifla
-run_group examples examples/*.nifla
-run_group checker checker-examples/*.nifla
-run_group floor floor-examples/*.nifla
-run_group voice voice-examples/*.nifla
-run_group selfhost selfhost/nifla-in-nifla.nifla selfhost/nifla-front.nifla
-run_group tools tools/feathercheck.nifla
-run_group primer "$SCRATCH"/primer/*.nifla
-run_group tutorial "$SCRATCH"/tutorial/*.nifla
-run_group fixtures front-examples/*.nifla
-run_group checkfix check-examples/*.nifla
-run_group cmpfix compile-examples/*.nifla
-
 CARDNULL_DIR="$HOME/workspace/cardnull-os-2/src"
-if [ -d "$CARDNULL_DIR" ]; then
-    run_group cardnull "$CARDNULL_DIR"/*.nifla
-else
-    echo "SKIP cardnull (directory $CARDNULL_DIR is absent)"
-    GROUP_RESULTS="$GROUP_RESULTS cardnull SKIPPED,"
-fi
+for MODE in barecompile barecompile-guest; do
+    GROUP_RESULTS=""
+    run_group bcfix barecompile-examples/*.nifla
+    run_group bare bare-examples/*.nifla
+    run_group bvfix barevalid-examples/*.nifla
+    run_group examples examples/*.nifla
+    run_group checker checker-examples/*.nifla
+    run_group floor floor-examples/*.nifla
+    run_group voice voice-examples/*.nifla
+    run_group selfhost selfhost/nifla-in-nifla.nifla selfhost/nifla-front.nifla
+    run_group tools tools/feathercheck.nifla
+    run_group primer "$SCRATCH"/primer/*.nifla
+    run_group tutorial "$SCRATCH"/tutorial/*.nifla
+    run_group fixtures front-examples/*.nifla
+    run_group checkfix check-examples/*.nifla
+    run_group cmpfix compile-examples/*.nifla
+    if [ -d "$CARDNULL_DIR" ]; then
+        run_group cardnull "$CARDNULL_DIR"/*.nifla
+    else
+        echo "SKIP cardnull (directory $CARDNULL_DIR is absent)"
+        GROUP_RESULTS="$GROUP_RESULTS cardnull SKIPPED,"
+    fi
+    echo "$MODE:$GROUP_RESULTS"
+done
+
+# The card mode over byte files (Stone 57).
+mkdir -p "$SCRATCH/cards"
+: > "$SCRATCH/cards/empty.bin"
+python3 - "$SCRATCH/cards" <<'PYEOF'
+import os
+import sys
+
+d = sys.argv[1]
+with open(os.path.join(d, "allbytes.bin"), "wb") as f:
+    f.write(bytes(range(256)))
+with open(os.path.join(d, "cardfile"), "wb") as f:
+    f.write(b"a feather with no ending")
+with open(os.path.join(d, "card.test.bin"), "wb") as f:
+    f.write(b"two endings to shed")
+PYEOF
+cpass=0
+ctotal=0
+run_card() {
+    ctotal=$((ctotal + 1))
+    timeout 300 "$ORACLE" card "$1" > "$SCRATCH/o.out" 2> "$SCRATCH/o.err"
+    oc=$?
+    timeout 300 "$FRONT" card "$1" > "$SCRATCH/f.out" 2> "$SCRATCH/f.err"
+    fc=$?
+    if [ "$oc" -eq "$fc" ] && cmp -s "$SCRATCH/o.out" "$SCRATCH/f.out" && cmp -s "$SCRATCH/o.err" "$SCRATCH/f.err"; then
+        echo "PASS card $1"
+        cpass=$((cpass + 1))
+        pass=$((pass + 1))
+    else
+        echo "FAIL card $1 (oracle exit $oc, front exit $fc)"
+        diff "$SCRATCH/o.out" "$SCRATCH/f.out" | head -n 20
+        diff "$SCRATCH/o.err" "$SCRATCH/f.err" | head -n 20
+        fail=$((fail + 1))
+    fi
+}
+run_card "$SCRATCH/cards/empty.bin"
+run_card "$SCRATCH/cards/allbytes.bin"
+run_card "$SCRATCH/cards/cardfile"
+run_card "$SCRATCH/cards/card.test.bin"
+run_card barecompile-examples/guest-text.nifla
+run_card tools/feathercheck.nifla
+run_card selfhost/nifla-front.nifla
+echo "card: $cpass/$ctotal,"
 
 boundary_count=$(wc -l < "$BOUNDARY_LIST" | tr -d ' ')
-echo "barecompile:$GROUP_RESULTS boundary $boundary_count noted"
+echo "boundary: $bdiv verified divergent (expected $((boundary_count * 2)) — the $boundary_count fixtures in both pictures)"
 if [ "$fail" -ne 0 ]; then
     echo "FAIL barecompile: $fail failure(s)"
     exit 1
 fi
-echo "PASS barecompile (Stone 56: the Nifla-written bare translator's emitted assembly is byte-identical to the Swift bare translator's across the whole corpus:$GROUP_RESULTS boundary $boundary_count noted)"
+if [ "$bdiv" -ne $((boundary_count * 2)) ]; then
+    echo "FAIL barecompile: boundary divergences $bdiv, expected $((boundary_count * 2))"
+    exit 1
+fi
+echo "PASS barecompile (Stones 56-57: the Nifla-written bare translator's emitted assembly is byte-identical to the Swift bare translator's across the whole corpus in both pictures, and the feather card agrees over every byte file tried; boundary $boundary_count noted, divergent in both pictures)"

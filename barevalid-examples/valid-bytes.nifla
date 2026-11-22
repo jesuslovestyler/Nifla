@@ -1,0 +1,7 @@
+// Stone 55 fixture: a block of bytes made, written by
+// number, read back by number, and measured — accepted.
+let block = makebytes(512)
+block[0] = 65
+block[511] = 66
+let first = block[0]
+say first + block[511] + length(block)

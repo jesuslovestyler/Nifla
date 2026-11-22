@@ -1,0 +1,8 @@
+// Stone 55 fixture: a floor block handed two pieces of
+// text — the desk has one memory side only.
+let a = "one"
+let b = "two"
+let n = floor(a, b) {
+    mov rax, 0
+}
+say n

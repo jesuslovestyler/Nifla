@@ -1,0 +1,5 @@
+// Stone 55 fixture: a host opening the guest door —
+// callguest with an address and a value — accepted in
+// the host picture.
+let answer = callguest(2097152, 7)
+say answer

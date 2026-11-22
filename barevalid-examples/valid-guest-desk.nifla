@@ -1,0 +1,7 @@
+// Stone 55 fixture: a guest speaking through its desk —
+// guestvalue read, guestgive handed back. Accepted in
+// the guest picture; the host picture refuses the desk
+// tools before the validator is reached.
+let gift = guestvalue()
+say gift
+guestgive(gift + 1)

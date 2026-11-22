@@ -12,6 +12,8 @@
 //     nifla-front check-bare <path>
 //     nifla-front check-guest <path>
 //     nifla-front compile <path>
+//     nifla-front barevalid <path>
+//     nifla-front barevalid-guest <path>
 //
 // Stone 50 adds the check modes: lex, parse, then the
 // checker (the section below the tree dump), printing
@@ -26,6 +28,14 @@
 // section below the checker), printing the generated
 // Swift exactly as the toolchain's SwiftTranslator
 // (src/Compiler.swift) writes it.
+//
+// Stone 55 adds the barevalid modes: lex, parse, check
+// in the bare picture, then the bare validator (the
+// section below the compiler), printing exactly
+// "valid" for a program the whole bare road accepts.
+// The bare leg's claim in this stone is the
+// validator's verdict; the bare translator's assembly
+// stands in the leg's next stone.
 //
 // 'tokens' reads the file at <path> and prints its tokens,
 // one per line, in this dump:
@@ -5316,6 +5326,1201 @@ make cmpSourceName(path) {
     give pieces[length(pieces) - 1]
 }
 
+// ---------- the bare validator ----------
+// Stone 55: the bare leg begins. BareValidator in
+// src/BareCompiler.swift — the walk that refuses, in
+// plain words and before anything is built, whatever
+// the bare subset doesn't include — ported into Nifla,
+// fresh: a SUPERSESSION in Stone 50's pattern, not a
+// convergence. Nothing anywhere in the self-host
+// validates a program for a target; the validator is
+// written against BareCompiler.swift as the sole
+// standard, reusing the front end's helpers (the name
+// maps, errAt, numText, chkPhraseForWord) the way the
+// checker and the translator were. The self-host stays
+// untouched, and nothing under src/ is touched.
+//
+// The front end's new modes stand on this section:
+//
+//     nifla-front barevalid <path>
+//     nifla-front barevalid-guest <path>
+//
+// lex, parse, check in the bare picture (check-bare /
+// check-guest's picture), then this walk, in the host
+// picture or the guest picture as the mode names. A
+// program the whole road accepts prints exactly
+// "valid"; a refusal from any stage is spoken exactly
+// as that stage speaks it. The claim of this stone is
+// the validator's verdict — the bare translator's
+// assembly (BareTranslator, the same file's second
+// half) stands in the leg's next stone, and the modes
+// grow it there. compileBare's driver half — the
+// assembling, the linking, the packaging — is not
+// ported, as compileMain's driver half was not in
+// Stone 53; findAssembler, which src/Compiler.swift
+// hosts, is driver machinery of the same kind (it
+// reads the process environment and tests files for
+// executability, neither of which the language can
+// express) and stands with the driver, as the bare
+// oracle's header records.
+//
+// A bare kind is carried as its word: "number",
+// "text", "boolean", "bytes", "unknown" — BareKind's
+// five cases. The validator's state stands in globals
+// the way the checker's does: the function table (a
+// name map to records { params, giveKind }), each
+// function's define line, the definition order, the
+// pinned parameter kinds (a name map to lists of kind
+// words), the scope stack (a list of name maps to kind
+// words), the function being read ("" for the program
+// itself — Swift's nil), the mode's picture, and the
+// final-desk-check flag of Stone 15.
+//
+// Written in assignment style throughout, per Stone
+// 50's pipe finding.
+
+let gBvFuncs = nmNew()
+let gBvDefineLines = nmNew()
+let gBvParamKinds = nmNew()
+let gBvDefOrder = []
+let gBvScopes = []
+let gBvCurrentFunc = ""
+let gBvGuest = false
+let gBvDeskFinal = false
+
+// The bare-only tools and their arities — bareOnlyTools
+// in src/BareCompiler.swift, transcribed exactly.
+make bvBuildBareTools() {
+    let m = nmNew()
+    nmSet(m, "ticks", 0)
+    nmSet(m, "readkey", 0)
+    nmSet(m, "waittick", 0)
+    nmSet(m, "memorysize", 0)
+    nmSet(m, "disksectors", 0)
+    nmSet(m, "diskread", 2)
+    nmSet(m, "diskwrite", 2)
+    give m
+}
+
+let gBvBareTools = bvBuildBareTools()
+
+// The guest door's two tables — guestDeskTools and
+// guestDoorTools in src/BareCompiler.swift.
+make bvBuildGuestDesk() {
+    let m = nmNew()
+    nmSet(m, "guestvalue", 0)
+    nmSet(m, "guestgive", 1)
+    give m
+}
+
+make bvBuildGuestDoor() {
+    let m = nmNew()
+    nmSet(m, "callguest", 2)
+    give m
+}
+
+let gBvGuestDesk = bvBuildGuestDesk()
+let gBvGuestDoor = bvBuildGuestDoor()
+
+// The built-in tools' names — the keys of builtinTools
+// in src/Interpreter.swift. The validator needs only
+// membership: a name in this list that it does not
+// know by name is refused with its one long message.
+let gBvBuiltinNames = ["length", "join", "split", "part", "find", "append", "readfile", "readbytes", "writefile", "arguments", "makebytes", "sayerr", "exitwith", "removeat", "insertat", "sorted", "fieldnames", "removefield", "asnumber", "bitand", "bitor", "bitxor", "astext", "wholediv", "leftover", "rounddown", "roundup", "absolute", "smallest", "largest"]
+
+// BareValidator.kindPhrase.
+make bvKindPhrase(kind) {
+    if kind == "number" {
+        give "a number"
+    }
+    if kind == "text" {
+        give "text"
+    }
+    if kind == "boolean" {
+        give "true or false"
+    }
+    if kind == "bytes" {
+        give "a block of bytes"
+    }
+    give "a machine word"
+}
+
+// BareValidator.bareKind(forAnnotation:) — the kind an
+// annotation word names, or "" when bare metal can't
+// hold that kind at all (Swift's nil).
+make bvKindForWord(word) {
+    if word == "number" {
+        give "number"
+    }
+    if word == "text" {
+        give "text"
+    }
+    if word == "boolean" {
+        give "boolean"
+    }
+    if word == "bytes" {
+        give "bytes"
+    }
+    give ""
+}
+
+// BareValidator.bareKindWord — the annotation word a
+// kind answers to; an unpinned kind answers "number".
+make bvKindWord(kind) {
+    if kind == "unknown" {
+        give "number"
+    }
+    give kind
+}
+
+// The kind a name holds in the innermost scope that
+// holds it, or "" when no scope does (Swift's nil).
+make bvLookup(name) {
+    let i = length(gBvScopes) - 1
+    while i >= 0 {
+        let r = nmGet(gBvScopes[i], name)
+        if r.found {
+            give r.value
+        }
+        i = i - 1
+    }
+    give ""
+}
+
+// BareValidator.pin: the first pin wins, and a
+// conflicting pin is refused at this line. A name no
+// scope holds is left alone, as Swift's pin leaves it.
+make bvPin(name, kind, line) {
+    let i = length(gBvScopes) - 1
+    while i >= 0 {
+        let r = nmGet(gBvScopes[i], name)
+        if r.found {
+            if r.value == "unknown" {
+                nmSet(gBvScopes[i], name, kind)
+                give okVal(true)
+            }
+            if r.value != kind {
+                give errAt(line, "This uses '" + name + "' as " + bvKindPhrase(kind) + ", but '" + name + "' already holds " + bvKindPhrase(r.value) + ". On bare metal a value's shape has to be one thing.")
+            }
+            give okVal(true)
+        }
+        i = i - 1
+    }
+    give okVal(true)
+}
+
+// BareValidator.kindOf — the kind an expression provably
+// has, checking everything inside it on the way. Gives
+// back okVal(kind word) or the refusal.
+make bvKindOf(e) {
+    if e.type == "number" {
+        let v = e.value
+        if absolute(v) >= 1000000000000000 {
+            give errAt(e.line, "On bare metal every number is a whole number that fits the machine, but this one is " + numText(v) + ". Use a whole number — division there gives the whole quotient, too.")
+        }
+        if v - rounddown(v) != 0 {
+            give errAt(e.line, "On bare metal every number is a whole number that fits the machine, but this one is " + numText(v) + ". Use a whole number — division there gives the whole quotient, too.")
+        }
+        give okVal("number")
+    }
+    if e.type == "text" {
+        give okVal("text")
+    }
+    if e.type == "boolean" {
+        give okVal("boolean")
+    }
+    if e.type == "nothing" {
+        give errAt(e.line, "Bare metal has no 'nothing' — every value there is a machine word with one shape, and the empty value has no word to be. Absence lives in hosted Nifla, in the 'maybe' kinds; on bare metal, hand the value itself, or leave the line out.")
+    }
+    if e.type == "variable" {
+        let held = bvLookup(e.name)
+        if held == "" {
+            give okVal("unknown")
+        }
+        give okVal(held)
+    }
+    if e.type == "call" {
+        give bvCallKind(e.name, e.args, e.line)
+    }
+    if e.type == "object" {
+        give errAt(e.line, "Objects aren't part of bare metal yet — there is no one there to own their fields. Bare metal has numbers, text, and true or false.")
+    }
+    if e.type == "list" {
+        give errAt(e.line, "Lists aren't part of bare metal yet — there is no one there to own their items. Bare metal has numbers, text, and true or false.")
+    }
+    if e.type == "field" {
+        give errAt(e.line, "Reading a field isn't part of bare metal yet — there are no objects there.")
+    }
+    if e.type == "index" {
+        let bk = bvKindOf(e.base)
+        if bk.ok == false {
+            give bk
+        }
+        let baseKind = bk.value
+        if baseKind == "unknown" {
+            if e.base.type == "variable" {
+                let pr = bvPin(e.base.name, "bytes", e.line)
+                if pr.ok == false {
+                    give pr
+                }
+                baseKind = "bytes"
+            }
+        }
+        if baseKind != "bytes" {
+            give errAt(e.line, "Taking an item by number on bare metal works on a block of bytes — made with makebytes — but here the value being picked from is " + bvKindPhrase(baseKind) + ". Lists and text can't be picked apart there.")
+        }
+        let rn = bvRequireNumber(e.index, e.line, "pick a byte")
+        if rn.ok == false {
+            give rn
+        }
+        give okVal("number")
+    }
+    if e.type == "floor" {
+        let memoryCount = 0
+        for arg in e.args {
+            let kr = bvKindOf(arg)
+            if kr.ok == false {
+                give kr
+            }
+            if kr.value == "text" {
+                memoryCount = memoryCount + 1
+            }
+            if kr.value == "bytes" {
+                memoryCount = memoryCount + 1
+            }
+            if kr.value == "boolean" {
+                give errAt(e.line, "A floor block can be handed numbers and one piece of text or block of bytes, but it was handed true or false. Hand it a number instead — 1 for true, 0 for false.")
+            }
+            if kr.value == "unknown" {
+                if gBvCurrentFunc == "" {
+                    give errAt(e.line, "I can't tell whether this value handed to a floor block is a number or memory, and on bare metal the desk differs — numbers in a row, memory on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, a block of bytes, or a variable holding one of those.")
+                }
+                if gBvDeskFinal {
+                    give errAt(e.line, "I can't tell whether this value handed to a floor block is a number or memory, and on bare metal the desk differs — numbers in a row, memory on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, a block of bytes, or a variable holding one of those.")
+                }
+                if arg.type != "variable" {
+                    give errAt(e.line, "I can't tell whether this value handed to a floor block is a number or memory, and on bare metal the desk differs — numbers in a row, memory on the memory side. Give the block a value whose shape is plain where it's handed: a number, a piece of text, a block of bytes, or a variable holding one of those.")
+                }
+            }
+        }
+        if memoryCount > 1 {
+            give errAt(e.line, "A floor block can be handed only one piece of text or block of bytes — the desk has one memory side (rbx and r12). Hand the rest as numbers, or work on the other memory from inside the block.")
+        }
+        give okVal("number")
+    }
+    if e.type == "negate" {
+        let rn = bvRequireNumber(e.inner, e.line, "be turned into its negative")
+        if rn.ok == false {
+            give rn
+        }
+        give okVal("number")
+    }
+    if e.type == "binary" {
+        give bvBinaryKind(e)
+    }
+    give errAt(e.line, "Something went wrong while reading the program.")
+}
+
+// BareValidator.kindOf's binary case, walked in Swift's
+// operator order.
+make bvBinaryKind(e) {
+    let op = e.op
+    if op == "+" {
+        let lk = bvKindOf(e.left)
+        if lk.ok == false {
+            give lk
+        }
+        let rk = bvKindOf(e.right)
+        if rk.ok == false {
+            give rk
+        }
+        if lk.value == "text" {
+            give bvJoinKind(e, lk.value, rk.value)
+        }
+        if rk.value == "text" {
+            give bvJoinKind(e, lk.value, rk.value)
+        }
+        if lk.value == "boolean" {
+            give errAt(e.line, "True and false can't be added on bare metal — arithmetic there is for numbers, as it is everywhere in Nifla.")
+        }
+        if rk.value == "boolean" {
+            give errAt(e.line, "True and false can't be added on bare metal — arithmetic there is for numbers, as it is everywhere in Nifla.")
+        }
+        if lk.value == "bytes" {
+            give errAt(e.line, "A block of bytes can't be added on bare metal — arithmetic there is for numbers. Work with one byte at a time, like block[0], or hand the block to a floor block.")
+        }
+        if rk.value == "bytes" {
+            give errAt(e.line, "A block of bytes can't be added on bare metal — arithmetic there is for numbers. Work with one byte at a time, like block[0], or hand the block to a floor block.")
+        }
+        give okVal("number")
+    }
+    if op == "-" {
+        give bvArithKind(e)
+    }
+    if op == "*" {
+        give bvArithKind(e)
+    }
+    if op == "/" {
+        give bvArithKind(e)
+    }
+    if op == "<" {
+        give bvCompareKind(e)
+    }
+    if op == "<=" {
+        give bvCompareKind(e)
+    }
+    if op == ">" {
+        give bvCompareKind(e)
+    }
+    if op == ">=" {
+        give bvCompareKind(e)
+    }
+    if op == "==" {
+        give bvEqualKind(e)
+    }
+    if op == "!=" {
+        give bvEqualKind(e)
+    }
+    give errAt(e.line, "The sign '" + op + "' isn't part of bare metal yet.")
+}
+
+// The joining road of '+': one side is text (Stone 15).
+make bvJoinKind(e, leftKind, rightKind) {
+    let other = rightKind
+    let otherExpr = e.right
+    if leftKind == "text" {
+        other = rightKind
+        otherExpr = e.right
+    } else {
+        other = leftKind
+        otherExpr = e.left
+    }
+    if other == "boolean" {
+        give errAt(e.line, "True and false can't be joined with text on bare metal yet — joining there joins text with text, or text with a whole number, which is written out as its digits.")
+    }
+    if other == "bytes" {
+        give errAt(e.line, "A block of bytes can't be joined with text on bare metal — turn the bytes you need into numbers or text first, a byte at a time.")
+    }
+    if other == "unknown" {
+        if otherExpr.type == "variable" {
+            let pr = bvPin(otherExpr.name, "text", e.line)
+            if pr.ok == false {
+                give pr
+            }
+        } else {
+            give errAt(e.line, "I can't tell what kind of value this is, so I can't join it with text on bare metal. Join a piece of text, a variable holding text, or a whole number.")
+        }
+    }
+    give okVal("text")
+}
+
+make bvArithKind(e) {
+    let l = bvRequireNumber(e.left, e.line, "be part of arithmetic")
+    if l.ok == false {
+        give l
+    }
+    let r = bvRequireNumber(e.right, e.line, "be part of arithmetic")
+    if r.ok == false {
+        give r
+    }
+    give okVal("number")
+}
+
+make bvCompareKind(e) {
+    let l = bvRequireNumber(e.left, e.line, "be compared by size")
+    if l.ok == false {
+        give l
+    }
+    let r = bvRequireNumber(e.right, e.line, "be compared by size")
+    if r.ok == false {
+        give r
+    }
+    give okVal("boolean")
+}
+
+make bvEqualKind(e) {
+    let lk = bvKindOf(e.left)
+    if lk.ok == false {
+        give lk
+    }
+    let rk = bvKindOf(e.right)
+    if rk.ok == false {
+        give rk
+    }
+    if lk.value == "bytes" {
+        give errAt(e.line, "Blocks of bytes can't be compared on bare metal — compare their lengths, or a byte at a time, like block[0] == 65.")
+    }
+    if rk.value == "bytes" {
+        give errAt(e.line, "Blocks of bytes can't be compared on bare metal — compare their lengths, or a byte at a time, like block[0] == 65.")
+    }
+    if lk.value != "unknown" {
+        if rk.value != "unknown" {
+            if lk.value != rk.value {
+                give errAt(e.line, "On bare metal, comparing needs both sides to be the same kind of value — numbers with numbers, text with text — but here one side is " + bvKindPhrase(lk.value) + " and the other is " + bvKindPhrase(rk.value) + ".")
+            }
+        }
+    }
+    if lk.value == "text" {
+        if e.left.type == "variable" {
+            let pr = bvPin(e.left.name, "text", e.line)
+            if pr.ok == false {
+                give pr
+            }
+        }
+        if e.right.type == "variable" {
+            let pr2 = bvPin(e.right.name, "text", e.line)
+            if pr2.ok == false {
+                give pr2
+            }
+        }
+    }
+    if rk.value == "text" {
+        if e.left.type == "variable" {
+            let pr = bvPin(e.left.name, "text", e.line)
+            if pr.ok == false {
+                give pr
+            }
+        }
+        if e.right.type == "variable" {
+            let pr2 = bvPin(e.right.name, "text", e.line)
+            if pr2.ok == false {
+                give pr2
+            }
+        }
+    }
+    give okVal("boolean")
+}
+
+// BareValidator.requireNumber: a proven other kind is
+// refused, an unpinned variable is pinned.
+make bvRequireNumber(e, line, doing) {
+    let kr = bvKindOf(e)
+    if kr.ok == false {
+        give kr
+    }
+    if kr.value == "number" {
+        give okVal("number")
+    }
+    if kr.value == "unknown" {
+        if e.type == "variable" {
+            let pr = bvPin(e.name, "number", line)
+            if pr.ok == false {
+                give pr
+            }
+        }
+        give okVal("unknown")
+    }
+    if kr.value == "text" {
+        give errAt(line, "Text can't " + doing + " — arithmetic on bare metal is for numbers, as it is everywhere in Nifla.")
+    }
+    if kr.value == "boolean" {
+        give errAt(line, "True and false can't " + doing + " — arithmetic on bare metal is for numbers, as it is everywhere in Nifla.")
+    }
+    give errAt(line, "A block of bytes can't " + doing + " — arithmetic on bare metal is for numbers. Work with one byte at a time, like block[0], or hand the block to a floor block.")
+}
+
+// BareValidator.callKind — a bare-only tool, a built-in
+// tool, or a made function, walked in Swift's order:
+// the guest desk, the host's door, the machine's own
+// tools, the built-ins, then the made functions.
+make bvCallKind(name, args, line) {
+    let desk = nmGet(gBvGuestDesk, name)
+    if desk.found {
+        if gBvGuest == false {
+            give errAt(line, "'" + name + "' is a guest's tool — it speaks through the desk a host hands a guest, and this program is not being built as a guest. Build it with 'niflac --bare --guest' to make it a guest, or take the call out.")
+        }
+        if name == "guestgive" {
+            if length(args) != desk.value {
+                give errAt(line, "'guestgive' takes 1 value — the number handed back to the host — but it was given " + length(args) + ".")
+            }
+            let rn = bvRequireNumber(args[0], line, "be handed back to the host")
+            if rn.ok == false {
+                give rn
+            }
+        }
+        give okVal("number")
+    }
+    let door = nmGet(gBvGuestDoor, name)
+    if door.found {
+        if gBvGuest {
+            give errAt(line, "'" + name + "' is the host's door — a guest cannot call a guest. Only the host program, the one that was booted, opens the door.")
+        }
+        if length(args) != door.value {
+            give errAt(line, "'callguest' takes 2 values (address, value), but it was given " + length(args) + ". Call it like: callguest(2097152, 7) — the address the guest's image was loaded at (guests are linked for the doorstep, 2097152), and a whole number to hand the guest.")
+        }
+        let r0 = bvRequireNumber(args[0], line, "say where the guest stands")
+        if r0.ok == false {
+            give r0
+        }
+        let r1 = bvRequireNumber(args[1], line, "be handed to the guest")
+        if r1.ok == false {
+            give r1
+        }
+        give okVal("number")
+    }
+    let bare = nmGet(gBvBareTools, name)
+    if bare.found {
+        if gBvGuest {
+            give errAt(line, "'" + name + "' belongs to the host — a guest does not own the machine's timer, keyboard, memory map, or disk; the host keeps those. A guest's world is the screen, its own heap, and the desk the host hands it (guestvalue and guestgive).")
+        }
+        if name == "diskread" {
+            give bvDiskKind(name, args, line, bare.value)
+        }
+        if name == "diskwrite" {
+            give bvDiskKind(name, args, line, bare.value)
+        }
+        for arg in args {
+            let kr = bvKindOf(arg)
+            if kr.ok == false {
+                give kr
+            }
+        }
+        if length(args) != bare.value {
+            give errAt(line, "'" + name + "' takes no values, but it was given " + length(args) + ". It reads the machine itself — call it with nothing between the parentheses: " + name + "().")
+        }
+        give okVal("number")
+    }
+    if nameIndex(gBvBuiltinNames, name) >= 0 {
+        give bvBuiltinKind(name, args, line)
+    }
+    let rec = nmGet(gBvFuncs, name)
+    if rec.found == false {
+        give errAt(line, "I don't know a function called '" + name + "'.")
+    }
+    let info = rec.value
+    let pk = nmGet(gBvParamKinds, name)
+    let slots = 0
+    let idx = 0
+    while idx < length(args) {
+        let kr = bvKindOf(args[idx])
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "text" {
+            slots = slots + 2
+        } else {
+            if kr.value == "bytes" {
+                slots = slots + 2
+            } else {
+                slots = slots + 1
+            }
+        }
+        if idx < length(info.params) {
+            if kr.value != "unknown" {
+                if pk.value[idx] == "unknown" {
+                    pk.value[idx] = kr.value
+                } else {
+                    if pk.value[idx] != kr.value {
+                        give errAt(line, "This call hands '" + name + "' " + bvKindPhrase(kr.value) + " for its value '" + info.params[idx] + "', but another call hands it " + bvKindPhrase(pk.value[idx]) + ". On bare metal a value's shape has to be one thing.")
+                    }
+                }
+            }
+        }
+        idx = idx + 1
+    }
+    if slots > 6 {
+        give errAt(line, "This call hands '" + name + "' more values than the machine's registers can carry — six words' worth is the most (a piece of text takes two). Hand fewer values, or pack numbers into fewer words.")
+    }
+    let now = nmGet(gBvFuncs, name)
+    give okVal(now.value.giveKind)
+}
+
+// diskread / diskwrite (Stone 16): a sector number and
+// a block of bytes to move the sector into or out of.
+make bvDiskKind(name, args, line, arity) {
+    if length(args) != arity {
+        give errAt(line, "'" + name + "' takes 2 values (sector, block), but it was given " + length(args) + ". Call it like: " + name + "(0, block) — a sector number, and a block of bytes made with makebytes.")
+    }
+    let doing = "say which sector to read"
+    if name == "diskwrite" {
+        doing = "say which sector to write"
+    }
+    let rn = bvRequireNumber(args[0], line, doing)
+    if rn.ok == false {
+        give rn
+    }
+    let bk = bvKindOf(args[1])
+    if bk.ok == false {
+        give bk
+    }
+    let blockKind = bk.value
+    if blockKind == "unknown" {
+        if args[1].type == "variable" {
+            let pr = bvPin(args[1].name, "bytes", line)
+            if pr.ok == false {
+                give pr
+            }
+            blockKind = "bytes"
+        }
+    }
+    if blockKind != "bytes" {
+        give errAt(line, "'" + name + "' moves a whole sector between the disk and a block of bytes — made with makebytes, at least 512 of them — but here it was given " + bvKindPhrase(blockKind) + ".")
+    }
+    give okVal("number")
+}
+
+// The built-in tools the validator knows by name, each
+// with its own count refusal, and the one long refusal
+// for every other built-in.
+make bvBuiltinKind(name, args, line) {
+    if name == "makebytes" {
+        if length(args) != 1 {
+            give errAt(line, "'makebytes' takes 1 value (count), but it was given " + length(args) + ".")
+        }
+        let rn = bvRequireNumber(args[0], line, "say how many bytes to make")
+        if rn.ok == false {
+            give rn
+        }
+        give okVal("bytes")
+    }
+    if name == "absolute" {
+        if length(args) != 1 {
+            give errAt(line, "'absolute' takes 1 value (value), but it was given " + length(args) + ".")
+        }
+        let rn = bvRequireNumber(args[0], line, "take the size of")
+        if rn.ok == false {
+            give rn
+        }
+        give okVal("number")
+    }
+    if name == "smallest" {
+        give bvTwoNumbers(name, args, line, "choose between")
+    }
+    if name == "largest" {
+        give bvTwoNumbers(name, args, line, "choose between")
+    }
+    if name == "bitand" {
+        give bvTwoNumbers(name, args, line, "be worked on bit by bit")
+    }
+    if name == "bitor" {
+        give bvTwoNumbers(name, args, line, "be worked on bit by bit")
+    }
+    if name == "bitxor" {
+        give bvTwoNumbers(name, args, line, "be worked on bit by bit")
+    }
+    if name == "leftover" {
+        give bvTwoNumbers(name, args, line, "be divided")
+    }
+    if name == "wholediv" {
+        give bvTwoNumbers(name, args, line, "be divided")
+    }
+    if name == "asnumber" {
+        if length(args) != 1 {
+            give errAt(line, "'asnumber' takes 1 value (text), but it was given " + length(args) + ".")
+        }
+        let kr = bvKindOf(args[0])
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "unknown" {
+            if args[0].type == "variable" {
+                let pr = bvPin(args[0].name, "text", line)
+                if pr.ok == false {
+                    give pr
+                }
+            }
+        } else {
+            if kr.value != "text" {
+                give errAt(line, "'asnumber' reads a number out of text — the characters a number is written with, like \"620\" — but here it was given " + bvKindPhrase(kr.value) + ".")
+            }
+        }
+        give okVal("number")
+    }
+    if name == "astext" {
+        if length(args) != 1 {
+            give errAt(line, "'astext' takes 1 value (bytes), but it was given " + length(args) + ".")
+        }
+        let kr = bvKindOf(args[0])
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "unknown" {
+            if args[0].type == "variable" {
+                let pr = bvPin(args[0].name, "bytes", line)
+                if pr.ok == false {
+                    give pr
+                }
+            }
+        } else {
+            if kr.value != "bytes" {
+                give errAt(line, "'astext' reads text out of a block of bytes — the bytes a file's or a card's contents are held in — but here it was given " + bvKindPhrase(kr.value) + ".")
+            }
+        }
+        give okVal("text")
+    }
+    if name != "length" {
+        give errAt(line, "The tool '" + name + "' isn't part of bare metal yet — there are no files there, and no lists or objects for it to work on. Bare metal keeps 'length', for measuring text and blocks of bytes, 'absolute', for a number's size, 'smallest' and 'largest', for choosing between two numbers, the bit words 'bitand', 'bitor' and 'bitxor', 'leftover', for what a dividing leaves, 'wholediv', for dividing into whole numbers, 'asnumber', for reading a number out of text, and 'astext', for reading text out of a block of bytes.")
+    }
+    if length(args) != 1 {
+        give errAt(line, "'length' takes 1 value (value), but it was given " + length(args) + ".")
+    }
+    let kr = bvKindOf(args[0])
+    if kr.ok == false {
+        give kr
+    }
+    if kr.value == "number" {
+        give errAt(line, "On bare metal 'length' measures text and blocks of bytes only — lists and objects, which it also measures in hosted Nifla, aren't there.")
+    }
+    if kr.value == "boolean" {
+        give errAt(line, "On bare metal 'length' measures text and blocks of bytes only — lists and objects, which it also measures in hosted Nifla, aren't there.")
+    }
+    if kr.value == "unknown" {
+        if args[0].type == "variable" {
+            let pr = bvPin(args[0].name, "text", line)
+            if pr.ok == false {
+                give pr
+            }
+        }
+    }
+    give okVal("number")
+}
+
+// smallest / largest, the bit words, leftover and
+// wholediv share one shape: two values, both numbers.
+make bvTwoNumbers(name, args, line, doing) {
+    if length(args) != 2 {
+        give errAt(line, "'" + name + "' takes 2 values (first, second), but it was given " + length(args) + ".")
+    }
+    let r0 = bvRequireNumber(args[0], line, doing)
+    if r0.ok == false {
+        give r0
+    }
+    let r1 = bvRequireNumber(args[1], line, doing)
+    if r1.ok == false {
+        give r1
+    }
+    give okVal("number")
+}
+
+// BareValidator.validateBlock.
+make bvBlock(stmts) {
+    append(gBvScopes, nmNew())
+    for s in stmts {
+        let r = bvStmt(s, false)
+        if r.ok == false {
+            give r
+        }
+    }
+    removeat(gBvScopes, length(gBvScopes) - 1)
+    give okVal(true)
+}
+
+// BareValidator.validateStatement.
+make bvStmt(s, topLevel) {
+    if s.type == "declare" {
+        let kr = bvKindOf(s.value)
+        if kr.ok == false {
+            give kr
+        }
+        let kind = kr.value
+        let marked = ""
+        if s.kindWord != "" {
+            let m = bvKindForWord(s.kindWord)
+            if m == "" {
+                give errAt(s.line, "Bare metal can't hold " + chkPhraseForWord(s.kindWord) + " — an annotation there can only mark a number, some text, a true/false value, or a block of bytes.")
+            }
+            marked = m
+        }
+        if kind == "unknown" {
+            if s.value.type == "variable" {
+                let pinKind = "number"
+                if marked != "" {
+                    pinKind = marked
+                }
+                let pr = bvPin(s.value.name, pinKind, s.value.line)
+                if pr.ok == false {
+                    give pr
+                }
+            }
+            kind = "number"
+            if marked != "" {
+                kind = marked
+            }
+        }
+        if marked != "" {
+            if kind != marked {
+                give errAt(s.line, "'" + s.name + "' is marked as " + chkPhraseForWord(s.kindWord) + " by its annotation, but this value is " + chkPhraseForWord(bvKindWord(kind)) + ". Change the value, or change the annotation.")
+            }
+        }
+        nmSet(gBvScopes[length(gBvScopes) - 1], s.name, kind)
+        give okVal(true)
+    }
+    if s.type == "assign" {
+        let kr = bvKindOf(s.value)
+        if kr.ok == false {
+            give kr
+        }
+        let kind = kr.value
+        if kind == "unknown" {
+            if s.value.type == "variable" {
+                let pr = bvPin(s.value.name, "number", s.value.line)
+                if pr.ok == false {
+                    give pr
+                }
+            }
+            kind = "number"
+        }
+        let existing = bvLookup(s.name)
+        if existing != "" {
+            if existing != "unknown" {
+                if kind != existing {
+                    give errAt(s.line, "This sets '" + s.name + "' to " + bvKindPhrase(kind) + ", but '" + s.name + "' already holds " + bvKindPhrase(existing) + ". On bare metal a value's shape has to be one thing.")
+                }
+            }
+        }
+        if existing == "unknown" {
+            let pr = bvPin(s.name, kind, s.line)
+            if pr.ok == false {
+                give pr
+            }
+        }
+        if existing == "" {
+            let pr = bvPin(s.name, kind, s.line)
+            if pr.ok == false {
+                give pr
+            }
+        }
+        give okVal(true)
+    }
+    if s.type == "assignTarget" {
+        if s.target.type == "index" {
+            let bk = bvKindOf(s.target.base)
+            if bk.ok == false {
+                give bk
+            }
+            let baseKind = bk.value
+            if baseKind == "unknown" {
+                if s.target.base.type == "variable" {
+                    let pr = bvPin(s.target.base.name, "bytes", s.line)
+                    if pr.ok == false {
+                        give pr
+                    }
+                    baseKind = "bytes"
+                }
+            }
+            if baseKind != "bytes" {
+                give errAt(s.line, "Setting an item by number on bare metal works on a block of bytes — made with makebytes — but here the value being set into is " + bvKindPhrase(baseKind) + ".")
+            }
+            let ri = bvRequireNumber(s.target.index, s.line, "pick a byte")
+            if ri.ok == false {
+                give ri
+            }
+            let rv = bvRequireNumber(s.value, s.line, "be stored as a byte")
+            if rv.ok == false {
+                give rv
+            }
+            give okVal(true)
+        }
+        give errAt(s.line, "Setting a field isn't part of bare metal yet — there are no objects there. Setting a byte in a block of bytes, like block[0] = 65, is the one setting-by-place it has.")
+    }
+    if s.type == "say" {
+        let kr = bvKindOf(s.value)
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "text" {
+            give okVal(true)
+        }
+        if kr.value == "number" {
+            give okVal(true)
+        }
+        if kr.value == "unknown" {
+            if s.value.type == "variable" {
+                let pr = bvPin(s.value.name, "text", s.line)
+                if pr.ok == false {
+                    give pr
+                }
+                give okVal(true)
+            }
+            give errAt(s.line, "I can't tell what kind of value this is, so I can't say it on bare metal. Say a piece of text, a variable holding text, or a whole number.")
+        }
+        if kr.value == "boolean" {
+            give errAt(s.line, "'say' on bare metal can show text or a whole number, but here it was given a true/false value. Compare it or count it first, and say the words or the number.")
+        }
+        give errAt(s.line, "'say' on bare metal can show text or a whole number, but here it was given a block of bytes. Say a byte at a time, like block[0], or join words about it.")
+    }
+    if s.type == "if" {
+        let kr = bvKindOf(s.condition)
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "number" {
+            give errAt(s.line, "This 'if' decides with " + bvKindPhrase(kr.value) + ", but a decision needs true or false — compare something, like: if style == 15 { ... }.")
+        }
+        if kr.value == "text" {
+            give errAt(s.line, "This 'if' decides with " + bvKindPhrase(kr.value) + ", but a decision needs true or false — compare something, like: if style == 15 { ... }.")
+        }
+        let bt = bvBlock(s.thenStmts)
+        if bt.ok == false {
+            give bt
+        }
+        if s.hasElse {
+            let be = bvBlock(s.elseStmts)
+            if be.ok == false {
+                give be
+            }
+        }
+        give okVal(true)
+    }
+    if s.type == "while" {
+        let kr = bvKindOf(s.condition)
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "number" {
+            give errAt(s.line, "This 'while' decides with " + bvKindPhrase(kr.value) + ", but a decision needs true or false — compare something, like: while count < 5 { ... }.")
+        }
+        if kr.value == "text" {
+            give errAt(s.line, "This 'while' decides with " + bvKindPhrase(kr.value) + ", but a decision needs true or false — compare something, like: while count < 5 { ... }.")
+        }
+        give bvBlock(s.body)
+    }
+    if s.type == "repeat" {
+        let kr = bvKindOf(s.count)
+        if kr.ok == false {
+            give kr
+        }
+        if kr.value == "text" {
+            give errAt(s.line, "'repeat' needs a number saying how many times to run, but here it was given " + bvKindPhrase(kr.value) + ".")
+        }
+        if kr.value == "boolean" {
+            give errAt(s.line, "'repeat' needs a number saying how many times to run, but here it was given " + bvKindPhrase(kr.value) + ".")
+        }
+        give bvBlock(s.body)
+    }
+    if s.type == "for" {
+        give errAt(s.line, "'for' isn't part of bare metal yet — there are no lists there. Walk a block of bytes with 'while' and a counter instead.")
+    }
+    if s.type == "define" {
+        if topLevel {
+            give okVal(true)
+        }
+        give errAt(s.line, "On bare metal, functions are made at the top of the program — a 'make' inside a block or another function isn't part of it yet.")
+    }
+    if s.type == "give" {
+        let kr = bvKindOf(s.value)
+        if kr.ok == false {
+            give kr
+        }
+        if gBvCurrentFunc != "" {
+            if kr.value != "unknown" {
+                let rec = nmGet(gBvFuncs, gBvCurrentFunc)
+                let existing = rec.value.giveKind
+                if existing != "unknown" {
+                    if existing != kr.value {
+                        let dl = nmGet(gBvDefineLines, gBvCurrentFunc)
+                        give errAt(dl.value, "The function '" + gBvCurrentFunc + "' gives back " + bvKindPhrase(existing) + " in one place and " + bvKindPhrase(kr.value) + " in another. On bare metal what a function gives has to be one shape.")
+                    }
+                }
+                rec.value.giveKind = kr.value
+                nmSet(gBvFuncs, gBvCurrentFunc, rec.value)
+            }
+        }
+        give okVal(true)
+    }
+    if s.type == "attempt" {
+        give errAt(s.line, "'attempt' isn't part of bare metal yet — on bare metal a problem stops the machine itself, and there is nothing there to catch it with.")
+    }
+    if s.type == "doCall" {
+        let r = bvCallKind(s.name, s.args, s.line)
+        if r.ok == false {
+            give r
+        }
+        give okVal(true)
+    }
+    if s.type == "doExpr" {
+        let r = bvKindOf(s.expr)
+        if r.ok == false {
+            give r
+        }
+        give okVal(true)
+    }
+    give errAt(s.line, "Something went wrong while reading the program.")
+}
+
+// BareValidator.validateFunction: read one body with
+// its parameters' pinned kinds as the opening scope,
+// then write back whatever the body's uses pinned.
+make bvFunction(name, body) {
+    let rec = nmGet(gBvFuncs, name)
+    let info = rec.value
+    let pk = nmGet(gBvParamKinds, name)
+    let scope = nmNew()
+    let i = 0
+    while i < length(info.params) {
+        nmSet(scope, info.params[i], pk.value[i])
+        i = i + 1
+    }
+    while length(gBvScopes) > 0 {
+        removeat(gBvScopes, 0)
+    }
+    append(gBvScopes, scope)
+    gBvCurrentFunc = name
+    for s in body {
+        let r = bvStmt(s, false)
+        if r.ok == false {
+            give r
+        }
+    }
+    let j = 0
+    while j < length(info.params) {
+        let held = nmGet(gBvScopes[0], info.params[j])
+        let pinned = "unknown"
+        if held.found {
+            pinned = held.value
+        }
+        if pinned != "unknown" {
+            if pk.value[j] != "unknown" {
+                if pk.value[j] != pinned {
+                    let dl = nmGet(gBvDefineLines, name)
+                    give errAt(dl.value, "The function '" + name + "' uses its value '" + info.params[j] + "' as " + bvKindPhrase(pinned) + ", but a call hands it " + bvKindPhrase(pk.value[j]) + ". On bare metal a value's shape has to be one thing — change the call, or how the function uses '" + info.params[j] + "'.")
+                }
+            }
+            pk.value[j] = pinned
+        }
+        j = j + 1
+    }
+    while length(gBvScopes) > 0 {
+        removeat(gBvScopes, 0)
+    }
+    gBvCurrentFunc = ""
+    give okVal(true)
+}
+
+// Two pinned-kind lists standing equal.
+make bvKindListsEqual(a, b) {
+    if length(a) != length(b) {
+        give false
+    }
+    let i = 0
+    while i < length(a) {
+        if a[i] != b[i] {
+            give false
+        }
+        i = i + 1
+    }
+    give true
+}
+
+// BareValidator.validate — the whole walk: collect the
+// functions (their annotations seeding the shapes),
+// read the bodies, read the program, then the settling
+// rounds of Stone 15, then the final desk check.
+make bvValidateProgram(stmts, guest) {
+    nmClear(gBvFuncs)
+    nmClear(gBvDefineLines)
+    nmClear(gBvParamKinds)
+    while length(gBvDefOrder) > 0 {
+        removeat(gBvDefOrder, 0)
+    }
+    while length(gBvScopes) > 0 {
+        removeat(gBvScopes, 0)
+    }
+    gBvGuest = guest
+    gBvDeskFinal = false
+    gBvCurrentFunc = ""
+    for s in stmts {
+        if s.type == "define" {
+            if nmHas(gBvBareTools, s.name) {
+                give errAt(s.line, "There is already a bare-metal tool called '" + s.name + "' — every bare program has it from the start. A function can't be made with that name; rename the function.")
+            }
+            if nmHas(gBvGuestDesk, s.name) {
+                give errAt(s.line, "There is already a bare-metal tool called '" + s.name + "' — every bare program has it from the start. A function can't be made with that name; rename the function.")
+            }
+            if nmHas(gBvGuestDoor, s.name) {
+                give errAt(s.line, "There is already a bare-metal tool called '" + s.name + "' — every bare program has it from the start. A function can't be made with that name; rename the function.")
+            }
+            nmSet(gBvFuncs, s.name, { params: s.params, giveKind: "unknown" })
+            nmSet(gBvDefineLines, s.name, s.line)
+            append(gBvDefOrder, s.name)
+            let seeded = []
+            for w in s.paramKinds {
+                if w == "" {
+                    append(seeded, "unknown")
+                } else {
+                    let k = bvKindForWord(w)
+                    if k == "" {
+                        give errAt(s.line, "Bare metal can't hold " + chkPhraseForWord(w) + " — an annotation there can only mark a number, some text, a true/false value, or a block of bytes.")
+                    }
+                    append(seeded, k)
+                }
+            }
+            nmSet(gBvParamKinds, s.name, seeded)
+            if s.returnKind != "" {
+                let k = bvKindForWord(s.returnKind)
+                if k == "" {
+                    give errAt(s.line, "Bare metal can't hold " + chkPhraseForWord(s.returnKind) + " — an annotation there can only mark a number, some text, a true/false value, or a block of bytes.")
+                }
+                let rec = nmGet(gBvFuncs, s.name)
+                rec.value.giveKind = k
+                nmSet(gBvFuncs, s.name, rec.value)
+            }
+        }
+    }
+    for s in stmts {
+        if s.type == "define" {
+            let r = bvFunction(s.name, s.body)
+            if r.ok == false {
+                give r
+            }
+        }
+    }
+    while length(gBvScopes) > 0 {
+        removeat(gBvScopes, 0)
+    }
+    append(gBvScopes, nmNew())
+    gBvCurrentFunc = ""
+    for s in stmts {
+        if s.type != "define" {
+            let r = bvStmt(s, true)
+            if r.ok == false {
+                give r
+            }
+        }
+    }
+    while length(gBvScopes) > 0 {
+        removeat(gBvScopes, 0)
+    }
+    let settling = true
+    let rounds = 0
+    while settling {
+        if rounds >= 8 {
+            settling = false
+        } else {
+            settling = false
+            rounds = rounds + 1
+            for s in stmts {
+                if s.type == "define" {
+                    let pk = nmGet(gBvParamKinds, s.name)
+                    let before = []
+                    for k in pk.value {
+                        append(before, k)
+                    }
+                    let r = bvFunction(s.name, s.body)
+                    if r.ok == false {
+                        give r
+                    }
+                    let after = nmGet(gBvParamKinds, s.name)
+                    if bvKindListsEqual(after.value, before) == false {
+                        settling = true
+                    }
+                }
+            }
+        }
+    }
+    gBvDeskFinal = true
+    for s in stmts {
+        if s.type == "define" {
+            let r = bvFunction(s.name, s.body)
+            if r.ok == false {
+                give r
+            }
+        }
+    }
+    gBvDeskFinal = false
+    give okVal(true)
+}
+
 // ---------- the program itself ----------
 // What running this front end does: take the mode and the
 // file path from the words it was started with, read the
@@ -5350,8 +6555,12 @@ if length(allArgs) < 2 {
                 if allArgs[0] != "check-bare" {
                     if allArgs[0] != "check-guest" {
                         if allArgs[0] != "compile" {
-                            sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest' and 'compile', like: nifla-front tokens program.nifla")
-                            exitwith(2)
+                            if allArgs[0] != "barevalid" {
+                                if allArgs[0] != "barevalid-guest" {
+                                    sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest', 'compile', 'barevalid' and 'barevalid-guest', like: nifla-front tokens program.nifla")
+                                    exitwith(2)
+                                }
+                            }
                         }
                     }
                 }
@@ -5386,6 +6595,36 @@ if length(allArgs) < 2 {
                 if allArgs[0] == "tree" {
                     say dumpProgram(parsed.value)
                 } else {
+                    if allArgs[0] == "barevalid" {
+                        let checked = chkCheckProgram(parsed.value, true, false)
+                        if checked.ok == false {
+                            sayerr(checked.message)
+                            exitwith(1)
+                        } else {
+                            let validated = bvValidateProgram(parsed.value, false)
+                            if validated.ok == false {
+                                sayerr(validated.message)
+                                exitwith(1)
+                            } else {
+                                say "valid"
+                            }
+                        }
+                    } else {
+                        if allArgs[0] == "barevalid-guest" {
+                            let checked = chkCheckProgram(parsed.value, true, true)
+                            if checked.ok == false {
+                                sayerr(checked.message)
+                                exitwith(1)
+                            } else {
+                                let validated = bvValidateProgram(parsed.value, true)
+                                if validated.ok == false {
+                                    sayerr(validated.message)
+                                    exitwith(1)
+                                } else {
+                                    say "valid"
+                                }
+                            }
+                        } else {
                     if allArgs[0] == "compile" {
                         let checked = chkCheckProgram(parsed.value, false, false)
                         if checked.ok == false {
@@ -5402,6 +6641,8 @@ if length(allArgs) < 2 {
                             exitwith(1)
                         } else {
                             say "checked"
+                        }
+                    }
                         }
                     }
                 }

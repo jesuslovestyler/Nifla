@@ -1,0 +1,6 @@
+// Stone 55 fixture: joining text with text and with a
+// whole number, then saying the joined text — the bare
+// validator's join walk, accepted.
+let name = "Nifla"
+let line = name + " on bare metal, pass " + 3
+say line

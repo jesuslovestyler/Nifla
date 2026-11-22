@@ -5032,6 +5032,155 @@ into Nifla the same way, piece by piece, and
 the bootstrap stone at the road's end — are
 future work, named here and not started.
 
+## Stone 55 — the bare leg begins: the validator stands in Nifla
+
+The all-Nifla port's fourth leg — the bare
+compiler (`src/BareCompiler.swift`, the
+`niflac --bare` target) — opens here.
+`BareValidator`, the walk that refuses in plain
+words, before anything is built, whatever the
+bare subset doesn't include, stands in Nifla in
+`selfhost/nifla-front.nifla` as the front end's
+new `barevalid` and `barevalid-guest` modes:
+lex, parse, check in the mode's bare picture
+(the `check-bare` / `check-guest` pictures of
+Stones 50–51), then the validator in the mode's
+picture — host or guest. A program the whole
+road accepts prints exactly `valid`; a refusal
+from any stage is spoken exactly as that stage
+speaks it.
+
+The leg's convergence decision is SUPERSEDE,
+in Stone 50's pattern: nothing anywhere in the
+self-host validates a program for a target —
+the interpreter runs programs and the checker
+proves hosted facts — so the validator is
+written fresh against `BareCompiler.swift` as
+the sole standard, reusing the front end's
+helper layer (the name maps, `errAt`, `numText`,
+`chkPhraseForWord`). The self-host stays
+untouched, and nothing under `src/` is touched.
+
+Ported whole: the collection (functions from
+the top level only, a made name colliding with
+a bare tool refused, the `make` line's
+annotations seeding the shapes — a kind bare
+metal can't hold refused there, in
+`StaticKind.phrase`'s words); the bodies-first
+reading and the program's own; Stone 15's
+settling rounds (bodies re-read as calls pin
+their parameters' shapes, until the shapes
+settle, eight rounds at most) and the final
+desk check (a value handed to a floor block
+whose shape is still not known is refused
+there); the pinning scope walk (the first pin
+wins, a conflicting pin refused at the line);
+`kindOf` whole — whole-number literals that
+fit the machine, text, true/false, the
+`nothing` refusal, blocks of bytes picked by
+number, the floor desk (numbers in a row, one
+piece of memory on the memory side — the
+validator's counting of what crosses, which
+Stone 52's ledger named as this leg's
+business), joining, arithmetic, comparisons;
+`requireNumber`; `callKind` whole in Swift's
+order — the guest desk, the host's door, the
+machine's own tools (the disk tools' sector
+and block), the built-ins the bare subset
+keeps (`makebytes`, `length`, `absolute`,
+`smallest`/`largest`, the bit words,
+`leftover`, `wholediv`, `asnumber`, `astext`),
+each with its own count refusal, the one long
+refusal for every other built-in, and the made
+functions (shapes pinned by calls, the
+six-words register limit counted with text and
+bytes at two words); and the statement walk
+whole, annotations on `let` included. Every
+refusal message is transcribed character for
+character from `BareCompiler.swift`.
+
+The scope boundary is recorded honestly, as
+Stone 53 recorded its own: what stands here is
+the validator — the verdict half of the bare
+compiler, this stone's identity claim.
+`BareTranslator` (the same file's second half,
+which turns the validated program into x86-64
+assembly) stands in the leg's next stone, and
+the modes grow it there. `compileBare`'s
+driver half — the assembling, the linking, the
+packaging, the running of tools — is not
+emitted text and is not ported in this leg, as
+`compileMain`'s driver half was not in the
+compiler leg; `findAssembler`, which
+`src/Compiler.swift` also hosts, is driver
+machinery of the same kind — it reads the
+process environment (`CC`, `PATH`) and tests
+files for executability, and the language has
+no word for either — so it stands with the
+driver, recorded here and in the bare oracle's
+header, rather than in `front-examples/
+BOUNDARY.txt`: the boundary list holds
+fixtures, programs whose two readings diverge,
+and no program's reading turns on the
+assembler search. `featherCard` and its
+`fnv1a64` reckoning (Stone 20) are likewise
+noted for a later stone of this leg: the
+checksum is a 64-bit reckoning whose state no
+Nifla number holds exactly, and whether it can
+be carried some other honest way is that
+stone's question, not this one's.
+
+Proof: `tools/bare-oracle.swift` (a proof-only
+Swift main in the compile oracle's pattern —
+the same seven-file link) and
+`run-barevalid.sh`, comparing stdout, stderr
+and exit byte for byte in both modes:
+barevalid fixtures 18/18 and 18/18 in the
+guest picture, bare 16/16 and 16/16, examples
+60/60, checker 45/45, floor 4/4, voice 3/3,
+selfhost 2/2, tools 1/1, primer 58/58,
+tutorial 86/86, fixtures 104/104, checkfix
+64/64, cmpfix 10/10, cardnull 21/21 and 21/21
+— 547 comparisons in all; boundary 5 noted
+(the front-examples boundary fixtures diverge
+in the barevalid modes too, verified divergent
+on every run — the word fixtures at the lex
+stage, the number fixtures in the value the
+validator's whole-number refusal carries).
+The 18 new fixtures in `barevalid-examples/`
+were each confirmed against the oracle first,
+in both modes: joinings, bytes, a floor handed
+text and a number, the machine's tools, a
+guest's desk (accepted as a guest, refused as
+a host), the host's door (the mirror image), a
+library function settled by its call; and the
+refusals — a fraction, `nothing`, a list, a
+said true/false, two texts to one floor, eight
+words of call, an unholdable annotation, a
+disk read handed a number, a desk shape no
+call ever pins, one function handed two
+shapes, a text repeat count.
+
+The new code is written in the front end's
+assignment style, per Stone 50's pipe finding:
+the whole front file's generated Swift stands
+at 78 warnings / 62,699 bytes of diagnostics,
+against Stone 54's 58 warnings / 48,149 bytes
+— a growth of twenty warnings, still under
+the swiftc-stderr pipe's 64 KB, and niflac
+compiles the enlarged front end as every proof
+requires. One walk is slower than Swift's and
+the ledger says so plainly: the front end
+validating its own 6,600 lines takes about a
+minute (the settling rounds re-read some 150
+bodies through list-held name maps) where the
+oracle takes half a second; the verdict is
+the same word for word, and no corpus file
+comes near the proof's timeout but that one.
+
+No PRIMER change: the language's surface did
+not change in this stone.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

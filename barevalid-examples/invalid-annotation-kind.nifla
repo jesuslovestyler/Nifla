@@ -1,0 +1,8 @@
+// Stone 55 fixture: an annotation marking a kind bare
+// metal can't hold — a list — on a function's value.
+// The call satisfies the checker; the bare validator's
+// collection refuses the mark itself.
+make f(a: list) {
+    give 1
+}
+say f([1])

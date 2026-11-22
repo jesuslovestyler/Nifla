@@ -1,0 +1,9 @@
+// Stone 55 fixture: the machine's own tools in a host
+// program — ticks, waittick, readkey, memorysize —
+// accepted in the host picture.
+let t = ticks()
+let k = readkey()
+let m = memorysize()
+say t + k + m
+let w = waittick()
+say w

@@ -1,0 +1,4 @@
+// Stone 55 fixture: saying a true/false value — 'say'
+// on bare metal shows text or a whole number.
+let flag = true
+say flag

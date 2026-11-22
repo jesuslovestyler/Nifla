@@ -1,0 +1,5 @@
+// Stone 55 fixture: 'repeat' counted by a piece of
+// text instead of a number.
+repeat "three" {
+    say 1
+}

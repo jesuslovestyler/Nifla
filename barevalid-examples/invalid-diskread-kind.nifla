@@ -1,0 +1,4 @@
+// Stone 55 fixture: diskread handed a number where the
+// block of bytes belongs.
+let n = diskread(0, 5)
+say n

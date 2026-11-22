@@ -1,0 +1,4 @@
+// Stone 55 fixture: 'nothing' on bare metal — the
+// empty value has no machine word to be.
+let x = nothing
+say 1

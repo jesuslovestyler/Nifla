@@ -1,0 +1,12 @@
+// Stone 55 fixture: a library function whose parameter
+// is handed straight to a floor block. The body's first
+// reading leaves the shape unpinned; the call below
+// pins it to text, and the settling rounds re-read the
+// body with the shape known — accepted.
+make shout(word) {
+    let n = floor(word) {
+        mov rax, r12
+    }
+    give n
+}
+say shout("hello")

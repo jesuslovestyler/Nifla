@@ -1,0 +1,10 @@
+// Stone 55 fixture: a function handing a parameter
+// straight to a floor block, and never called — no call
+// ever pins the shape, so the final desk check refuses.
+make hand(word) {
+    let n = floor(word) {
+        mov rax, r12
+    }
+    give n
+}
+say 1

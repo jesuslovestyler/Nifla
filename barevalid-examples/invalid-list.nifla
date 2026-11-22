@@ -1,0 +1,4 @@
+// Stone 55 fixture: a list on bare metal — there is
+// no one there to own its items.
+let xs = [1, 2, 3]
+say 1

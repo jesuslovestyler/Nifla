@@ -1,0 +1,4 @@
+// Stone 55 fixture: a fraction on bare metal — every
+// bare number is a whole number that fits the machine.
+let x = 1.5
+say x

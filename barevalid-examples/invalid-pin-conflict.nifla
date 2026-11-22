@@ -1,0 +1,9 @@
+// Stone 55 fixture: one function handed text by one
+// call and a number by another — a value's shape has
+// to be one thing.
+make use(v) {
+    give v
+}
+let a = use("text")
+let b = use(4)
+say 1

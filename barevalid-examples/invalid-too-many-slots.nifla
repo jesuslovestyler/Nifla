@@ -1,0 +1,7 @@
+// Stone 55 fixture: a call handing four pieces of text
+// — eight words' worth — to one function; the machine's
+// registers carry six words at most.
+make take(a, b, c, d) {
+    give 1
+}
+say take("a", "b", "c", "d")

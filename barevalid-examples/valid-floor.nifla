@@ -1,0 +1,8 @@
+// Stone 55 fixture: a floor block handed one piece of
+// text and one number — the desk's one memory side and
+// one number in a row — accepted.
+let word = "abc"
+let total = floor(word, 7) {
+    mov rax, r12
+}
+say total

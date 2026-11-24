@@ -5452,6 +5452,28 @@ No PRIMER change: the language's surface did not
 change in this stone. The ARM leg's seeded sweep
 stands next, and then the bootstrap.
 
+Stone 60 is the ARM leg's generated sweep, in Stone
+58's shape: run-barecompile-arm-sweep.sh (seeds
+59059–59061) generates three families no one
+hand-picked and compares both sides byte for byte
+in the barecompile-arm mode — bare-grammar programs
+(300; 66 accepted, the rest refused identically,
+the desk and door shapes meeting the target's own
+refusal walk as well as the validator's), number
+literals under the bare law (200; the in-law half
+accepted, the past-law half refused with the refusal
+speaking the value), and text literals assembled
+byte by byte (200, all accepted). There is no cards
+family: the ARM target lays no feather card, so the
+card stands proved by Stone 57's sweep alone. The
+sweep passes whole — 700 comparisons — and with it
+the ARM leg stands proved the way the x86 bare leg
+was: the corpus gate and the generated sweep, both
+byte-identical. The front end did not grow in this
+stone, so generated-Swift diagnostics stand at
+Stone 59's 63,883 bytes. What remains on the
+all-Nifla road is the bootstrap.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

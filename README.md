@@ -5474,6 +5474,101 @@ stone, so generated-Swift diagnostics stand at
 Stone 59's 63,883 bytes. What remains on the
 all-Nifla road is the bootstrap.
 
+## Stone 61 — the bootstrap: the compiler compiles itself
+
+The all-Nifla road's last stone. What the legs
+built toward stands proved here: the front end —
+the whole toolchain spoken in Nifla, lexer,
+parser, checker, the hosted translator, the bare
+validator and both bare translators — compiles
+*itself*, and the compiler built from its own
+output compiles it again to the same text, byte
+for byte.
+
+The proof is run-bootstrap.sh, a chain driven in
+a scratch folder. The seed — the Swift toolchain
+in src/, built by build.sh — compiles
+selfhost/nifla-front.nifla, keeping the generated
+Swift beside the binary as compileMain keeps it:
+that text is S0, and the binary is generation 1.
+Generation 1, in its compile mode, compiles its
+own source: S1, and S1 equals S0 byte for byte.
+S1 is built into generation 2 — handed to swiftc
+under the name main.swift beside the runtime,
+exactly as compileMain's driver hands it over —
+and generation 2 compiles the front end's source
+again: S2, and S2 equals S1 byte for byte. The
+fixed point is proved whole, the texts compared
+entire, not sampled. Generation 2 is then
+exercised as a front end beside generation 1:
+548 fixture runs across the front, compile, bare
+and ARM fixture folders in the check, compile,
+barecompile and barecompile-arm modes, and the
+front end's own source in every mode (tokens,
+tree, check, compile, barevalid, barecompile,
+barecompile-arm) — stdout, stderr and exit
+identical on every run. In the bare modes both
+generations speak the same refusal of the front
+end's own objects, at line 195: the front end is
+a hosted program, and says so in both
+generations.
+
+The driving, said plainly: the builds in the
+chain are driven by the gate script standing
+where compileMain's driver half stands in Swift —
+the scratch folder, the running of swiftc, the
+keeping of the generated Swift. Stones 53–60
+recorded the driver halves (compileMain's,
+compileBare's, compileBareARM's, and the finders
+with them) as driver machinery outside the
+identity claims, and this stone does not move
+them: the language has no word for starting a
+process, and the bootstrap's claim was never
+that a Nifla program starts swiftc — it is that
+the compiler, spoken in Nifla, produces itself
+exactly. What a driver does with that text is
+the same work in Swift's hands or the shell's.
+
+With the fixed point proved, the seed retires,
+as the road decided on November 19, 2026: src/
+stands frozen — the honest first builder, kept
+for honesty, no longer the living standard. The
+living standard is selfhost/nifla-front.nifla
+itself: the seed builds generation 1,
+generation 1's text builds generation 2, and
+run-bootstrap.sh proves the generations are
+one. Work on the compiler from here is work on
+the front end, proved by the front end's own
+gates and by this one.
+
+The boundaries stand as recorded — the Unicode
+boundary at the lex stage and the number
+boundary at the reader, both inherited by the
+front end exactly as by the seed, both the
+project owner's call alone — and no new boundary
+was found: within the proved ground, the
+compiler compiling itself exposed no
+expressibility gap. Diagnostics stand at Stone
+59's measurement, 158 warnings / 63,883 bytes of
+generated-Swift diagnostics; the front file has
+not changed since Stone 59. No PRIMER change:
+the language's surface did not change in this
+stone. What changed is who speaks it.
+
+A bench note, plainly: the gate's first run
+stalled in a starved-cell window and its second
+was cut by a service restart inside the last
+battery; the third run passed whole, and every
+stage of the chain had already passed in the
+earlier runs. The gate prints each mode as it is
+compared, so a stall shows where it stands.
+
+The all-Nifla road is complete: every leg of the
+toolchain stands in Nifla, proved identical to
+the Swift it was ported from, and the compiler
+compiles itself. Swift retires to the frozen
+seed, kept for honesty.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull

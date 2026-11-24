@@ -1,0 +1,21 @@
+// Stone 59 fixture: the built-in words on ARM —
+// the smallest and largest of two, the bit words
+// with their negative guards, the remainder and
+// whole-division words, absolute — and the
+// machine's own gifts: memorysize from the device
+// tree, ticks from the counter, waittick, readkey.
+say smallest(9, 4)
+say largest(9, 4)
+say bitand(12, 10)
+say bitor(12, 10)
+say bitxor(12, 10)
+say leftover(100, 7)
+say wholediv(100, 7)
+say absolute(0 - 5)
+say memorysize()
+let first = ticks()
+waittick()
+if ticks() >= first {
+    say "ticks advance"
+}
+say readkey()

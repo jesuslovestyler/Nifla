@@ -1,0 +1,19 @@
+// Stone 59 fixture: number literals at the edges of
+// the immediate move — 65535 and -65536 ride in a
+// mov; one step past either edge, and the wide ones,
+// load from the literal pool instead — and the
+// arithmetic walks: division's guard, the compares,
+// negation. Pins the rendering of each literal.
+let edge = 65535
+let past = 65536
+let lowedge = 0 - 65536
+let lowpast = 0 - 65537
+let wide = 4000000000
+say edge + past
+say lowedge + lowpast
+say wide / 7
+say wide - past * 3
+if past > edge {
+    say "past the edge"
+}
+say 0 - 42

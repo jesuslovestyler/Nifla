@@ -1,0 +1,25 @@
+// Stone 59 fixture: the loops on ARM — a while and
+// a repeat nested one inside the other (their guard
+// counters and labels numbered in the walk's order),
+// an if with an else, and a block of bytes written
+// by number and read back the same way.
+let block = makebytes(4)
+let i = 0
+while i < 4 {
+    block[i] = i * 10
+    i = i + 1
+}
+let total = 0
+repeat 3 {
+    let j = 0
+    while j < 4 {
+        total = total + block[j]
+        j = j + 1
+    }
+}
+say total
+if total == 180 {
+    say "the loops agree"
+} else {
+    say "the loops wandered"
+}

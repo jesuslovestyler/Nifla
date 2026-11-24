@@ -1,0 +1,12 @@
+// Stone 59 fixture: the refusal walk reads the
+// program in its own order, defines where they
+// stand. The disk tool stands in the define; the
+// guest call stands later, in the main body. The
+// disk refusal is the one spoken — the first the
+// walk meets.
+make sectors() -> number {
+    give disksectors()
+}
+
+say sectors()
+say callguest(2097152, 7)

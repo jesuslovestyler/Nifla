@@ -1,0 +1,8 @@
+// Stone 59 fixture: the ARM target's own refusal of
+// the guest door. The host's call is honest bare
+// Nifla, but the guest door belongs to the x86 host's
+// road in this ladder, and the target says so in its
+// own words. Both sides must speak it identically.
+say "before the guest"
+let back = callguest(2097152, 7)
+say back

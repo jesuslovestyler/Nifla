@@ -1,0 +1,25 @@
+// Stone 59 fixture: the text walks on ARM — joins
+// with a number on either side, text compared for
+// equal and not-equal, length, a block read as text,
+// text read as a number, the escapes, and characters
+// past ASCII (a Latin-1 letter, an em dash) whose
+// bytes the port reckons from the program's own
+// source, as Stone 56's walk taught it.
+let line = "feathers here — type feather"
+let cafe = "café"
+say line
+say cafe
+say "count " + 42
+say 42 + " counted"
+if cafe == "café" {
+    say "the words match"
+}
+if line != cafe {
+    say "the words differ"
+}
+say length(line)
+let block = makebytes(2)
+block[0] = 65
+say astext(block)
+say asnumber("123") + 1
+say "escapes\ttab\nnewline \"quoted\" back\\slash"

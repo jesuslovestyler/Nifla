@@ -1,0 +1,7 @@
+// Stone 59 fixture: the ARM target's own refusal of
+// the disk tools. The program is honest bare Nifla —
+// the validator accepts it whole — but the virt
+// machine this target boots on has no ATA disk, and
+// the target says so in its own words. Both sides
+// must speak the refusal identically.
+say disksectors()

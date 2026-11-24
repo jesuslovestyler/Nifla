@@ -17,6 +17,7 @@
 //     nifla-front barecompile <path>
 //     nifla-front barecompile-guest <path>
 //     nifla-front card <path>
+//     nifla-front barecompile-arm <path>
 //
 // Stone 50 adds the check modes: lex, parse, then the
 // checker (the section below the tree dump), printing
@@ -58,6 +59,17 @@
 // feather's head. The card's checksum state is 64
 // bits, carried as four 16-bit limbs the way the
 // feather checker already carries it.
+//
+// Stone 59 adds the barecompile-arm mode: the ARM
+// target's whole road — lex, parse, check in the
+// bare picture, validate, then the target's own
+// refusal walk and its translator (the section
+// below the feather's card) — printing the emitted
+// assembly exactly as BareTranslatorARM
+// (src/BareCompilerARM.swift) writes it, or the
+// target's own refusal in its own words. The
+// translator is made with no video request, as a
+// build without the flag is.
 //
 // 'tokens' reads the file at <path> and prints its tokens,
 // one per line, in this dump:
@@ -8878,6 +8890,1786 @@ make btFeatherCard(name, block) {
     give "CARDNULL FEATHER 1\n" + "name: " + name + "\n" + "needs: the guest door (desk version 1)\n" + "bytes: " + numText(length(block)) + "\n" + "checksum: " + btFnvHex(h) + "\n" + "\n"
 }
 
+// ---------- the ARM bare compiler (Stone 59) ----------
+//
+// The ARM leg of the all-Nifla port: the target's own
+// refusal walk (armRefusal) and its translator
+// (BareTranslatorARM), both from
+// src/BareCompilerARM.swift, standing below the x86
+// bare translator. The claim is the walk's words and
+// the translator's assembly, character for character.
+//
+// The translator is made with no video request, as a
+// build without the flag is: the picture screen's
+// lines answer to the build's '--video' input, the
+// way Stone 56 recorded for the x86 road, so they
+// stand unported with the driver's inputs. What else
+// stands with the driver, by Stone 55's precedent:
+// compileBareARM's own half — finding clang and
+// ld.lld, assembling, linking, and its "Made" lines —
+// and the command line's flag refusals, which live in
+// compileMain. The mode's road is compileMain's own
+// order for a '--bare --arm' build: check in the bare
+// picture, validate, refuse what the target does not
+// hold, then translate.
+//
+// Two things the walk borrows from the stones before
+// it: the validator's tables and settled shapes
+// (gBvFuncs, gBvParamKinds, and the bare and guest
+// tool tables — the translator is made from the
+// validator, as Swift's is), and Stone 56's byte
+// reckoning for text (btTextBytes and the machinery
+// under it), whose state baTranslateProgram sets the
+// way btTranslateProgram sets it. The walk's own
+// state stands in the gBa names: one code list the
+// functions and the main body share, as Swift's
+// translator holds one.
+
+let gBaCode = []
+let gBaLiterals = []
+let gBaFloors = []
+let gBaLabelCounter = 0
+let gBaScopes = []
+let gBaNextOffset = 0
+let gBaExitLabel = "__nifla_main_exit"
+let gBaRegisters = ["x0", "x1", "x2", "x3", "x4", "x5"]
+
+// The target's own refusals, in its own words
+// (armRefusal in the Swift source): the disk tools
+// have nothing honest to speak to on the virt
+// machine, and the guest door belongs to the x86
+// host's road in this ladder.
+make baDiskRefusal(name) {
+    give "The disk tools are not stood up on the ARM target: the virt machine this target boots on has no ATA disk of the kind the x86 road speaks to, and '" + name + "' has nothing honest to speak to yet. Build this program for the x86 target (without '--arm') to use it."
+}
+
+make baGuestRefusal(name) {
+    give "Guests are not stood up on the ARM target: the guest door belongs to the x86 host's road in this ladder, and '" + name + "' has no door to speak through here yet. Build this program for the x86 target (without '--arm') to use it."
+}
+
+make baRefusalForName(name) {
+    let found = ""
+    if name == "disksectors" {
+        found = baDiskRefusal(name)
+    }
+    if name == "diskread" {
+        found = baDiskRefusal(name)
+    }
+    if name == "diskwrite" {
+        found = baDiskRefusal(name)
+    }
+    if name == "callguest" {
+        found = baGuestRefusal(name)
+    }
+    if name == "guestvalue" {
+        found = baGuestRefusal(name)
+    }
+    if name == "guestgive" {
+        found = baGuestRefusal(name)
+    }
+    give found
+}
+
+// The refusal walk, expression by expression: a
+// call's name is read before its arguments, and the
+// first refusal found is the one spoken.
+make baRefusalInExpr(e) {
+    let found = ""
+    if e.type == "floor" {
+        found = baRefusalInExprs(e.args)
+    }
+    if found == "" {
+        if e.type == "call" {
+            found = baRefusalForName(e.name)
+            if found == "" {
+                found = baRefusalInExprs(e.args)
+            }
+        }
+    }
+    if found == "" {
+        if e.type == "binary" {
+            found = baRefusalInExpr(e.left)
+            if found == "" {
+                found = baRefusalInExpr(e.right)
+            }
+        }
+    }
+    if found == "" {
+        if e.type == "negate" {
+            found = baRefusalInExpr(e.inner)
+        }
+    }
+    if found == "" {
+        if e.type == "index" {
+            found = baRefusalInExpr(e.base)
+            if found == "" {
+                found = baRefusalInExpr(e.index)
+            }
+        }
+    }
+    if found == "" {
+        if e.type == "field" {
+            found = baRefusalInExpr(e.base)
+        }
+    }
+    if found == "" {
+        if e.type == "list" {
+            found = baRefusalInExprs(e.items)
+        }
+    }
+    if found == "" {
+        if e.type == "object" {
+            found = baRefusalInExprs(e.values)
+        }
+    }
+    give found
+}
+
+make baRefusalInExprs(list) {
+    let found = ""
+    for e in list {
+        if found == "" {
+            found = baRefusalInExpr(e)
+        }
+    }
+    give found
+}
+
+make baRefusalInStmts(list) {
+    let found = ""
+    for s in list {
+        if found == "" {
+            found = baRefusalInStmt(s)
+        }
+    }
+    give found
+}
+
+// The refusal walk, statement by statement: each
+// statement's parts are read in the order Swift's
+// walk reads them — a setting-by-place's target
+// before its value, an if's condition before its
+// arms, an attempt's body before its recovery, a
+// call statement as the call it is.
+make baRefusalInStmt(s) {
+    let found = ""
+    if s.type == "declare" {
+        found = baRefusalInExpr(s.value)
+    }
+    if found == "" {
+        if s.type == "assign" {
+            found = baRefusalInExpr(s.value)
+        }
+    }
+    if found == "" {
+        if s.type == "say" {
+            found = baRefusalInExpr(s.value)
+        }
+    }
+    if found == "" {
+        if s.type == "give" {
+            found = baRefusalInExpr(s.value)
+        }
+    }
+    if found == "" {
+        if s.type == "doExpr" {
+            found = baRefusalInExpr(s.expr)
+        }
+    }
+    if found == "" {
+        if s.type == "assignTarget" {
+            found = baRefusalInExpr(s.target)
+            if found == "" {
+                found = baRefusalInExpr(s.value)
+            }
+        }
+    }
+    if found == "" {
+        if s.type == "if" {
+            found = baRefusalInExpr(s.condition)
+            if found == "" {
+                found = baRefusalInStmts(s.thenStmts)
+            }
+            if found == "" {
+                if s.hasElse {
+                    found = baRefusalInStmts(s.elseStmts)
+                }
+            }
+        }
+    }
+    if found == "" {
+        if s.type == "while" {
+            found = baRefusalInExpr(s.condition)
+            if found == "" {
+                found = baRefusalInStmts(s.body)
+            }
+        }
+    }
+    if found == "" {
+        if s.type == "repeat" {
+            found = baRefusalInExpr(s.count)
+            if found == "" {
+                found = baRefusalInStmts(s.body)
+            }
+        }
+    }
+    if found == "" {
+        if s.type == "for" {
+            found = baRefusalInExpr(s.over)
+            if found == "" {
+                found = baRefusalInStmts(s.body)
+            }
+        }
+    }
+    if found == "" {
+        if s.type == "attempt" {
+            found = baRefusalInStmts(s.body)
+            if found == "" {
+                found = baRefusalInStmts(s.recovery)
+            }
+        }
+    }
+    if found == "" {
+        if s.type == "define" {
+            found = baRefusalInStmts(s.body)
+        }
+    }
+    if found == "" {
+        if s.type == "doCall" {
+            found = baRefusalForName(s.name)
+            if found == "" {
+                found = baRefusalInExprs(s.args)
+            }
+        }
+    }
+    give found
+}
+
+make baRefusalProgram(stmts) {
+    give baRefusalInStmts(stmts)
+}
+
+make baEmit(line) {
+    append(gBaCode, line)
+}
+
+make baEmitWhen(flag, line) {
+    if flag {
+        baEmit(line)
+    }
+}
+
+make baEmitPick(flag, whenTrue, whenFalse) {
+    if flag {
+        baEmit(whenTrue)
+    } else {
+        baEmit(whenFalse)
+    }
+}
+
+make baFreshLabel(base) {
+    gBaLabelCounter = gBaLabelCounter + 1
+    give "__" + base + "_" + numText(gBaLabelCounter)
+}
+
+make baSlots(kind) {
+    let n = 1
+    if kind == "text" {
+        n = 2
+    }
+    if kind == "bytes" {
+        n = 2
+    }
+    give n
+}
+
+make baDeclareVar(name, kind) {
+    gBaNextOffset = gBaNextOffset + 8 * baSlots(kind)
+    let scope = gBaScopes[length(gBaScopes) - 1]
+    nmSet(scope, name, { offset: gBaNextOffset, kind: kind })
+    give { offset: gBaNextOffset, kind: kind }
+}
+
+// Swift's lookupVar hands back (0, number) for a name
+// no scope holds — the checker proved it exists, so
+// the walk uses the entry as it stands.
+make baLookupVar(name) {
+    let i = length(gBaScopes) - 1
+    let result = { offset: 0, kind: "number" }
+    let looking = true
+    while looking {
+        if i < 0 {
+            looking = false
+        } else {
+            let r = nmGet(gBaScopes[i], name)
+            if r.found {
+                result = { offset: r.value.offset, kind: r.value.kind }
+                looking = false
+            } else {
+                i = i - 1
+            }
+        }
+    }
+    give result
+}
+
+// Loads a whole number into a register: a plain mov
+// when the assembler's own immediates reach it, and
+// a literal-pool load for the wide ones.
+make baEmitLoadImm(reg, value) {
+    let line = "    ldr " + reg + ", =" + numText(value)
+    if value >= 0 - 65536 {
+        if value <= 65535 {
+            line = "    mov " + reg + ", #" + numText(value)
+        }
+    }
+    baEmit(line)
+}
+
+// The translator's own kindOf, the twin of the x86
+// walk's: it reads the frame this walk is building
+// (gBaScopes), where Swift's reads its scopes.
+// Written in assignment style, the settled flag
+// carrying Swift's order: the built-in words first,
+// then the bare and guest tables, then a made
+// function's settled give shape.
+make baKindOf(e) {
+    let result = "number"
+    if e.type == "text" {
+        result = "text"
+    }
+    if e.type == "boolean" {
+        result = "boolean"
+    }
+    if e.type == "variable" {
+        let r = baLookupVar(e.name)
+        result = r.kind
+    }
+    if e.type == "call" {
+        btSeedBuiltinKinds()
+        let settled = false
+        let br = nmGet(gBtBuiltinKinds, e.name)
+        if br.found {
+            result = br.value
+            settled = true
+        }
+        if settled == false {
+            if nmHas(gBvBareTools, e.name) {
+                result = "number"
+                settled = true
+            }
+        }
+        if settled == false {
+            if nmHas(gBvGuestDesk, e.name) {
+                result = "number"
+                settled = true
+            }
+        }
+        if settled == false {
+            if nmHas(gBvGuestDoor, e.name) {
+                result = "number"
+                settled = true
+            }
+        }
+        if settled == false {
+            let fr = nmGet(gBvFuncs, e.name)
+            if fr.found {
+                result = fr.value.giveKind
+            }
+        }
+    }
+    if e.type == "binary" {
+        result = "number"
+        if e.op == "<" {
+            result = "boolean"
+        }
+        if e.op == "<=" {
+            result = "boolean"
+        }
+        if e.op == ">" {
+            result = "boolean"
+        }
+        if e.op == ">=" {
+            result = "boolean"
+        }
+        if e.op == "==" {
+            result = "boolean"
+        }
+        if e.op == "!=" {
+            result = "boolean"
+        }
+        if e.op == "+" {
+            result = "number"
+            if baKindOf(e.left) == "text" {
+                result = "text"
+            }
+            if baKindOf(e.right) == "text" {
+                result = "text"
+            }
+        }
+    }
+    give result
+}
+
+make baEmitBlock(stmts) {
+    append(gBaScopes, nmNew())
+    for s in stmts {
+        baEmitStatement(s)
+    }
+    removeat(gBaScopes, length(gBaScopes) - 1)
+}
+
+// One pass of one loop, counted in that loop's own
+// frame slot: the million-pass guard stands over one
+// loop's run, so each loop is given a fresh count of
+// its own as it starts.
+make baEmitGuardTick(entry) {
+    baEmit("    ldr x10, [x29, #-" + numText(entry.offset) + "]")
+    baEmit("    add x10, x10, #1")
+    baEmit("    str x10, [x29, #-" + numText(entry.offset) + "]")
+    baEmit("    ldr x11, =1000000")
+    baEmit("    cmp x10, x11")
+    baEmit("    b.gt __halt_trap")
+}
+
+// Stores the value in x0 (and x1, for a two-word
+// value) into a variable's slot(s) — the address
+// word in the higher slot, the count word in the
+// lower, as on the x86 road.
+make baEmitStore(entry) {
+    if baSlots(entry.kind) == 2 {
+        baEmit("    str x0, [x29, #-" + numText(entry.offset - 8) + "]")
+        baEmit("    str x1, [x29, #-" + numText(entry.offset) + "]")
+    } else {
+        baEmit("    str x0, [x29, #-" + numText(entry.offset) + "]")
+    }
+}
+
+make baEmitStatement(s) {
+    if s.type == "declare" {
+        let kind = baKindOf(s.value)
+        baEmitExpr(s.value)
+        let entry = baDeclareVar(s.name, kind)
+        baEmitStore(entry)
+    }
+    if s.type == "assign" {
+        baEmitExpr(s.value)
+        baEmitStore(baLookupVar(s.name))
+    }
+    if s.type == "assignTarget" {
+        if s.target.type == "index" {
+            baEmitExpr(s.target.base)
+            baEmit("    str x0, [sp, #-16]!")
+            baEmit("    str x1, [sp, #-16]!")
+            baEmitExpr(s.target.index)
+            baEmit("    str x0, [sp, #-16]!")
+            baEmitExpr(s.value)
+            baEmit("    mov x8, x0")
+            baEmit("    ldr x0, [sp], #16")
+            baEmit("    ldr x1, [sp], #16")
+            baEmit("    ldr x2, [sp], #16")
+            baEmit("    cmp x0, x1")
+            baEmit("    b.hs __halt_trap")
+            baEmit("    cmp x8, #255")
+            baEmit("    b.hi __halt_trap")
+            baEmit("    strb w8, [x2, x0]")
+        }
+        baEmitWhen(s.target.type != "index", "    b __halt_trap")
+    }
+    if s.type == "say" {
+        baEmitExpr(s.value)
+        baEmitWhen(baKindOf(s.value) == "number", "    bl __nifla_numtext")
+        baEmit("    bl __nifla_say_text")
+        baEmit("    bl __nifla_say_newline")
+    }
+    baEmitWhen(s.type == "for", "    b __halt_trap")
+    baEmitWhen(s.type == "attempt", "    b __halt_trap")
+    baEmitWhen(s.type == "define", "    b __halt_trap")
+    if s.type == "if" {
+        let elseLabel = baFreshLabel("else")
+        let endLabel = baFreshLabel("endif")
+        baEmitExpr(s.condition)
+        if s.hasElse {
+            baEmit("    cbz x0, " + elseLabel)
+        } else {
+            baEmit("    cbz x0, " + endLabel)
+        }
+        baEmitBlock(s.thenStmts)
+        if s.hasElse {
+            baEmit("    b " + endLabel)
+            baEmit(elseLabel + ":")
+            baEmitBlock(s.elseStmts)
+        }
+        baEmit(endLabel + ":")
+    }
+    if s.type == "while" {
+        let passEntry = baDeclareVar(baFreshLabel("guard_passes"), "number")
+        let topLabel = baFreshLabel("while")
+        let endLabel = baFreshLabel("endwhile")
+        baEmit("    str xzr, [x29, #-" + numText(passEntry.offset) + "]")
+        baEmit(topLabel + ":")
+        baEmitExpr(s.condition)
+        baEmit("    cbz x0, " + endLabel)
+        baEmitGuardTick(passEntry)
+        baEmitBlock(s.body)
+        baEmit("    b " + topLabel)
+        baEmit(endLabel + ":")
+    }
+    if s.type == "repeat" {
+        let countEntry = baDeclareVar(baFreshLabel("repeat_count"), "number")
+        let counterEntry = baDeclareVar(baFreshLabel("repeat_done"), "number")
+        let passEntry = baDeclareVar(baFreshLabel("guard_passes"), "number")
+        baEmitExpr(s.count)
+        baEmit("    str x0, [x29, #-" + numText(countEntry.offset) + "]")
+        baEmit("    cmp x0, #0")
+        baEmit("    b.lt __halt_trap")
+        baEmit("    str xzr, [x29, #-" + numText(counterEntry.offset) + "]")
+        baEmit("    str xzr, [x29, #-" + numText(passEntry.offset) + "]")
+        let topLabel = baFreshLabel("repeat")
+        let endLabel = baFreshLabel("endrepeat")
+        baEmit(topLabel + ":")
+        baEmit("    ldr x0, [x29, #-" + numText(counterEntry.offset) + "]")
+        baEmit("    ldr x9, [x29, #-" + numText(countEntry.offset) + "]")
+        baEmit("    cmp x0, x9")
+        baEmit("    b.hs " + endLabel)
+        baEmitGuardTick(passEntry)
+        baEmitBlock(s.body)
+        baEmit("    ldr x0, [x29, #-" + numText(counterEntry.offset) + "]")
+        baEmit("    add x0, x0, #1")
+        baEmit("    str x0, [x29, #-" + numText(counterEntry.offset) + "]")
+        baEmit("    b " + topLabel)
+        baEmit(endLabel + ":")
+    }
+    if s.type == "give" {
+        baEmitExpr(s.value)
+        baEmit("    b " + gBaExitLabel)
+    }
+    if s.type == "doCall" {
+        baEmitCall({ name: s.name, args: s.args, line: s.line })
+    }
+    if s.type == "doExpr" {
+        baEmitExpr(s.expr)
+    }
+}
+
+make baEmitExpr(e) {
+    if e.type == "number" {
+        baEmitLoadImm("x0", e.value)
+    }
+    if e.type == "text" {
+        let bytes = btTextBytes(e.value, e.line)
+        let label = "__text_" + numText(length(gBaLiterals))
+        append(gBaLiterals, { label: label, bytes: bytes })
+        baEmit("    ldr x0, =" + label)
+        baEmitLoadImm("x1", length(bytes))
+    }
+    if e.type == "boolean" {
+        baEmitPick(e.flag, "    mov x0, #1", "    mov x0, #0")
+    }
+    baEmitWhen(e.type == "nothing", "    b __halt_trap")
+    if e.type == "variable" {
+        let entry = baLookupVar(e.name)
+        if baSlots(entry.kind) == 2 {
+            baEmit("    ldr x0, [x29, #-" + numText(entry.offset - 8) + "]")
+            baEmit("    ldr x1, [x29, #-" + numText(entry.offset) + "]")
+        } else {
+            baEmit("    ldr x0, [x29, #-" + numText(entry.offset) + "]")
+        }
+    }
+    if e.type == "call" {
+        baEmitCall(e)
+    }
+    if e.type == "floor" {
+        let index = length(gBaFloors)
+        append(gBaFloors, e.asm)
+        let numberIndex = 0
+        let hasText = false
+        for arg in e.args {
+            if baSlots(baKindOf(arg)) == 2 {
+                baEmitExpr(arg)
+                baEmit("    mov x21, x0")
+                baEmit("    mov x22, x1")
+                hasText = true
+            } else {
+                baEmitExpr(arg)
+                baEmit("    ldr x9, =__floor_inputs")
+                baEmit("    str x0, [x9, #" + numText(8 * numberIndex) + "]")
+                numberIndex = numberIndex + 1
+            }
+        }
+        baEmit("    ldr x19, =__floor_inputs")
+        baEmitLoadImm("x20", numberIndex)
+        baEmitWhen(hasText == false, "    mov x21, #0")
+        baEmitWhen(hasText == false, "    mov x22, #0")
+        baEmit("    mov x23, #0")
+        baEmit("    mov x24, #0")
+        baEmit("    bl __floor_" + numText(index))
+    }
+    if e.type == "negate" {
+        baEmitExpr(e.inner)
+        baEmit("    neg x0, x0")
+    }
+    if e.type == "binary" {
+        baEmitBinary(e)
+    }
+    if e.type == "index" {
+        baEmitExpr(e.base)
+        baEmit("    str x0, [sp, #-16]!")
+        baEmit("    str x1, [sp, #-16]!")
+        baEmitExpr(e.index)
+        baEmit("    ldr x1, [sp], #16")
+        baEmit("    ldr x2, [sp], #16")
+        baEmit("    cmp x0, x1")
+        baEmit("    b.hs __halt_trap")
+        baEmit("    ldrb w0, [x2, x0]")
+    }
+    baEmitWhen(e.type == "object", "    b __halt_trap")
+    baEmitWhen(e.type == "list", "    b __halt_trap")
+    baEmitWhen(e.type == "field", "    b __halt_trap")
+}
+
+make baEmitJoin(e) {
+    baEmitExpr(e.left)
+    baEmitWhen(baKindOf(e.left) == "number", "    bl __nifla_numtext")
+    baEmit("    str x0, [sp, #-16]!")
+    baEmit("    str x1, [sp, #-16]!")
+    baEmitExpr(e.right)
+    baEmitWhen(baKindOf(e.right) == "number", "    bl __nifla_numtext")
+    baEmit("    mov x2, x0")
+    baEmit("    mov x3, x1")
+    baEmit("    ldr x1, [sp], #16")
+    baEmit("    ldr x0, [sp], #16")
+    baEmit("    bl __nifla_join")
+}
+
+make baEmitTextCompare(e, isEqual) {
+    baEmitExpr(e.left)
+    baEmit("    str x0, [sp, #-16]!")
+    baEmit("    str x1, [sp, #-16]!")
+    baEmitExpr(e.right)
+    baEmit("    mov x3, x1")
+    baEmit("    mov x2, x0")
+    baEmit("    ldr x1, [sp], #16")
+    baEmit("    ldr x0, [sp], #16")
+    baEmit("    bl __nifla_text_eq")
+    baEmitWhen(isEqual == false, "    eor x0, x0, #1")
+}
+
+make baEmitCompare(condition) {
+    baEmit("    cmp x0, x2")
+    baEmit("    cset x0, " + condition)
+}
+
+make baEmitBinary(e) {
+    let done = false
+    if e.op == "+" {
+        if baKindOf(e.left) == "text" {
+            baEmitJoin(e)
+            done = true
+        }
+        if done == false {
+            if baKindOf(e.right) == "text" {
+                baEmitJoin(e)
+                done = true
+            }
+        }
+    }
+    if done == false {
+        if e.op == "==" {
+            if baKindOf(e.left) == "text" {
+                baEmitTextCompare(e, true)
+                done = true
+            }
+            if done == false {
+                if baKindOf(e.right) == "text" {
+                    baEmitTextCompare(e, true)
+                    done = true
+                }
+            }
+        }
+    }
+    if done == false {
+        if e.op == "!=" {
+            if baKindOf(e.left) == "text" {
+                baEmitTextCompare(e, false)
+                done = true
+            }
+            if done == false {
+                if baKindOf(e.right) == "text" {
+                    baEmitTextCompare(e, false)
+                    done = true
+                }
+            }
+        }
+    }
+    if done == false {
+        baEmitExpr(e.left)
+        baEmit("    str x0, [sp, #-16]!")
+        baEmitExpr(e.right)
+        baEmit("    mov x2, x0")
+        baEmit("    ldr x0, [sp], #16")
+        if e.op == "+" {
+            baEmit("    add x0, x0, x2")
+            done = true
+        }
+        if e.op == "-" {
+            baEmit("    sub x0, x0, x2")
+            done = true
+        }
+        if e.op == "*" {
+            baEmit("    mul x0, x0, x2")
+            done = true
+        }
+        if e.op == "/" {
+            baEmit("    cbz x2, __halt_trap")
+            baEmit("    sdiv x0, x0, x2")
+            done = true
+        }
+        if e.op == "<" {
+            baEmitCompare("lt")
+            done = true
+        }
+        if e.op == "<=" {
+            baEmitCompare("le")
+            done = true
+        }
+        if e.op == ">" {
+            baEmitCompare("gt")
+            done = true
+        }
+        if e.op == ">=" {
+            baEmitCompare("ge")
+            done = true
+        }
+        if e.op == "==" {
+            baEmitCompare("eq")
+            done = true
+        }
+        if e.op == "!=" {
+            baEmitCompare("ne")
+            done = true
+        }
+        if done == false {
+            baEmit("    b __halt_trap")
+        }
+    }
+}
+make baBootLines(sourceName) {
+    let out = []
+    append(out, "// A bare-metal Nifla program for aarch64 (Stone 23),")
+    append(out, "// compiled from " + sourceName + " by niflac --bare --arm.")
+    append(out, "// It boots on QEMU's virt machine at 0x40000000; the")
+    append(out, "// device tree is looked for in x0, then at address 0,")
+    append(out, "// and the program speaks over the PL011 serial line")
+    append(out, "// at 0x09000000.")
+    append(out, "    .text")
+    append(out, "    .globl _start")
+    append(out, "_start:")
+    append(out, "    movz w11, #0xfeed")
+    append(out, "    movk w11, #0xd00d, lsl #16")
+    append(out, "    mov x9, x0")
+    append(out, "    cbz x9, 1f")
+    append(out, "    ldr w10, [x9]")
+    append(out, "    rev w10, w10")
+    append(out, "    cmp w10, w11")
+    append(out, "    b.eq 2f")
+    append(out, "1:  mov x9, #0")
+    append(out, "    ldr w10, [x9]")
+    append(out, "    rev w10, w10")
+    append(out, "    cmp w10, w11")
+    append(out, "    b.eq 2f")
+    append(out, "    mov x9, #-1")
+    append(out, "2:  ldr x10, =__dtb")
+    append(out, "    str x9, [x10]")
+    append(out, "    ldr x9, =__stack_top")
+    append(out, "    mov sp, x9")
+    append(out, "    ldr x9, =__bss_start")
+    append(out, "    ldr x10, =__bss_end")
+    append(out, "1:  cmp x9, x10")
+    append(out, "    b.hs 2f")
+    append(out, "    str xzr, [x9], #8")
+    append(out, "    b 1b")
+    append(out, "2:  bl __nifla_memory_init")
+    append(out, "    bl __nifla_main")
+    append(out, "__halt_trap:")
+    append(out, "    wfe")
+    append(out, "    b __halt_trap")
+    append(out, "")
+    give out
+}
+
+make baRuntimeLines() {
+    let out = []
+    append(out, "__nifla_memory_init:")
+    append(out, "    str x30, [sp, #-16]!")
+    append(out, "    ldr x9, =__kernel_end")
+    append(out, "    add x9, x9, #15")
+    append(out, "    and x9, x9, #-16")
+    append(out, "    ldr x10, =__heap_cursor")
+    append(out, "    str x9, [x10]")
+    append(out, "    add x11, x9, #8388608")
+    append(out, "    ldr x10, =__heap_limit")
+    append(out, "    str x11, [x10]")
+    append(out, "    mrs x9, cntfrq_el0")
+    append(out, "    mov x10, #100")
+    append(out, "    udiv x9, x9, x10")
+    append(out, "    cbnz x9, 1f")
+    append(out, "    mov x9, #1")
+    append(out, "1:  ldr x10, =__tick_divisor")
+    append(out, "    str x9, [x10]")
+    append(out, "    ldr x9, =__dtb")
+    append(out, "    ldr x9, [x9]")
+    append(out, "    cmp x9, #-1")
+    append(out, "    b.eq 9f")
+    append(out, "    bl __fdt_walk")
+    append(out, "9:  ldr x30, [sp], #16")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__fdt_walk:")
+    append(out, "    str x30, [sp, #-16]!")
+    append(out, "    ldr w10, [x9, #8]")
+    append(out, "    rev w10, w10")
+    append(out, "    add x14, x9, x10")
+    append(out, "    ldr w10, [x9, #12]")
+    append(out, "    rev w10, w10")
+    append(out, "    add x15, x9, x10")
+    append(out, "    mov x16, #2")
+    append(out, "    mov x17, #1")
+    append(out, "    mov x18, #0")
+    append(out, "    mov x19, #0")
+    append(out, "__fdt_next:")
+    append(out, "    ldr w10, [x14], #4")
+    append(out, "    rev w10, w10")
+    append(out, "    cmp w10, #9")
+    append(out, "    b.eq __fdt_done")
+    append(out, "    cmp w10, #4")
+    append(out, "    b.eq __fdt_next")
+    append(out, "    cmp w10, #1")
+    append(out, "    b.eq __fdt_begin")
+    append(out, "    cmp w10, #2")
+    append(out, "    b.eq __fdt_endnode")
+    append(out, "    cmp w10, #3")
+    append(out, "    b.eq __fdt_prop")
+    append(out, "    b __fdt_done")
+    append(out, "__fdt_begin:")
+    append(out, "    mov x19, #0")
+    append(out, "    cmp x18, #1")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14]")
+    append(out, "    cmp w10, #109")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14, #1]")
+    append(out, "    cmp w10, #101")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14, #2]")
+    append(out, "    cmp w10, #109")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14, #3]")
+    append(out, "    cmp w10, #111")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14, #4]")
+    append(out, "    cmp w10, #114")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14, #5]")
+    append(out, "    cmp w10, #121")
+    append(out, "    b.ne 1f")
+    append(out, "    ldrb w10, [x14, #6]")
+    append(out, "    cmp w10, #64")
+    append(out, "    b.eq 2f")
+    append(out, "    cmp w10, #0")
+    append(out, "    b.ne 1f")
+    append(out, "2:  mov x19, #1")
+    append(out, "1:  add x18, x18, #1")
+    append(out, "    mov x10, x14")
+    append(out, "3:  ldrb w11, [x10], #1")
+    append(out, "    cbnz w11, 3b")
+    append(out, "    sub x14, x10, x9")
+    append(out, "    add x14, x14, #3")
+    append(out, "    and x14, x14, #-4")
+    append(out, "    add x14, x14, x9")
+    append(out, "    b __fdt_next")
+    append(out, "__fdt_endnode:")
+    append(out, "    sub x18, x18, #1")
+    append(out, "    cmp x18, #1")
+    append(out, "    b.gt 1f")
+    append(out, "    mov x19, #0")
+    append(out, "1:  b __fdt_next")
+    append(out, "__fdt_prop:")
+    append(out, "    ldr w20, [x14], #4")
+    append(out, "    rev w20, w20")
+    append(out, "    ldr w21, [x14], #4")
+    append(out, "    rev w21, w21")
+    append(out, "    add x22, x15, x21")
+    append(out, "    cmp x18, #1")
+    append(out, "    b.ne 3f")
+    append(out, "    mov x0, x22")
+    append(out, "    ldr x1, =__fdt_addr_cells")
+    append(out, "    mov x2, #14")
+    append(out, "    bl __fdt_name_eq")
+    append(out, "    cbz x0, 1f")
+    append(out, "    ldr w10, [x14]")
+    append(out, "    rev w10, w10")
+    append(out, "    mov x16, x10")
+    append(out, "    b 3f")
+    append(out, "1:  mov x0, x22")
+    append(out, "    ldr x1, =__fdt_size_cells")
+    append(out, "    mov x2, #11")
+    append(out, "    bl __fdt_name_eq")
+    append(out, "    cbz x0, 3f")
+    append(out, "    ldr w10, [x14]")
+    append(out, "    rev w10, w10")
+    append(out, "    mov x17, x10")
+    append(out, "    b 3f")
+    append(out, "3:  cmp x19, #1")
+    append(out, "    b.ne 4f")
+    append(out, "    mov x0, x22")
+    append(out, "    ldr x1, =__fdt_reg")
+    append(out, "    mov x2, #3")
+    append(out, "    bl __fdt_name_eq")
+    append(out, "    cbz x0, 4f")
+    append(out, "    mov x10, x14")
+    append(out, "    mov x11, #0")
+    append(out, "    mov x12, x16")
+    append(out, "5:  cbz x12, 6f")
+    append(out, "    ldr w13, [x10], #4")
+    append(out, "    rev w13, w13")
+    append(out, "    lsl x11, x11, #32")
+    append(out, "    orr x11, x11, x13")
+    append(out, "    sub x12, x12, #1")
+    append(out, "    b 5b")
+    append(out, "6:  mov x12, x17")
+    append(out, "    mov x13, #0")
+    append(out, "7:  cbz x12, 8f")
+    append(out, "    ldr w23, [x10], #4")
+    append(out, "    rev w23, w23")
+    append(out, "    lsl x13, x13, #32")
+    append(out, "    orr x13, x13, x23")
+    append(out, "    sub x12, x12, #1")
+    append(out, "    b 7b")
+    append(out, "8:  ldr x10, =__mem_total")
+    append(out, "    str x13, [x10]")
+    append(out, "    add x11, x11, x13")
+    append(out, "    ldr x10, =__heap_limit")
+    append(out, "    str x11, [x10]")
+    append(out, "4:  add x14, x14, x20")
+    append(out, "    add x14, x14, #3")
+    append(out, "    and x14, x14, #-4")
+    append(out, "    b __fdt_next")
+    append(out, "__fdt_done:")
+    append(out, "    ldr x30, [sp], #16")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__fdt_name_eq:")
+    append(out, "    mov x12, #0")
+    append(out, "1:  cmp x12, x2")
+    append(out, "    b.hs 2f")
+    append(out, "    ldrb w10, [x0, x12]")
+    append(out, "    ldrb w11, [x1, x12]")
+    append(out, "    cmp w10, w11")
+    append(out, "    b.ne 3f")
+    append(out, "    add x12, x12, #1")
+    append(out, "    b 1b")
+    append(out, "2:  ldrb w10, [x0, x2]")
+    append(out, "    cbz w10, 4f")
+    append(out, "3:  mov x0, #0")
+    append(out, "    ret")
+    append(out, "4:  mov x0, #1")
+    append(out, "    ret")
+    append(out, "    .rodata")
+    append(out, "__fdt_addr_cells: .asciz \"#address-cells\"")
+    append(out, "__fdt_size_cells: .asciz \"#size-cells\"")
+    append(out, "__fdt_reg:        .asciz \"reg\"")
+    append(out, "    .text")
+    append(out, "")
+    append(out, "__nifla_alloc:")
+    append(out, "    ldr x9, =16777216")
+    append(out, "    cmp x0, x9")
+    append(out, "    b.hi __halt_trap")
+    append(out, "    mov x1, x0")
+    append(out, "    add x0, x0, #15")
+    append(out, "    and x0, x0, #-16")
+    append(out, "    ldr x9, =__heap_cursor")
+    append(out, "    ldr x10, [x9]")
+    append(out, "    add x11, x10, x0")
+    append(out, "    ldr x12, =__heap_limit")
+    append(out, "    ldr x12, [x12]")
+    append(out, "    cmp x11, x12")
+    append(out, "    b.hi __halt_trap")
+    append(out, "    str x11, [x9]")
+    append(out, "    mov x12, x10")
+    append(out, "    mov x13, x0")
+    append(out, "1:  cbz x13, 2f")
+    append(out, "    str xzr, [x12], #8")
+    append(out, "    sub x13, x13, #8")
+    append(out, "    b 1b")
+    append(out, "2:  mov x0, x10")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__nifla_numtext:")
+    append(out, "    stp x29, x30, [sp, #-16]!")
+    append(out, "    mov x29, sp")
+    append(out, "    mov x9, x0")
+    append(out, "    mov x10, #0")
+    append(out, "    cmp x9, #0")
+    append(out, "    b.ge 1f")
+    append(out, "    mov x10, #1")
+    append(out, "    neg x9, x9")
+    append(out, "1:  ldr x11, =__numtext_buf")
+    append(out, "    add x11, x11, #32")
+    append(out, "    mov x12, x11")
+    append(out, "    mov x13, #10")
+    append(out, "2:  udiv x14, x9, x13")
+    append(out, "    msub x15, x14, x13, x9")
+    append(out, "    add x15, x15, #48")
+    append(out, "    sub x12, x12, #1")
+    append(out, "    strb w15, [x12]")
+    append(out, "    mov x9, x14")
+    append(out, "    cbnz x9, 2b")
+    append(out, "    cbz x10, 3f")
+    append(out, "    sub x12, x12, #1")
+    append(out, "    mov w15, #45")
+    append(out, "    strb w15, [x12]")
+    append(out, "3:  sub x0, x11, x12")
+    append(out, "    str x12, [sp, #-16]!")
+    append(out, "    bl __nifla_alloc")
+    append(out, "    ldr x13, [sp], #16")
+    append(out, "    mov x14, x0")
+    append(out, "    mov x15, x1")
+    append(out, "4:  cbz x15, 5f")
+    append(out, "    ldrb w16, [x13], #1")
+    append(out, "    strb w16, [x14], #1")
+    append(out, "    sub x15, x15, #1")
+    append(out, "    b 4b")
+    append(out, "5:  ldp x29, x30, [sp], #16")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__nifla_join:")
+    append(out, "    stp x29, x30, [sp, #-16]!")
+    append(out, "    mov x29, sp")
+    append(out, "    str x0, [sp, #-16]!")
+    append(out, "    str x1, [sp, #-16]!")
+    append(out, "    str x2, [sp, #-16]!")
+    append(out, "    str x3, [sp, #-16]!")
+    append(out, "    add x0, x1, x3")
+    append(out, "    bl __nifla_alloc")
+    append(out, "    ldr x16, [sp], #16")
+    append(out, "    ldr x15, [sp], #16")
+    append(out, "    ldr x14, [sp], #16")
+    append(out, "    ldr x13, [sp], #16")
+    append(out, "    mov x17, x0")
+    append(out, "    mov x9, x14")
+    append(out, "    mov x10, x13")
+    append(out, "1:  cbz x9, 2f")
+    append(out, "    ldrb w11, [x10], #1")
+    append(out, "    strb w11, [x17], #1")
+    append(out, "    sub x9, x9, #1")
+    append(out, "    b 1b")
+    append(out, "2:  mov x9, x16")
+    append(out, "    mov x10, x15")
+    append(out, "3:  cbz x9, 4f")
+    append(out, "    ldrb w11, [x10], #1")
+    append(out, "    strb w11, [x17], #1")
+    append(out, "    sub x9, x9, #1")
+    append(out, "    b 3b")
+    append(out, "4:  ldp x29, x30, [sp], #16")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__nifla_asnumber:")
+    append(out, "    mov x9, x0")
+    append(out, "    mov x10, x1")
+    append(out, "    mov x11, #0")
+    append(out, "    mov x12, #0")
+    append(out, "    ldr x13, =922337203685477580")
+    append(out, "    cbz x10, __halt_trap")
+    append(out, "    ldrb w14, [x9]")
+    append(out, "    cmp w14, #45")
+    append(out, "    b.ne 1f")
+    append(out, "    mov x12, #1")
+    append(out, "    add x9, x9, #1")
+    append(out, "    sub x10, x10, #1")
+    append(out, "1:  cbz x10, __halt_trap")
+    append(out, "    ldrb w14, [x9]")
+    append(out, "    sub w14, w14, #48")
+    append(out, "    cmp w14, #9")
+    append(out, "    b.hi __halt_trap")
+    append(out, "2:  cmp x11, x13")
+    append(out, "    b.hi __halt_trap")
+    append(out, "    b.ne 3f")
+    append(out, "    add x15, x12, #7")
+    append(out, "    cmp x14, x15")
+    append(out, "    b.hi __halt_trap")
+    append(out, "3:  mov x15, #10")
+    append(out, "    mul x11, x11, x15")
+    append(out, "    add x11, x11, x14")
+    append(out, "    add x9, x9, #1")
+    append(out, "    sub x10, x10, #1")
+    append(out, "    cbz x10, 5f")
+    append(out, "    ldrb w14, [x9]")
+    append(out, "    sub w14, w14, #48")
+    append(out, "    cmp w14, #9")
+    append(out, "    b.ls 2b")
+    append(out, "    ldrb w14, [x9]")
+    append(out, "    cmp w14, #46")
+    append(out, "    b.ne __halt_trap")
+    append(out, "    add x9, x9, #1")
+    append(out, "    sub x10, x10, #1")
+    append(out, "    cbz x10, __halt_trap")
+    append(out, "4:  ldrb w14, [x9]")
+    append(out, "    sub w14, w14, #48")
+    append(out, "    cmp w14, #9")
+    append(out, "    b.hi __halt_trap")
+    append(out, "    cbnz w14, __halt_trap")
+    append(out, "    add x9, x9, #1")
+    append(out, "    sub x10, x10, #1")
+    append(out, "    cbnz x10, 4b")
+    append(out, "5:  mov x0, x11")
+    append(out, "    cbz x12, 6f")
+    append(out, "    neg x0, x0")
+    append(out, "6:  ret")
+    append(out, "")
+    append(out, "__nifla_astext:")
+    append(out, "    stp x29, x30, [sp, #-16]!")
+    append(out, "    mov x29, sp")
+    append(out, "    mov x9, x0")
+    append(out, "    mov x10, x1")
+    append(out, "    str x9, [sp, #-16]!")
+    append(out, "    str x10, [sp, #-16]!")
+    append(out, "    add x0, x1, x1, lsl #1")
+    append(out, "    bl __nifla_alloc")
+    append(out, "    ldr x10, [sp], #16")
+    append(out, "    ldr x9, [sp], #16")
+    append(out, "    mov x11, x0")
+    append(out, "    mov x12, x0")
+    append(out, "    mov x13, x9")
+    append(out, "    mov x14, x10")
+    append(out, "__at_loop:")
+    append(out, "    cbz x14, __at_done")
+    append(out, "    ldrb w15, [x13]")
+    append(out, "    cmp w15, #0x80")
+    append(out, "    b.lo __at_copy1")
+    append(out, "    cmp w15, #0xC2")
+    append(out, "    b.lo __at_mark1")
+    append(out, "    cmp w15, #0xE0")
+    append(out, "    b.lo __at_2byte")
+    append(out, "    b.eq __at_e0")
+    append(out, "    cmp w15, #0xED")
+    append(out, "    b.lo __at_3byte")
+    append(out, "    b.eq __at_ed")
+    append(out, "    cmp w15, #0xF0")
+    append(out, "    b.lo __at_3byte")
+    append(out, "    b.eq __at_f0")
+    append(out, "    cmp w15, #0xF4")
+    append(out, "    b.lo __at_4byte")
+    append(out, "    b.eq __at_f4")
+    append(out, "    b __at_mark1")
+    append(out, "__at_2byte:")
+    append(out, "    mov x16, #2")
+    append(out, "    mov x17, #0x80")
+    append(out, "    mov x9, #0xBF")
+    append(out, "    b __at_seq")
+    append(out, "__at_e0:")
+    append(out, "    mov x16, #3")
+    append(out, "    mov x17, #0xA0")
+    append(out, "    mov x9, #0xBF")
+    append(out, "    b __at_seq")
+    append(out, "__at_3byte:")
+    append(out, "    mov x16, #3")
+    append(out, "    mov x17, #0x80")
+    append(out, "    mov x9, #0xBF")
+    append(out, "    b __at_seq")
+    append(out, "__at_ed:")
+    append(out, "    mov x16, #3")
+    append(out, "    mov x17, #0x80")
+    append(out, "    mov x9, #0x9F")
+    append(out, "    b __at_seq")
+    append(out, "__at_f0:")
+    append(out, "    mov x16, #4")
+    append(out, "    mov x17, #0x90")
+    append(out, "    mov x9, #0xBF")
+    append(out, "    b __at_seq")
+    append(out, "__at_4byte:")
+    append(out, "    mov x16, #4")
+    append(out, "    mov x17, #0x80")
+    append(out, "    mov x9, #0xBF")
+    append(out, "    b __at_seq")
+    append(out, "__at_f4:")
+    append(out, "    mov x16, #4")
+    append(out, "    mov x17, #0x80")
+    append(out, "    mov x9, #0x8F")
+    append(out, "    b __at_seq")
+    append(out, "__at_seq:")
+    append(out, "    mov x10, #1")
+    append(out, "__at_seq_check:")
+    append(out, "    cmp x10, x16")
+    append(out, "    b.eq __at_copyseq")
+    append(out, "    cmp x10, x14")
+    append(out, "    b.eq __at_markprefix")
+    append(out, "    ldrb w15, [x13, x10]")
+    append(out, "    cmp x10, #1")
+    append(out, "    b.eq __at_seq_first")
+    append(out, "    cmp w15, #0x80")
+    append(out, "    b.lo __at_markprefix")
+    append(out, "    cmp w15, #0xBF")
+    append(out, "    b.hi __at_markprefix")
+    append(out, "    add x10, x10, #1")
+    append(out, "    b __at_seq_check")
+    append(out, "__at_seq_first:")
+    append(out, "    cmp w15, w17")
+    append(out, "    b.lo __at_markprefix")
+    append(out, "    cmp w15, w9")
+    append(out, "    b.hi __at_markprefix")
+    append(out, "    add x10, x10, #1")
+    append(out, "    b __at_seq_check")
+    append(out, "__at_copyseq:")
+    append(out, "    mov x10, x16")
+    append(out, "__at_copyseq_loop:")
+    append(out, "    cbz x10, __at_copyseq_done")
+    append(out, "    ldrb w15, [x13], #1")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    sub x10, x10, #1")
+    append(out, "    b __at_copyseq_loop")
+    append(out, "__at_copyseq_done:")
+    append(out, "    sub x14, x14, x16")
+    append(out, "    b __at_loop")
+    append(out, "__at_markprefix:")
+    append(out, "    mov w15, #0xEF")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    mov w15, #0xBF")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    mov w15, #0xBD")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    add x13, x13, x10")
+    append(out, "    sub x14, x14, x10")
+    append(out, "    b __at_loop")
+    append(out, "__at_mark1:")
+    append(out, "    mov w15, #0xEF")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    mov w15, #0xBF")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    mov w15, #0xBD")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    add x13, x13, #1")
+    append(out, "    sub x14, x14, #1")
+    append(out, "    b __at_loop")
+    append(out, "__at_copy1:")
+    append(out, "    ldrb w15, [x13], #1")
+    append(out, "    strb w15, [x12], #1")
+    append(out, "    sub x14, x14, #1")
+    append(out, "    b __at_loop")
+    append(out, "__at_done:")
+    append(out, "    mov x0, x11")
+    append(out, "    sub x1, x12, x11")
+    append(out, "    ldp x29, x30, [sp], #16")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__nifla_text_eq:")
+    append(out, "    cmp x1, x3")
+    append(out, "    b.ne 3f")
+    append(out, "    mov x9, #0")
+    append(out, "1:  cmp x9, x1")
+    append(out, "    b.hs 2f")
+    append(out, "    ldrb w10, [x0, x9]")
+    append(out, "    ldrb w11, [x2, x9]")
+    append(out, "    cmp w10, w11")
+    append(out, "    b.ne 3f")
+    append(out, "    add x9, x9, #1")
+    append(out, "    b 1b")
+    append(out, "2:  mov x0, #1")
+    append(out, "    ret")
+    append(out, "3:  mov x0, #0")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__nifla_say_text:")
+    append(out, "    mov x9, x0")
+    append(out, "    mov x10, x1")
+    append(out, "    mov x11, #0")
+    append(out, "    ldr x12, =0x09000000")
+    append(out, "1:  cmp x11, x10")
+    append(out, "    b.hs 3f")
+    append(out, "    ldrb w13, [x9, x11]")
+    append(out, "2:  ldr w14, [x12, #24]")
+    append(out, "    tst w14, #32")
+    append(out, "    b.ne 2b")
+    append(out, "    str w13, [x12]")
+    append(out, "    add x11, x11, #1")
+    append(out, "    b 1b")
+    append(out, "3:  ret")
+    append(out, "__nifla_say_newline:")
+    append(out, "    ldr x12, =0x09000000")
+    append(out, "    mov w13, #10")
+    append(out, "2:  ldr w14, [x12, #24]")
+    append(out, "    tst w14, #32")
+    append(out, "    b.ne 2b")
+    append(out, "    str w13, [x12]")
+    append(out, "    ret")
+    append(out, "")
+    append(out, "__nifla_ticks:")
+    append(out, "    mrs x0, cntpct_el0")
+    append(out, "    ldr x9, =__tick_divisor")
+    append(out, "    ldr x9, [x9]")
+    append(out, "    udiv x0, x0, x9")
+    append(out, "    ret")
+    append(out, "__nifla_waittick:")
+    append(out, "    mrs x9, cntpct_el0")
+    append(out, "    ldr x10, =__tick_divisor")
+    append(out, "    ldr x10, [x10]")
+    append(out, "    add x9, x9, x10")
+    append(out, "1:  mrs x11, cntpct_el0")
+    append(out, "    cmp x11, x9")
+    append(out, "    b.lo 1b")
+    append(out, "    mrs x0, cntpct_el0")
+    append(out, "    udiv x0, x0, x10")
+    append(out, "    ret")
+    append(out, "__nifla_readkey:")
+    append(out, "    ldr x9, =0x09000000")
+    append(out, "    ldr w10, [x9, #24]")
+    append(out, "    tst w10, #16")
+    append(out, "    b.ne 1f")
+    append(out, "    ldr w0, [x9]")
+    append(out, "    and x0, x0, #255")
+    append(out, "    ret")
+    append(out, "1:  mov x0, #0")
+    append(out, "    ret")
+    append(out, "__nifla_memorysize:")
+    append(out, "    ldr x9, =__mem_total")
+    append(out, "    ldr x0, [x9]")
+    append(out, "    ret")
+    append(out, "")
+    give out
+}
+
+make baBssLines() {
+    let out = []
+    append(out, "    .bss")
+    append(out, "    .balign 8")
+    append(out, "__dtb:          .skip 8")
+    append(out, "__mem_total:    .skip 8")
+    append(out, "__heap_cursor:  .skip 8")
+    append(out, "__heap_limit:   .skip 8")
+    append(out, "__tick_divisor: .skip 8")
+    append(out, "__guard_depth:  .skip 8")
+    append(out, "__floor_inputs: .skip 128")
+    append(out, "__video_fb:     .skip 8")
+    append(out, "__video_width:  .skip 8")
+    append(out, "__video_height: .skip 8")
+    append(out, "__video_stride: .skip 8")
+    append(out, "__video_sel:    .skip 8")
+    append(out, "__video_name:   .skip 56")
+    append(out, "    .balign 8")
+    append(out, "__video_cfg:    .skip 32")
+    append(out, "__video_dma:    .skip 16")
+    append(out, "__numtext_buf:  .skip 32")
+    append(out, "__stack:        .skip 65536")
+    append(out, "__stack_top:")
+    append(out, "")
+    give out
+}
+
+// A call: values are worked out in order, stacked,
+// and popped into the registers — x0...x5 — then the
+// function is called. 'length' is the one tool whose
+// answer is already in hand: the text is in x0/x1, so
+// its count is the answer. The built-in words stand
+// first, in Swift's order; the bare and guest tools
+// are refused for this target before translating and
+// are never emitted — the halt stands in their place
+// the way it stands in Swift's.
+make baEmitCall(e) {
+    let handled = false
+    if e.name == "length" {
+        baEmitExpr(e.args[0])
+        baEmit("    mov x0, x1")
+        handled = true
+    }
+    if handled == false {
+        if e.name == "absolute" {
+            baEmitExpr(e.args[0])
+            let done = baFreshLabel("absolute_done")
+            baEmit("    cmp x0, xzr")
+            baEmit("    b.ge " + done)
+            baEmit("    neg x0, x0")
+            baEmit(done + ":")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "smallest" {
+            baEmitChoose(e, true)
+            handled = true
+        }
+        if e.name == "largest" {
+            baEmitChoose(e, false)
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "bitand" {
+            baEmitBitwise(e, "    and x0, x0, x2")
+            handled = true
+        }
+        if e.name == "bitor" {
+            baEmitBitwise(e, "    orr x0, x0, x2")
+            handled = true
+        }
+        if e.name == "bitxor" {
+            baEmitBitwise(e, "    eor x0, x0, x2")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "leftover" {
+            baEmitExpr(e.args[0])
+            baEmit("    str x0, [sp, #-16]!")
+            baEmitExpr(e.args[1])
+            baEmit("    mov x2, x0")
+            baEmit("    ldr x0, [sp], #16")
+            baEmit("    cbz x2, __halt_trap")
+            baEmit("    sdiv x3, x0, x2")
+            baEmit("    msub x0, x3, x2, x0")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "wholediv" {
+            baEmitExpr(e.args[0])
+            baEmit("    str x0, [sp, #-16]!")
+            baEmitExpr(e.args[1])
+            baEmit("    mov x2, x0")
+            baEmit("    ldr x0, [sp], #16")
+            baEmit("    cbz x2, __halt_trap")
+            baEmit("    sdiv x0, x0, x2")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "asnumber" {
+            baEmitExpr(e.args[0])
+            baEmit("    bl __nifla_asnumber")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "astext" {
+            baEmitExpr(e.args[0])
+            baEmit("    bl __nifla_astext")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "makebytes" {
+            baEmitExpr(e.args[0])
+            baEmit("    bl __nifla_alloc")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "memorysize" {
+            baEmit("    bl __nifla_memorysize")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "ticks" {
+            baEmit("    bl __nifla_ticks")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "waittick" {
+            baEmit("    bl __nifla_waittick")
+            handled = true
+        }
+    }
+    if handled == false {
+        if e.name == "readkey" {
+            baEmit("    bl __nifla_readkey")
+            handled = true
+        }
+    }
+    if handled == false {
+        if nmHas(gBvBareTools, e.name) {
+            baEmit("    b __halt_trap")
+            handled = true
+        }
+    }
+    if handled == false {
+        if nmHas(gBvGuestDesk, e.name) {
+            baEmit("    b __halt_trap")
+            handled = true
+        }
+    }
+    if handled == false {
+        if nmHas(gBvGuestDoor, e.name) {
+            baEmit("    b __halt_trap")
+            handled = true
+        }
+    }
+    if handled == false {
+        let slotCount = 0
+        for arg in e.args {
+            baEmitExpr(arg)
+            baEmit("    str x0, [sp, #-16]!")
+            slotCount = slotCount + 1
+            if baSlots(baKindOf(arg)) == 2 {
+                baEmit("    str x1, [sp, #-16]!")
+                slotCount = slotCount + 1
+            }
+        }
+        if slotCount > 0 {
+            let index = slotCount - 1
+            while index >= 0 {
+                baEmit("    ldr " + gBaRegisters[index] + ", [sp], #16")
+                index = index - 1
+            }
+        }
+        baEmit("    bl __fn_" + e.name)
+    }
+}
+
+// smallest and largest: the first value is kept on
+// the stack while the second is worked out; the
+// comparison chooses which of the two the answer is.
+make baEmitChoose(e, isSmallest) {
+    baEmitExpr(e.args[0])
+    baEmit("    str x0, [sp, #-16]!")
+    baEmitExpr(e.args[1])
+    baEmit("    mov x2, x0")
+    baEmit("    ldr x0, [sp], #16")
+    let done = baFreshLabel("choose_done")
+    baEmit("    cmp x0, x2")
+    baEmitPick(isSmallest, "    b.le " + done, "    b.ge " + done)
+    baEmit("    mov x0, x2")
+    baEmit(done + ":")
+}
+
+// The bit words on the machine's own words — one
+// instruction each, once both operands are in hand.
+// A negative operand stops the machine: the hosted
+// doors refuse one in plain words, and stopping is
+// bare metal's way of refusing.
+make baEmitBitwise(e, instruction) {
+    baEmitExpr(e.args[0])
+    baEmit("    str x0, [sp, #-16]!")
+    baEmitExpr(e.args[1])
+    baEmit("    mov x2, x0")
+    baEmit("    ldr x0, [sp], #16")
+    baEmit("    cmp x0, xzr")
+    baEmit("    b.lt __halt_trap")
+    baEmit("    cmp x2, xzr")
+    baEmit("    b.lt __halt_trap")
+    baEmit(instruction)
+}
+
+// A function: its parameters are declared first —
+// they arrive in registers, in order, one word each
+// (text takes two) — and their stores are laid down
+// after the prologue, so the body is worked out
+// first and spliced in behind them, the way Swift's
+// holds the body back by its place in the one code
+// list.
+make baEmitFunction(s) {
+    gBaScopes = [nmNew()]
+    gBaNextOffset = 0
+    gBaExitLabel = "__fn_" + s.name + "_exit"
+    let info = { params: [], giveKind: "unknown" }
+    let fr = nmGet(gBvFuncs, s.name)
+    if fr.found {
+        info = fr.value
+    }
+    let kinds = []
+    let kr = nmGet(gBvParamKinds, s.name)
+    if kr.found {
+        kinds = kr.value
+    }
+    let paramStores = []
+    let index = 0
+    let registerIndex = 0
+    for pname in info.params {
+        let kind = "number"
+        if index < length(kinds) {
+            kind = kinds[index]
+        }
+        if kind == "unknown" {
+            kind = "number"
+        }
+        let entry = baDeclareVar(pname, kind)
+        let slots = baSlots(entry.kind)
+        let slot = 0
+        while slot < slots {
+            let off = entry.offset - 8 * (slots - 1 - slot)
+            append(paramStores, "    str " + gBaRegisters[registerIndex] + ", [x29, #-" + numText(off) + "]")
+            registerIndex = registerIndex + 1
+            slot = slot + 1
+        }
+        index = index + 1
+    }
+    let bodyStart = length(gBaCode)
+    for stmt in s.body {
+        baEmitStatement(stmt)
+    }
+    let bodyLines = []
+    let bi = bodyStart
+    while bi < length(gBaCode) {
+        append(bodyLines, gBaCode[bi])
+        bi = bi + 1
+    }
+    let kept = []
+    let ki = 0
+    while ki < bodyStart {
+        append(kept, gBaCode[ki])
+        ki = ki + 1
+    }
+    gBaCode = kept
+    let frameSize = wholediv(gBaNextOffset + 15, 16) * 16
+    baEmit("__fn_" + s.name + ":")
+    baEmit("    stp x29, x30, [sp, #-16]!")
+    baEmit("    mov x29, sp")
+    baEmitWhen(frameSize > 0, "    sub sp, sp, #" + numText(frameSize))
+    baEmit("    ldr x9, =__guard_depth")
+    baEmit("    ldr x10, [x9]")
+    baEmit("    cmp x10, #500")
+    baEmit("    b.hs __halt_trap")
+    baEmit("    add x10, x10, #1")
+    baEmit("    str x10, [x9]")
+    for line in paramStores {
+        baEmit(line)
+    }
+    for line in bodyLines {
+        baEmit(line)
+    }
+    baEmit("    mov x0, #0")
+    baEmit("    mov x1, #0")
+    baEmit(gBaExitLabel + ":")
+    baEmit("    ldr x9, =__guard_depth")
+    baEmit("    ldr x10, [x9]")
+    baEmit("    sub x10, x10, #1")
+    baEmit("    str x10, [x9]")
+    baEmit("    mov sp, x29")
+    baEmit("    ldp x29, x30, [sp], #16")
+    baEmit("    ret")
+    baEmit("")
+    gBaScopes = []
+}
+
+make baEmitMain(stmts) {
+    gBaScopes = [nmNew()]
+    gBaNextOffset = 0
+    gBaExitLabel = "__nifla_main_exit"
+    let bodyStart = length(gBaCode)
+    for s in stmts {
+        if s.type != "define" {
+            baEmitStatement(s)
+        }
+    }
+    let bodyLines = []
+    let bi = bodyStart
+    while bi < length(gBaCode) {
+        append(bodyLines, gBaCode[bi])
+        bi = bi + 1
+    }
+    let kept = []
+    let ki = 0
+    while ki < bodyStart {
+        append(kept, gBaCode[ki])
+        ki = ki + 1
+    }
+    gBaCode = kept
+    let frameSize = wholediv(gBaNextOffset + 15, 16) * 16
+    baEmit("__nifla_main:")
+    baEmit("    stp x29, x30, [sp, #-16]!")
+    baEmit("    mov x29, sp")
+    baEmitWhen(frameSize > 0, "    sub sp, sp, #" + numText(frameSize))
+    for line in bodyLines {
+        baEmit(line)
+    }
+    baEmit(gBaExitLabel + ":")
+    baEmit("    mov sp, x29")
+    baEmit("    ldp x29, x30, [sp], #16")
+    baEmit("    ret")
+    baEmit("")
+    gBaScopes = []
+}
+
+// The whole ARM road for one program: the functions
+// first (their text literals gather as they are
+// emitted), the main body after, then the file laid
+// out the way Swift's translate lays it — the boot
+// head, the runtime, the code, the floor blocks
+// behind their wrappers, the literals, the bss. A
+// text whose bytes the reckoning cannot reach
+// refuses the whole translation, in the words Stone
+// 56 settled.
+make baTranslateProgram(stmts, sourceName, sourceText, sourcePath) {
+    gBtSourceText = sourceText
+    gBtSourcePath = sourcePath
+    gBtByteMap = nmNew()
+    gBtByteMapSeeded = false
+    gBtByteFailed = false
+    gBtSrcChars = []
+    gBtSrcBytes = []
+    gBtLineStarts = []
+    gBtSourceBuilt = false
+    gBtUsedSpans = []
+    gBaLiterals = []
+    gBaFloors = []
+    gBaLabelCounter = 0
+    gBaCode = []
+    gBaScopes = []
+    gBaNextOffset = 0
+    gBaExitLabel = "__nifla_main_exit"
+    for s in stmts {
+        if s.type == "define" {
+            baEmitFunction(s)
+        }
+    }
+    baEmitMain(stmts)
+    let result = okVal("")
+    if gBtByteFailed {
+        result = errAt(1, "A piece of text in this program holds a character whose bytes I could not reckon.")
+    } else {
+        let out = baBootLines(sourceName)
+        let runtime = baRuntimeLines()
+        for line in runtime {
+            append(out, line)
+        }
+        for line in gBaCode {
+            append(out, line)
+        }
+        let fi = 0
+        for asm in gBaFloors {
+            append(out, "")
+            append(out, "__floor_" + numText(fi) + ":")
+            append(out, "    stp x21, x22, [sp, #-16]!")
+            append(out, "    stp x23, x24, [sp, #-16]!")
+            append(out, "    str x25, [sp, #-16]!")
+            append(out, asm)
+            append(out, "    ldr x25, [sp], #16")
+            append(out, "    ldp x23, x24, [sp], #16")
+            append(out, "    ldp x21, x22, [sp], #16")
+            append(out, "    ret")
+            fi = fi + 1
+        }
+        if length(gBaLiterals) > 0 {
+            append(out, "    .rodata")
+            for lit in gBaLiterals {
+                append(out, lit.label + ":")
+                let parts = []
+                for b in lit.bytes {
+                    append(parts, numText(b))
+                }
+                append(out, "    .byte " + join(parts, ", "))
+            }
+            append(out, "")
+        }
+        let bss = baBssLines()
+        for line in bss {
+            append(out, line)
+        }
+        result = okVal(join(out, "\n") + "\n")
+    }
+    give result
+}
+
 // ---------- the program itself ----------
 // What running this front end does: take the mode and the
 // file path from the words it was started with, read the
@@ -8916,9 +10708,11 @@ if length(allArgs) < 2 {
                                 if allArgs[0] != "barevalid-guest" {
                                     if allArgs[0] != "barecompile" {
                                         if allArgs[0] != "barecompile-guest" {
-                                            if allArgs[0] != "card" {
-                                                sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest', 'compile', 'barevalid', 'barevalid-guest', 'barecompile', 'barecompile-guest' and 'card', like: nifla-front tokens program.nifla")
-                                                exitwith(2)
+                                            if allArgs[0] != "barecompile-arm" {
+                                                if allArgs[0] != "card" {
+                                                    sayerr("I don't know the mode '" + allArgs[0] + "'. The modes I know are 'tokens', 'tree', 'check', 'check-bare', 'check-guest', 'compile', 'barevalid', 'barevalid-guest', 'barecompile', 'barecompile-guest', 'barecompile-arm' and 'card', like: nifla-front tokens program.nifla")
+                                                    exitwith(2)
+                                                }
                                             }
                                         }
                                     }
@@ -9042,6 +10836,33 @@ if length(allArgs) < 2 {
                             }
                         }
                     } else {
+                    if allArgs[0] == "barecompile-arm" {
+                        let checked = chkCheckProgram(parsed.value, true, false)
+                        if checked.ok == false {
+                            sayerr(checked.message)
+                            exitwith(1)
+                        } else {
+                            let validated = bvValidateProgram(parsed.value, false)
+                            if validated.ok == false {
+                                sayerr(validated.message)
+                                exitwith(1)
+                            } else {
+                                let refusal = baRefusalProgram(parsed.value)
+                                if refusal != "" {
+                                    sayerr(refusal)
+                                    exitwith(1)
+                                } else {
+                                    let translated = baTranslateProgram(parsed.value, cmpSourceName(path), source, path)
+                                    if translated.ok == false {
+                                        sayerr(translated.message)
+                                        exitwith(1)
+                                    } else {
+                                        say part(translated.value, 0, length(translated.value) - 1)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
                     if allArgs[0] == "compile" {
                         let checked = chkCheckProgram(parsed.value, false, false)
                         if checked.ok == false {
@@ -9060,6 +10881,7 @@ if length(allArgs) < 2 {
                             say "checked"
                         }
                     }
+                        }
                         }
                         }
                         }

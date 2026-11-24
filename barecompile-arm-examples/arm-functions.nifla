@@ -1,0 +1,27 @@
+// Stone 59 fixture: functions on ARM — parameters
+// of every kind (a text between two numbers takes
+// two of the argument registers), a block of bytes
+// handed in and read back, recursion under the
+// guard, and calls nested inside calls. Pins the
+// register order the arguments are gathered in.
+make wrap(n: number, word: text, m: number) -> text {
+    give word + (n + m)
+}
+
+make countdown(n: number) -> number {
+    if n <= 0 {
+        give 0
+    }
+    give 1 + countdown(n - 1)
+}
+
+make firstbyte(block: bytes) -> number {
+    give block[0]
+}
+
+say wrap(20, "sum ", 3)
+say countdown(5)
+let block = makebytes(3)
+block[0] = 72
+say firstbyte(block)
+say wrap(countdown(2), "deep ", countdown(1))

@@ -1,0 +1,33 @@
+// Stone 59 fixture: the floor on ARM — blocks with
+// numbers and text handed together, numbers alone,
+// and text alone, under the desk contract (x19 the
+// numbers' row, x20 their count, x21/x22 a handed
+// text's address and count, the results desk zero).
+// Pins the wrapper each block stands in.
+let reckoned = floor(30, 12, "abcd") {
+    ldr x0, [x19]
+    ldr x1, [x19, #8]
+    add x0, x0, x1
+    add x0, x0, x22
+}
+say "The floor reckons " + reckoned
+
+let lettersum = floor("abcd") {
+    mov x0, #0
+    mov x9, #0
+letters_loop:
+    cmp x9, x22
+    b.hs letters_done
+    ldrb w10, [x21, x9]
+    add x0, x0, x10
+    add x9, x9, #1
+    b letters_loop
+letters_done:
+}
+say "The letters add to " + lettersum
+
+let plain = floor(7) {
+    ldr x0, [x19]
+    add x0, x0, x0
+}
+say plain

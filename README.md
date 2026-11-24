@@ -5399,6 +5399,59 @@ environment and run other tools — the language has
 no word for either. The ARM bare compiler
 (src/BareCompilerARM.swift) is the port's next leg.
 
+## Stone 59 — the ARM leg: the refusal walk and translator stand in Nifla
+
+Stone 59 opens the port's ARM leg: the ARM bare
+compiler (src/BareCompilerARM.swift) stands in
+Nifla. The front end gains the barecompile-arm
+mode — compileMain's own road for a '--bare --arm'
+build: check in the bare picture, validate, then
+the target's own refusal walk (armRefusal), then
+its translator (BareTranslatorARM), made with no
+video request, as a build without the flag is. The
+gate is run-barecompile-arm.sh: 515 comparisons
+across the whole corpus — ten fixtures of the
+mode's own in barecompile-arm-examples/ (the disk
+and guest refusals; the walk's order pinned both
+ways, by fixtures holding one tool in a define and
+the other in the main body; immediates at the
+mov/ldr edge; text whose bytes are reckoned from
+the source; floors; a function with a text between
+two numbers; loops inside loops; the built-in
+words and the machine's own gifts), the x86 bare
+fixtures and examples walked the ARM road, the
+books' blocks, the front end translating itself,
+and the Cardnull OS 2 sources — and the five
+BOUNDARY.txt fixtures verified divergent in this
+mode too.
+
+The oracle's shape is this stone's ledger entry.
+The refusal walk is private to its Swift file, and
+compileBareARM is the only road to it, so the
+oracle's barecompile-arm mode drives the real build
+itself: a fail closure records the driver's own
+words, the driver's prints are sent to a scratch
+file, and the assembly is read back from the .s
+file the build itself writes. Everything past that
+write — finding clang and ld.lld, assembling,
+linking — is driver machinery, outside the claim,
+as compileBare's driver half stood outside Stone
+56's; compileBareARM's own half and findLLVMTool
+stand unported with it, the video lines with the
+driver's '--video' input, and the command line's
+flag refusals with compileMain. The translator is
+made from the validator's tables, as Swift's is,
+and its text bytes ride Stone 56's reckoning
+unchanged. Generated-Swift diagnostics stand at
+63,883 bytes — some 700 more than Stone 58's front
+end measured the same way, the section written
+assignment-style throughout — still under the pipe
+limit, with about 1.6 KB of headroom.
+
+No PRIMER change: the language's surface did not
+change in this stone. The ARM leg's seeded sweep
+stands next, and then the bootstrap.
+
 ## License
 
 Public domain, under the Unlicense — see `LICENSE`. Everything Cardnull
